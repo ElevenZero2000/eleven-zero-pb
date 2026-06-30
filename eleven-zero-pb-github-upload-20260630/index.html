@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eleven Zero PB</title>
+    <meta
+      name="description"
+      content="Eleven Zero PB is a live pickleball marketplace with sign-in, listings, trainers, and court discovery."
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260630b" />
+  </head>
+  <body data-nav="shop">
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
+          <img
+            class="brand-logo brand-logo-header"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <span class="brand-tag">Live Marketplace</span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#listings">Shop</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./account.html">Account</a>
+          <a href="#sell">Sell</a>
+        </nav>
+
+        <div class="nav-auth-slot" data-auth-slot></div>
+      </header>
+
+      <main id="top">
+        <section class="hero-section">
+          <div class="hero-copy reveal">
+            <p class="eyebrow">Real Eleven Zero PB MVP</p>
+            <h1>Buy, sell, and grow your game in one place.</h1>
+            <p class="hero-text">
+              This version moves past the concept stage. Players can now create
+              accounts, publish paddle listings, and start building a real
+              pickleball marketplace on top of a live database.
+            </p>
+
+            <div class="hero-actions">
+              <a class="button button-primary" href="#listings">Browse Live Listings</a>
+              <a class="button button-secondary" href="./auth.html">Create Account</a>
+            </div>
+
+            <div class="hero-points">
+              <div>
+                <strong>Real sign-in</strong>
+                <span>Account-based marketplace actions.</span>
+              </div>
+              <div>
+                <strong>Database-backed listings</strong>
+                <span>New paddles stay live between refreshes.</span>
+              </div>
+              <div>
+                <strong>Built to grow</strong>
+                <span>Ready for payments, moderation, and deploy next.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-visual reveal">
+            <div class="orb orb-one"></div>
+            <div class="orb orb-two"></div>
+
+            <article class="feature-card spotlight">
+              <div class="feature-topline">
+                <span class="pill">Live marketplace</span>
+                <span class="price" data-listing-count>0 listings</span>
+              </div>
+
+              <div class="paddle-stage paddle-stage-large">
+                <img
+                  class="stage-brand-shape"
+                  src="./assets/brand-shape.png"
+                  alt=""
+                />
+                <div class="paddle-graphic paddle-carbon"></div>
+                <div class="ball-dot"></div>
+              </div>
+
+              <div class="feature-details">
+                <div>
+                  <p class="feature-label">What is live now</p>
+                  <h2>Accounts, listings, trainers, reviews</h2>
+                </div>
+
+                <div class="feature-meta">
+                  <span>SQLite database</span>
+                  <span>Session-based sign in</span>
+                  <span>Built for Eleven Zero PB</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="feature-card mini-card mini-left">
+              <img class="mini-icon" src="./assets/icon-dollar.png" alt="" />
+              <span class="mini-kicker">Seller workflow</span>
+              <strong>Publish a paddle after signing in</strong>
+              <p>Your listing saves into the live marketplace immediately.</p>
+            </article>
+
+            <article class="feature-card mini-card mini-right">
+              <img class="mini-icon" src="./assets/icon-support.png" alt="" />
+              <span class="mini-kicker">Account foundation</span>
+              <strong>Ready for future payments and admin review</strong>
+              <p>This is the step that turns the site into a real app base.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="listings-section section-block" id="listings">
+          <div class="section-heading reveal">
+            <div>
+              <p class="eyebrow">Marketplace</p>
+              <h2>Live paddle listings</h2>
+            </div>
+
+            <p class="section-text">
+              These cards now come from the app database, not from a demo-only
+              mockup.
+            </p>
+          </div>
+
+          <div class="filter-row reveal" role="tablist" aria-label="Listing filters">
+            <button class="filter-chip is-active" type="button" data-filter="all">
+              All
+            </button>
+            <button class="filter-chip" type="button" data-filter="control">
+              Control
+            </button>
+            <button class="filter-chip" type="button" data-filter="power">
+              Power
+            </button>
+            <button class="filter-chip" type="button" data-filter="hybrid">
+              Hybrid
+            </button>
+          </div>
+
+          <div class="results-meta reveal">
+            <div>
+              <p class="eyebrow">Current view</p>
+              <h3 class="results-title" data-listings-heading>Marketplace listings</h3>
+            </div>
+
+            <p class="results-note" data-listings-note>
+              Sign in to publish your own paddle into the live feed.
+            </p>
+          </div>
+
+          <p class="marketplace-status reveal" data-marketplace-status aria-live="polite">
+            Buyer checkout messages will appear here once secure payments are turned on.
+          </p>
+
+          <div class="product-grid" data-listings-grid></div>
+        </section>
+
+        <section class="seller-section section-block" id="sell">
+          <div class="seller-card reveal">
+            <div class="seller-copy">
+              <p class="eyebrow">Sell on Eleven Zero PB</p>
+              <h2>Turn old gear into the next upgrade.</h2>
+              <p>
+                This form now talks to the live app database. After you sign
+                in, every new listing becomes part of the real marketplace feed.
+              </p>
+
+              <div class="seller-note">
+                <img class="seller-note-icon" src="./assets/icon-support.png" alt="" />
+                <div>
+                  <strong>Real seller flow</strong>
+                  <span>Account, listing form, database save, and instant live update.</span>
+                </div>
+              </div>
+            </div>
+
+            <form class="seller-form" data-seller-form>
+              <label>
+                Paddle brand
+                <input type="text" name="brand" placeholder="Ex: Six Zero" />
+              </label>
+              <label>
+                Paddle model
+                <input type="text" name="model" placeholder="Ex: Double Black Diamond" />
+              </label>
+              <label>
+                Play style
+                <select name="category">
+                  <option value="control">Control</option>
+                  <option value="power">Power</option>
+                  <option value="hybrid">Hybrid</option>
+                </select>
+              </label>
+              <label>
+                Condition
+                <select name="condition">
+                  <option value="Excellent">Excellent</option>
+                  <option value="Very Good">Very Good</option>
+                  <option value="Good">Good</option>
+                </select>
+              </label>
+              <label>
+                Asking price
+                <input type="text" name="price" placeholder="$140" />
+              </label>
+              <label>
+                Ships from
+                <input type="text" name="location" placeholder="Ex: Miami, FL" />
+              </label>
+              <label>
+                Condition notes
+                <textarea
+                  name="notes"
+                  rows="4"
+                  placeholder="Describe wear, grip, edge guard, or anything a buyer should know."
+                ></textarea>
+              </label>
+              <button class="button button-dark" type="submit">
+                Publish Listing
+              </button>
+              <div class="seller-status" aria-live="polite" data-seller-status>
+                Sign in first, then publish your paddle into the live marketplace.
+              </div>
+            </form>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="footer-brand-block">
+          <img
+            class="brand-logo brand-logo-footer"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <p class="footer-copy">
+            Eleven Zero PB is now set up as a real local MVP with authentication,
+            persistent data, live listings, trainer profiles, and review support.
+          </p>
+        </div>
+
+        <div class="footer-links">
+          <a href="#listings">Browse</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./account.html">Account</a>
+          <a href="./auth.html">Sign in</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./terms.html">Terms</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="./app.js?v=20260630a"></script>
+    <script src="./marketplace.js?v=20260630a"></script>
+  </body>
+</html>

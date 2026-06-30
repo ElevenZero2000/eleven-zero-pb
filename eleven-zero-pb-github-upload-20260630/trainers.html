@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eleven Zero PB Trainers</title>
+    <meta
+      name="description"
+      content="Find pickleball trainers, leave reviews, and join the Eleven Zero PB coaching network."
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260630b" />
+  </head>
+  <body class="trainers-page" data-nav="trainers">
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
+          <img
+            class="brand-logo brand-logo-header"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <span class="brand-tag">Trainers Directory</span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="./index.html#listings">Shop</a>
+          <a href="./courts.html">Courts</a>
+          <a href="#finder">Trainers</a>
+          <a href="#reviews">Reviews</a>
+          <a href="./account.html">Account</a>
+        </nav>
+
+        <div class="nav-auth-slot" data-auth-slot></div>
+      </header>
+
+      <main id="top">
+        <section class="courts-hero trainers-hero">
+          <div class="courts-hero-copy trainer-hero-copy reveal">
+            <p class="eyebrow">Train near you</p>
+            <h1>Find pickleball trainers who match your level and goals.</h1>
+            <p class="hero-text">
+              This trainer experience now runs on the live app foundation too.
+              Profiles, reviews, and new coach applications can all be saved in
+              the database.
+            </p>
+
+            <div class="hero-actions">
+              <a class="button button-primary" href="#finder">Find Trainers</a>
+              <a class="button button-secondary" href="#join">Join as Trainer</a>
+            </div>
+
+            <div class="courts-stats trainer-stats">
+              <article>
+                <strong class="stat-value" data-trainer-total>0</strong>
+                <span>Coaches in the current view.</span>
+              </article>
+              <article>
+                <strong class="stat-value" data-trainer-rating>0.0★</strong>
+                <span>Average trainer rating.</span>
+              </article>
+              <article>
+                <strong class="stat-value" data-trainer-reviews>0</strong>
+                <span>Published player reviews.</span>
+              </article>
+              <article>
+                <strong class="stat-value" data-trainer-tenure>0 mo</strong>
+                <span>Average time on Eleven Zero PB.</span>
+              </article>
+            </div>
+          </div>
+
+          <div class="courts-hero-board reveal">
+            <div class="orb orb-one"></div>
+            <div class="orb orb-two"></div>
+
+            <article class="courts-hero-card courts-hero-card-main">
+              <div class="courts-hero-topline">
+                <span class="pill">Trainer search</span>
+                <span class="courts-hero-chip">Coach, clinic or lesson</span>
+              </div>
+
+              <div class="courts-map-card trainer-finder-panel" id="finder">
+                <img class="shape-ghost" src="./assets/brand-shape.png" alt="" />
+
+                <form class="trainer-form" data-trainer-search-form>
+                  <label class="finder-field finder-field-search">
+                    <span>Search</span>
+                    <input
+                      type="search"
+                      name="query"
+                      placeholder="City, coach, or goal"
+                      autocomplete="off"
+                    />
+                  </label>
+
+                  <label class="finder-field">
+                    <span>Level</span>
+                    <select name="level">
+                      <option value="all">All levels</option>
+                      <option value="beginner">Beginner</option>
+                      <option value="intermediate">Intermediate</option>
+                      <option value="advanced">Advanced</option>
+                    </select>
+                  </label>
+
+                  <label class="finder-field">
+                    <span>Format</span>
+                    <select name="format">
+                      <option value="all">All formats</option>
+                      <option value="private">Private</option>
+                      <option value="group">Group</option>
+                      <option value="clinic">Clinic</option>
+                      <option value="virtual">Virtual</option>
+                    </select>
+                  </label>
+
+                  <button class="button button-primary finder-submit" type="submit">
+                    Find trainers
+                  </button>
+                </form>
+
+                <div class="finder-help">
+                  Search by city, coach name, coaching style, or the kind of
+                  improvement a player wants most.
+                </div>
+
+                <div class="city-pins trainer-quick-search" aria-label="Quick trainer cities">
+                  <button class="city-pin" type="button" data-trainer-city="Miami, FL">
+                    Miami
+                  </button>
+                  <button class="city-pin" type="button" data-trainer-city="Austin, TX">
+                    Austin
+                  </button>
+                  <button class="city-pin" type="button" data-trainer-city="San Diego, CA">
+                    San Diego
+                  </button>
+                  <button class="city-pin" type="button" data-trainer-city="Scottsdale, AZ">
+                    Scottsdale
+                  </button>
+                </div>
+
+                <div class="finder-status" aria-live="polite" data-trainer-status>
+                  Search by city, coach name, lesson style, or player level.
+                </div>
+              </div>
+            </article>
+
+            <article class="courts-hero-note trainer-hero-note">
+              <img class="mini-icon" src="./assets/icon-support.png" alt="" />
+              <div>
+                <span class="mini-kicker">Live trainer layer</span>
+                <strong>
+                  Reviews, new trainer profiles, and player trust signals are
+                  now part of the live app foundation.
+                </strong>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="directory-section section-block" id="directory">
+          <div class="section-heading reveal">
+            <div>
+              <p class="eyebrow">Trainers directory</p>
+              <h2>Search once, then narrow by level or lesson style.</h2>
+            </div>
+
+            <p class="section-text">
+              Use the live filters to quickly find beginner-friendly coaches,
+              advanced specialists, clinics, private lessons, or virtual help.
+            </p>
+          </div>
+
+          <div class="filter-row reveal" role="tablist" aria-label="Trainer filters">
+            <button class="filter-chip is-active" type="button" data-trainer-filter="all">
+              All
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="beginner">
+              Beginner
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="intermediate">
+              Intermediate
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="advanced">
+              Advanced
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="private">
+              Private
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="group">
+              Group
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="clinic">
+              Clinic
+            </button>
+            <button class="filter-chip" type="button" data-trainer-filter="virtual">
+              Virtual
+            </button>
+          </div>
+
+          <div class="results-meta reveal">
+            <div>
+              <p class="eyebrow">Current results</p>
+              <h3 class="results-title" data-trainer-results-heading>
+                Browse trainer matches
+              </h3>
+            </div>
+
+            <p class="results-note" data-trainer-results-note>
+              Sign in to review a trainer or publish your own coaching profile.
+            </p>
+          </div>
+
+          <div class="courts-grid trainer-grid" data-trainer-results></div>
+        </section>
+
+        <section class="review-section section-block" id="reviews">
+          <div class="guide-panel trainer-review-panel reveal">
+            <div class="guide-copy">
+              <p class="eyebrow">Player reviews</p>
+              <h2>Leave a trainer review and strengthen trust in the directory.</h2>
+              <p>
+                Signed-in players can publish reviews that update the live
+                rating system right away.
+              </p>
+            </div>
+
+            <div class="trainer-review-layout">
+              <form class="seller-form trainer-review-form" data-trainer-review-form>
+                <label>
+                  Trainer
+                  <select name="trainerId" data-review-trainer-select></select>
+                </label>
+                <label>
+                  Rating
+                  <select name="rating">
+                    <option value="5">5 stars</option>
+                    <option value="4">4 stars</option>
+                    <option value="3">3 stars</option>
+                    <option value="2">2 stars</option>
+                    <option value="1">1 star</option>
+                  </select>
+                </label>
+                <label>
+                  Short review
+                  <textarea
+                    name="comment"
+                    rows="4"
+                    placeholder="Tell players what the lesson felt like and who this trainer is best for."
+                  ></textarea>
+                </label>
+                <button class="button button-dark" type="submit">
+                  Publish Review
+                </button>
+              </form>
+
+              <div class="trainer-review-feed">
+                <div class="seller-status" aria-live="polite" data-review-status>
+                  Sign in first, then leave a review to help players trust the directory.
+                </div>
+                <div class="trainer-review-list" data-review-list></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="seller-section section-block" id="join">
+          <div class="seller-card trainer-join-panel reveal">
+            <div class="seller-copy">
+              <p class="eyebrow">Join the Eleven Zero PB coach network</p>
+              <h2>Get discovered by players looking for the right trainer.</h2>
+              <p>
+                This form now creates a real trainer profile in the app
+                database, ready for later approval and booking flows.
+              </p>
+
+              <div class="seller-note">
+                <img class="seller-note-icon" src="./assets/icon-bag.png" alt="" />
+                <div>
+                  <strong>Real trainer onboarding</strong>
+                  <span>Profile data, location, coaching style, rates, and live directory placement.</span>
+                </div>
+              </div>
+            </div>
+
+            <form class="seller-form" data-trainer-join-form>
+              <label>
+                Trainer name
+                <input type="text" name="name" placeholder="Ex: Maria Alvarez" />
+              </label>
+              <label>
+                Home city
+                <input type="text" name="location" placeholder="Ex: Miami, FL" />
+              </label>
+              <label>
+                Main coaching style
+                <select name="format">
+                  <option value="private">Private lessons</option>
+                  <option value="group">Group clinics</option>
+                  <option value="clinic">Drill sessions</option>
+                  <option value="virtual">Virtual analysis</option>
+                </select>
+              </label>
+              <label>
+                Player level focus
+                <select name="level">
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </label>
+              <label>
+                Starting rate
+                <input type="text" name="rate" placeholder="$85/hr" />
+              </label>
+              <label>
+                Contact email
+                <input type="email" name="email" placeholder="coach@example.com" />
+              </label>
+              <button class="button button-dark" type="submit">
+                Publish Trainer Profile
+              </button>
+              <div class="seller-status" aria-live="polite" data-trainer-join-status>
+                Sign in first, then publish your trainer profile into the live directory.
+              </div>
+            </form>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="footer-brand-block">
+          <img
+            class="brand-logo brand-logo-footer"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <p class="footer-copy">
+            Eleven Zero PB helps players buy paddles, find courts, and connect
+            with trainers who match their level, goals, and lesson style.
+          </p>
+        </div>
+
+        <div class="footer-links">
+          <a href="./index.html">Marketplace</a>
+          <a href="./courts.html">Courts</a>
+          <a href="#finder">Trainers</a>
+          <a href="#reviews">Reviews</a>
+          <a href="./account.html">Account</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./terms.html">Terms</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="./app.js?v=20260629b"></script>
+    <script src="./trainers.js?v=20260629b"></script>
+  </body>
+</html>

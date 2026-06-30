@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eleven Zero PB Account</title>
+    <meta
+      name="description"
+      content="Create an Eleven Zero PB account or sign in to manage listings and trainer activity."
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260630b" />
+  </head>
+  <body data-nav="auth">
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
+          <img
+            class="brand-logo brand-logo-header"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <span class="brand-tag">Account Access</span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="./index.html#listings">Shop</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./account.html">Account</a>
+        </nav>
+
+        <div class="nav-auth-slot" data-auth-slot></div>
+      </header>
+
+      <main id="top">
+        <section class="hero-section auth-hero">
+          <div class="hero-copy reveal">
+            <p class="eyebrow">Sign in foundation</p>
+            <h1>Create your Eleven Zero PB account.</h1>
+            <p class="hero-text">
+              Accounts unlock live listing creation, trainer profile publishing,
+              review posting, and your personal dashboard.
+            </p>
+
+            <div class="hero-points">
+              <div>
+                <strong>One account</strong>
+                <span>Manage listings and coaching activity.</span>
+              </div>
+              <div>
+                <strong>Live dashboard</strong>
+                <span>See your marketplace activity in one place.</span>
+              </div>
+              <div>
+                <strong>Future-ready</strong>
+                <span>Payments and approvals can plug in next.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-visual reveal auth-visual">
+            <div class="auth-grid">
+              <article class="seller-card auth-card auth-card-light">
+                <div class="seller-copy">
+                  <p class="eyebrow">Welcome back</p>
+                  <h2>Sign in</h2>
+                  <p>Access your live dashboard and continue building the marketplace.</p>
+                </div>
+
+                <form class="seller-form auth-form" data-signin-form>
+                  <label>
+                    Email
+                    <input type="email" name="email" placeholder="you@example.com" />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" name="password" placeholder="Your password" />
+                  </label>
+                  <button class="button button-dark" type="submit">Sign In</button>
+                  <div class="seller-status" aria-live="polite" data-signin-status>
+                    Sign in to continue to your account.
+                  </div>
+                </form>
+              </article>
+
+              <article class="seller-card auth-card">
+                <div class="seller-copy">
+                  <p class="eyebrow">New here</p>
+                  <h2>Create account</h2>
+                  <p>Start with a simple account, then publish listings and trainer activity.</p>
+                </div>
+
+                <form class="seller-form auth-form" data-signup-form>
+                  <label>
+                    Full name
+                    <input type="text" name="name" placeholder="Ex: Santiago Rivera" />
+                  </label>
+                  <label>
+                    Email
+                    <input type="email" name="email" placeholder="you@example.com" />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" name="password" placeholder="At least 8 characters" />
+                  </label>
+                  <button class="button button-dark" type="submit">Create Account</button>
+                  <div class="seller-status" aria-live="polite" data-signup-status>
+                    Create an account to unlock the live marketplace features.
+                  </div>
+                </form>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="footer-brand-block">
+          <img
+            class="brand-logo brand-logo-footer"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <p class="footer-copy">
+            Eleven Zero PB account access is the foundation for live listings,
+            trainer publishing, reviews, and the next wave of marketplace tools.
+          </p>
+        </div>
+
+        <div class="footer-links">
+          <a href="./index.html">Marketplace</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./account.html">Dashboard</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./terms.html">Terms</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="./app.js?v=20260629b"></script>
+    <script src="./auth.js?v=20260629b"></script>
+  </body>
+</html>

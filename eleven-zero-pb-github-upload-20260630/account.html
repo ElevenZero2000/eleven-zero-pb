@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eleven Zero PB Dashboard</title>
+    <meta
+      name="description"
+      content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260630b" />
+  </head>
+  <body data-nav="account">
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
+          <img
+            class="brand-logo brand-logo-header"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <span class="brand-tag">Account Dashboard</span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="./index.html#listings">Shop</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./account.html">Account</a>
+        </nav>
+
+        <div class="nav-auth-slot" data-auth-slot></div>
+      </header>
+
+      <main id="top">
+        <section class="hero-section">
+          <div class="hero-copy reveal">
+            <p class="eyebrow">Your account</p>
+            <h1 data-account-name>Welcome to Eleven Zero PB.</h1>
+            <p class="hero-text" data-account-copy>
+              Sign in to see your listings, trainer profiles, and activity stats.
+            </p>
+
+            <div class="hero-actions">
+              <a class="button button-primary" href="./index.html#sell">Create Listing</a>
+              <a class="button button-secondary" href="./trainers.html#join">Join as Trainer</a>
+              <a class="button button-secondary" href="#seller-payouts">Set Up Payouts</a>
+            </div>
+
+            <div class="hero-points">
+              <div>
+                <strong data-account-stat-listings>0</strong>
+                <span>Listings created</span>
+              </div>
+              <div>
+                <strong data-account-stat-trainers>0</strong>
+                <span>Trainer profiles</span>
+              </div>
+              <div>
+                <strong data-account-stat-reviews>0</strong>
+                <span>Reviews published</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-visual reveal">
+            <article class="feature-card spotlight dashboard-spotlight">
+              <div class="feature-topline">
+                <span class="pill">Live dashboard</span>
+                <span class="price" data-account-email>Account</span>
+              </div>
+
+              <div class="feature-details">
+                <div>
+                  <p class="feature-label">What you can manage here</p>
+                  <h2>Listings, trainer profiles, reviews</h2>
+                </div>
+
+                <div class="feature-meta">
+                  <span>Database-backed records</span>
+                  <span>Session-based account</span>
+                  <span>Ready for payments next</span>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="guide-section section-block">
+          <div class="guide-panel reveal">
+            <div class="dashboard-grid">
+              <article class="dashboard-card">
+                <p class="eyebrow">Recent listings</p>
+                <h3>Your latest paddle submissions</h3>
+                <div class="list-stack" data-account-listings></div>
+              </article>
+
+              <article class="dashboard-card">
+                <p class="eyebrow">Trainer profiles</p>
+                <h3>Your coaching presence</h3>
+                <div class="list-stack" data-account-trainers></div>
+              </article>
+            </div>
+
+            <article class="dashboard-card dashboard-card-wide" id="seller-payouts">
+              <div class="dashboard-card-head">
+                <div>
+                  <p class="eyebrow">Seller payouts</p>
+                  <h3>Stripe seller onboarding and payout readiness</h3>
+                </div>
+
+                <span class="dashboard-pill" data-seller-pill>Not started</span>
+              </div>
+
+              <p class="dashboard-copy" data-seller-summary>
+                Connect Stripe so sellers can be ready for marketplace payouts and platform fees.
+              </p>
+
+              <div class="seller-progress-grid" data-seller-progress></div>
+
+              <div class="hero-actions account-seller-actions">
+                <button class="button button-dark" type="button" data-seller-connect-button>
+                  Start Stripe onboarding
+                </button>
+                <button class="button button-secondary" type="button" data-seller-refresh-button>
+                  Refresh payout status
+                </button>
+              </div>
+
+              <div class="seller-status dashboard-status" aria-live="polite" data-seller-connect-status>
+                Seller payouts are not connected yet.
+              </div>
+            </article>
+
+            <div class="seller-status dashboard-status" aria-live="polite" data-account-status>
+              Sign in to load your dashboard.
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="footer-brand-block">
+          <img
+            class="brand-logo brand-logo-footer"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <p class="footer-copy">
+            Your Eleven Zero PB dashboard is the control center for the live
+            marketplace foundation.
+          </p>
+        </div>
+
+        <div class="footer-links">
+          <a href="./index.html">Marketplace</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./auth.html">Sign in</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./terms.html">Terms</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="./app.js?v=20260629b"></script>
+    <script src="./account.js?v=20260629b"></script>
+  </body>
+</html>
