@@ -8,7 +8,7 @@
       name="description"
       content="Eleven Zero PB live pickleball finder for free public courts and pay-to-play facilities."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260701a" />
+    <link rel="stylesheet" href="./styles.css?v=20260701b" />
   </head>
   <body class="courts-page" data-nav="courts">
     <div class="page-shell">
@@ -203,6 +203,82 @@
               Community-added courts and facilities will show here, with addresses, map links, and live city search.
             </p>
           </div>
+
+          <section class="court-tools-shell reveal" aria-label="Refine court results">
+            <div class="court-tools-head">
+              <div>
+                <p class="eyebrow">Refine the view</p>
+                <h3>Filter by quality, crowd, player level, and search terms.</h3>
+              </div>
+
+              <p class="results-note">
+                Use the quick chips above for access and surface, then narrow the
+                current results even more with search, rating, crowd, and level filters.
+              </p>
+            </div>
+
+            <div class="court-tools-grid">
+              <label class="court-tool-field court-tool-field-search">
+                <span>Search in results</span>
+                <input
+                  type="search"
+                  placeholder="Court name, address, city, amenity"
+                  data-court-keyword
+                />
+              </label>
+
+              <label class="court-tool-field">
+                <span>Sort by</span>
+                <select data-court-sort>
+                  <option value="recommended" selected>Recommended</option>
+                  <option value="closest">Closest first</option>
+                  <option value="rating">Highest rated</option>
+                  <option value="reports">Most reviewed</option>
+                  <option value="name">Name A–Z</option>
+                </select>
+              </label>
+
+              <label class="court-tool-field">
+                <span>Court condition</span>
+                <select data-court-condition>
+                  <option value="">Any condition</option>
+                  <option value="great">Excellent only</option>
+                  <option value="solid">Solid shape or better</option>
+                  <option value="playable">Playable or better</option>
+                </select>
+              </label>
+
+              <label class="court-tool-field">
+                <span>Crowd level</span>
+                <select data-court-busyness>
+                  <option value="">Any crowd level</option>
+                  <option value="quiet">Quiet</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="busy">Busy</option>
+                  <option value="packed">Packed</option>
+                </select>
+              </label>
+
+              <label class="court-tool-field">
+                <span>Player level</span>
+                <select data-court-player-level>
+                  <option value="">Any player level</option>
+                  <option value="beginner">Beginner-friendly</option>
+                  <option value="intermediate">Intermediate-heavy</option>
+                  <option value="advanced">Advanced-heavy</option>
+                  <option value="mixed">Mixed levels</option>
+                </select>
+              </label>
+
+              <button class="button button-secondary court-tool-reset" type="button" data-court-reset-filters>
+                Reset filters
+              </button>
+            </div>
+
+            <div class="court-tools-summary" data-court-tools-summary>
+              Showing the full courts directory right now.
+            </div>
+          </section>
 
           <section class="court-map-shell reveal" aria-label="Interactive courts map">
             <div class="court-map-head">
@@ -485,9 +561,29 @@
           </a>
         </div>
       </footer>
+
+      <div class="court-detail-modal" data-court-detail-modal hidden>
+        <div class="court-detail-backdrop" data-court-detail-close></div>
+        <div
+          class="court-detail-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="court-detail-title"
+        >
+          <button
+            class="court-detail-close"
+            type="button"
+            aria-label="Close court details"
+            data-court-detail-close
+          >
+            ×
+          </button>
+          <div class="court-detail-body" data-court-detail-body></div>
+        </div>
+      </div>
     </div>
 
     <script src="./app.js?v=20260701a"></script>
-    <script src="./courts.js?v=20260701a"></script>
+    <script src="./courts.js?v=20260701b"></script>
   </body>
 </html>
