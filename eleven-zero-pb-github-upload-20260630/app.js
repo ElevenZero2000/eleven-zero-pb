@@ -5,6 +5,9 @@ const ElevenZeroApp = {
     siteUrl: "",
     supportEmail: "",
     gaMeasurementId: "",
+    googleMapsEnabled: false,
+    googleMapsApiKey: "",
+    googleMapsMapId: "",
   },
   analyticsLoaded: false,
 
