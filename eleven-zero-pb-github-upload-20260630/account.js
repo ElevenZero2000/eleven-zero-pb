@@ -13,6 +13,18 @@ const sellerProgress = document.querySelector("[data-seller-progress]");
 const sellerConnectStatus = document.querySelector("[data-seller-connect-status]");
 const sellerConnectButton = document.querySelector("[data-seller-connect-button]");
 const sellerRefreshButton = document.querySelector("[data-seller-refresh-button]");
+const adminPanel = document.querySelector("[data-admin-panel]");
+const adminAnchor = document.querySelector("[data-owner-anchor]");
+const adminPill = document.querySelector("[data-admin-pill]");
+const adminSummary = document.querySelector("[data-admin-summary]");
+const adminStats = document.querySelector("[data-admin-stats]");
+const adminStatus = document.querySelector("[data-admin-status]");
+const adminListings = document.querySelector("[data-admin-listings]");
+const adminCourts = document.querySelector("[data-admin-courts]");
+const adminTrainers = document.querySelector("[data-admin-trainers]");
+const adminTrainerReviews = document.querySelector("[data-admin-trainer-reviews]");
+const adminCourtReports = document.querySelector("[data-admin-court-reports]");
+const ownerHelpCopy = document.querySelector("[data-owner-help-copy]");
 
 let latestSellerProfile = null;
 
@@ -35,9 +47,11 @@ function renderDashboardList(target, items, renderItem, emptyTitle, emptyCopy) {
 function renderListingItem(item) {
   return `
     <article class="list-item">
-      <strong>${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(
-        item.model
-      )}</strong>
+      <strong>
+        <a class="list-item-link" href="./listing.html?id=${ElevenZeroApp.escapeHtml(item.id)}">
+          ${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(item.model)}
+        </a>
+      </strong>
       <span>${ElevenZeroApp.escapeHtml(item.category)} · ${ElevenZeroApp.formatMoney(
         item.price_usd
       )} · ${ElevenZeroApp.escapeHtml(item.location)}</span>
@@ -215,6 +229,399 @@ async function refreshSellerProfile() {
   }
 }
 
+function formatStars(count) {
+  return "★".repeat(Math.max(1, Number(count || 0)));
+}
+
+function formatOwnerDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently";
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function adminStatCard(label, value, tone = "neutral") {
+  return `
+    <article class="admin-stat-card admin-stat-${ElevenZeroApp.escapeHtml(tone)}">
+      <strong>${ElevenZeroApp.escapeHtml(String(value))}</strong>
+      <span>${ElevenZeroApp.escapeHtml(label)}</span>
+    </article>
+  `;
+}
+
+function setAdminStatus(message, tone = "neutral") {
+  ElevenZeroApp.setStatus(adminStatus, message, tone);
+}
+
+function escapeAttr(value) {
+  return ElevenZeroApp.escapeHtml(String(value ?? ""));
+}
+
+function optionList(options, selectedValue) {
+  return options
+    .map(
+      (value) =>
+        `<option value="${escapeAttr(value)}"${
+          String(selectedValue) === String(value) ? " selected" : ""
+        }>${escapeAttr(value)}</option>`
+    )
+    .join("");
+}
+
+function checkedAttr(value) {
+  return value ? "checked" : "";
+}
+
+function renderAdminEmpty(target, title, copy) {
+  if (!target) return;
+  target.innerHTML = `
+    <article class="list-item list-item-empty">
+      <strong>${escapeAttr(title)}</strong>
+      <span>${escapeAttr(copy)}</span>
+    </article>
+  `;
+}
+
+function renderAdminListings(items) {
+  if (!adminListings) return;
+  if (!items.length) {
+    renderAdminEmpty(adminListings, "No listings yet", "The marketplace will appear here once people start posting.");
+    return;
+  }
+
+  adminListings.innerHTML = items
+    .map(
+      (item) => `
+        <details class="admin-record">
+          <summary>
+            <div>
+              <strong>${escapeAttr(item.brand)} ${escapeAttr(item.model)}</strong>
+              <span>${ElevenZeroApp.formatMoney(item.price_usd)} · ${escapeAttr(item.location)}</span>
+            </div>
+            <span class="admin-record-meta">${escapeAttr(item.seller_email || "No seller email")}</span>
+          </summary>
+
+          <form class="admin-editor-form" data-admin-form="listing" data-record-id="${escapeAttr(item.id)}">
+            <div class="admin-field-grid">
+              <label>Brand <input name="brand" value="${escapeAttr(item.brand)}" /></label>
+              <label>Model <input name="model" value="${escapeAttr(item.model)}" /></label>
+              <label>Color <input name="color" value="${escapeAttr(item.color || "")}" /></label>
+              <label>Thickness (mm) <input name="thickness" type="number" min="8" max="25" step="0.1" value="${escapeAttr(item.thickness_mm || "")}" /></label>
+              <label>Category
+                <select name="category">${optionList(["control", "power", "hybrid"], item.category)}</select>
+              </label>
+              <label>Condition
+                <select name="condition">${optionList(["Excellent", "Very Good", "Good"], item.condition)}</select>
+              </label>
+              <label>Price <input name="price" value="${escapeAttr(item.price_usd)}" /></label>
+              <label>Location <input name="location" value="${escapeAttr(item.location)}" /></label>
+            </div>
+
+            <label class="admin-field-block">
+              Notes
+              <textarea name="notes" rows="4">${escapeAttr(item.notes)}</textarea>
+            </label>
+
+            <div class="admin-actions">
+              <a class="button button-secondary" href="./listing.html?id=${escapeAttr(item.id)}" target="_blank" rel="noreferrer">Open listing</a>
+              <button class="button button-dark" type="submit">Save listing</button>
+              <button class="button button-secondary admin-delete-button" type="button" data-admin-delete="listing" data-record-id="${escapeAttr(item.id)}">Remove listing</button>
+            </div>
+          </form>
+        </details>
+      `
+    )
+    .join("");
+}
+
+function renderAdminCourts(items) {
+  if (!adminCourts) return;
+  if (!items.length) {
+    renderAdminEmpty(adminCourts, "No courts yet", "Saved courts will show up here for quick moderation.");
+    return;
+  }
+
+  adminCourts.innerHTML = items
+    .map(
+      (item) => `
+        <details class="admin-record">
+          <summary>
+            <div>
+              <strong>${escapeAttr(item.name)}</strong>
+              <span>${escapeAttr(item.location)} · ${escapeAttr(item.accessKind)}</span>
+            </div>
+            <span class="admin-record-meta">${escapeAttr(item.owner_email || "Directory")}</span>
+          </summary>
+
+          <form class="admin-editor-form" data-admin-form="court" data-record-id="${escapeAttr(item.record_id)}">
+            <div class="admin-field-grid">
+              <label>Name <input name="name" value="${escapeAttr(item.name)}" /></label>
+              <label>Location <input name="location" value="${escapeAttr(item.location)}" /></label>
+              <label>Address <input name="address" value="${escapeAttr(item.address || "")}" /></label>
+              <label>Court count <input name="courtCount" type="number" min="1" value="${escapeAttr(item.court_count)}" /></label>
+              <label>Access
+                <select name="accessKind">${optionList(["free", "paid", "check"], item.accessKind)}</select>
+              </label>
+              <label>Surface
+                <select name="surfaceKind">${optionList(["indoor", "outdoor"], item.surfaceKind)}</select>
+              </label>
+              <label>Access note <input name="accessNote" value="${escapeAttr(item.access_note || "")}" /></label>
+              <label>Website <input name="website" value="${escapeAttr(item.website || "")}" /></label>
+            </div>
+
+            <label class="admin-field-block">
+              Amenities
+              <input name="amenities" value="${escapeAttr(item.amenities || "")}" />
+            </label>
+
+            <label class="admin-field-block">
+              Description
+              <textarea name="description" rows="4">${escapeAttr(item.description)}</textarea>
+            </label>
+
+            <div class="admin-actions">
+              <button class="button button-dark" type="submit">Save court</button>
+              <button class="button button-secondary admin-delete-button" type="button" data-admin-delete="court" data-record-id="${escapeAttr(item.record_id)}">Remove court</button>
+            </div>
+          </form>
+        </details>
+      `
+    )
+    .join("");
+}
+
+function renderAdminTrainers(items) {
+  if (!adminTrainers) return;
+  if (!items.length) {
+    renderAdminEmpty(adminTrainers, "No trainers yet", "Trainer profiles will appear here once they go live.");
+    return;
+  }
+
+  adminTrainers.innerHTML = items
+    .map(
+      (item) => `
+        <details class="admin-record">
+          <summary>
+            <div>
+              <strong>${escapeAttr(item.name)}</strong>
+              <span>${escapeAttr(item.location)} · ${escapeAttr(item.level)} · ${escapeAttr(item.rate)}</span>
+            </div>
+            <span class="admin-record-meta">${escapeAttr(item.owner_email || item.email)}</span>
+          </summary>
+
+          <form class="admin-editor-form" data-admin-form="trainer" data-record-id="${escapeAttr(item.id)}">
+            <div class="admin-field-grid">
+              <label>Name <input name="name" value="${escapeAttr(item.name)}" /></label>
+              <label>Location <input name="location" value="${escapeAttr(item.location)}" /></label>
+              <label>Format
+                <select name="format">${optionList(["private", "group", "clinic", "virtual"], item.format)}</select>
+              </label>
+              <label>Level
+                <select name="level">${optionList(["beginner", "intermediate", "advanced"], item.level)}</select>
+              </label>
+              <label>Rate <input name="rate" value="${escapeAttr(item.rate)}" /></label>
+              <label>Email <input name="email" value="${escapeAttr(item.email)}" /></label>
+              <label>Experience <input name="experience" value="${escapeAttr(item.experience)}" /></label>
+              <label>Availability <input name="availability" value="${escapeAttr(item.availability)}" /></label>
+            </div>
+
+            <label class="admin-checkbox-row">
+              <input name="verified" type="checkbox" ${checkedAttr(item.verified)} />
+              <span>Verified trainer</span>
+            </label>
+
+            <label class="admin-field-block">
+              Bio
+              <textarea name="bio" rows="4">${escapeAttr(item.bio)}</textarea>
+            </label>
+
+            <div class="admin-actions">
+              <button class="button button-dark" type="submit">Save trainer</button>
+              <button class="button button-secondary admin-delete-button" type="button" data-admin-delete="trainer" data-record-id="${escapeAttr(item.id)}">Remove trainer</button>
+            </div>
+          </form>
+        </details>
+      `
+    )
+    .join("");
+}
+
+function renderAdminReviews(target, items, type) {
+  if (!target) return;
+  if (!items.length) {
+    renderAdminEmpty(
+      target,
+      "Nothing to moderate yet",
+      type === "trainerReview" ? "Trainer reviews will appear here." : "Court reports will appear here."
+    );
+    return;
+  }
+
+  target.innerHTML = items
+    .map((item) => {
+      const title =
+        type === "trainerReview"
+          ? `${item.trainer_name} · ${item.reviewer_name}`
+          : `${item.court_name} · ${item.reviewer_name}`;
+      const meta =
+        type === "trainerReview"
+          ? `${formatStars(item.rating)} · ${formatOwnerDate(item.created_at)}`
+          : `${formatStars(item.condition_rating)} · ${formatOwnerDate(item.created_at)}`;
+
+      return `
+        <article class="admin-review-card">
+          <strong>${escapeAttr(title)}</strong>
+          <span>${escapeAttr(meta)}</span>
+          <p>${escapeAttr(item.comment)}</p>
+          <button
+            class="button button-secondary admin-delete-button"
+            type="button"
+            data-admin-delete="${type}"
+            data-record-id="${escapeAttr(item.id)}"
+          >
+            Remove
+          </button>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function loadAdminDashboard() {
+  if (!ElevenZeroApp.session?.user?.isAdmin) {
+    adminPanel?.classList.add("is-hidden");
+    adminAnchor?.classList.add("is-hidden");
+    return;
+  }
+
+  adminPanel?.classList.remove("is-hidden");
+  adminAnchor?.classList.remove("is-hidden");
+
+  try {
+    setAdminStatus("Loading owner tools…", "warning");
+    const response = await ElevenZeroApp.request("/api/admin/dashboard");
+    const stats = response.stats || {};
+
+    if (adminPill) adminPill.textContent = "Moderator active";
+    if (adminSummary) {
+      adminSummary.textContent =
+        "You are signed in with the owner account, so you can edit or remove live website content here.";
+    }
+
+    if (adminStats) {
+      adminStats.innerHTML = [
+        adminStatCard("Users", stats.users || 0, "neutral"),
+        adminStatCard("Listings", stats.listings || 0, "ready"),
+        adminStatCard("Courts", stats.courts || 0, "ready"),
+        adminStatCard("Trainers", stats.trainers || 0, "ready"),
+        adminStatCard("Trainer reviews", stats.trainerReviews || 0, "pending"),
+        adminStatCard("Court reports", stats.courtReports || 0, "pending"),
+      ].join("");
+    }
+
+    renderAdminListings(response.listings || []);
+    renderAdminCourts(response.courts || []);
+    renderAdminTrainers(response.trainers || []);
+    renderAdminReviews(adminTrainerReviews, response.trainerReviews || [], "trainerReview");
+    renderAdminReviews(adminCourtReports, response.courtReports || [], "courtReport");
+    setAdminStatus("Owner tools loaded.", "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+  }
+}
+
+function collectAdminFormPayload(form) {
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+  payload.id = Number(form.dataset.recordId || 0);
+
+  if (form.dataset.adminForm === "trainer") {
+    payload.verified = form.querySelector('input[name="verified"]')?.checked || false;
+  }
+
+  return payload;
+}
+
+async function saveAdminRecord(form) {
+  const type = form.dataset.adminForm;
+  const payload = collectAdminFormPayload(form);
+
+  const routeByType = {
+    listing: "/api/admin/listings/update",
+    court: "/api/admin/courts/update",
+    trainer: "/api/admin/trainers/update",
+  };
+
+  const route = routeByType[type];
+  if (!route) return;
+
+  try {
+    setAdminStatus("Saving your changes…", "warning");
+    await ElevenZeroApp.request(route, {
+      method: "POST",
+      body: payload,
+    });
+    await loadAdminDashboard();
+    setAdminStatus("Changes saved.", "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+  }
+}
+
+async function deleteAdminRecord(type, recordId) {
+  const routeByType = {
+    listing: "/api/admin/listings/delete",
+    court: "/api/admin/courts/delete",
+    trainer: "/api/admin/trainers/delete",
+    trainerReview: "/api/admin/trainer-reviews/delete",
+    courtReport: "/api/admin/court-reports/delete",
+  };
+
+  const route = routeByType[type];
+  if (!route) return;
+
+  const labels = {
+    listing: "listing",
+    court: "court",
+    trainer: "trainer profile",
+    trainerReview: "trainer review",
+    courtReport: "court report",
+  };
+
+  const confirmed = window.confirm(`Remove this ${labels[type]} from the website?`);
+  if (!confirmed) return;
+
+  try {
+    setAdminStatus(`Removing ${labels[type]}…`, "warning");
+    await ElevenZeroApp.request(route, {
+      method: "POST",
+      body: { id: Number(recordId || 0) },
+    });
+    await loadAdminDashboard();
+    setAdminStatus(`${labels[type][0].toUpperCase()}${labels[type].slice(1)} removed.`, "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+  }
+}
+
+function bindAdminPanel() {
+  adminPanel?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("[data-admin-form]");
+    if (!form) return;
+    event.preventDefault();
+    await saveAdminRecord(form);
+  });
+
+  adminPanel?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-admin-delete]");
+    if (!button) return;
+    await deleteAdminRecord(button.dataset.adminDelete, button.dataset.recordId);
+  });
+}
+
 async function loadDashboard() {
   try {
     const response = await ElevenZeroApp.request("/api/dashboard");
@@ -223,8 +630,16 @@ async function loadDashboard() {
 
     if (accountName) accountName.textContent = `Welcome back, ${user.name}.`;
     if (accountCopy) {
-      accountCopy.textContent =
-        "This dashboard tracks the live activity tied to your Eleven Zero PB account.";
+      accountCopy.textContent = user.isAdmin
+        ? "You’re in the owner account. This dashboard now includes moderator tools for live site content."
+        : "This dashboard tracks the live activity tied to your Eleven Zero PB account.";
+    }
+    if (ownerHelpCopy) {
+      ownerHelpCopy.innerHTML = user.isAdmin
+        ? "You’re already signed in with the owner account, so the moderator tools below are active for live listings, courts, trainers, and reviews."
+        : `If you sign in with <strong>${ElevenZeroApp.escapeHtml(
+            ElevenZeroApp.config.supportEmail || "11zeropb@gmail.com"
+          )}</strong>, this dashboard unlocks the live moderator panel for listings, courts, trainers, and reviews.`;
     }
     if (accountEmail) accountEmail.textContent = user.email;
     if (statListings) statListings.textContent = String(stats.listings);
@@ -247,11 +662,7 @@ async function loadDashboard() {
     );
     renderSellerProfile(response.sellerProfile || response.user?.sellerProfile);
 
-    ElevenZeroApp.setStatus(
-      accountStatus,
-      "Dashboard loaded successfully.",
-      "success"
-    );
+    ElevenZeroApp.setStatus(accountStatus, "Dashboard loaded successfully.", "success");
   } catch (error) {
     ElevenZeroApp.setStatus(accountStatus, error.message, "error");
   }
@@ -272,7 +683,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
+  bindAdminPanel();
   await loadDashboard();
+  await loadAdminDashboard();
   sellerConnectButton?.addEventListener("click", handleSellerOnboarding);
   sellerRefreshButton?.addEventListener("click", refreshSellerProfile);
 });
