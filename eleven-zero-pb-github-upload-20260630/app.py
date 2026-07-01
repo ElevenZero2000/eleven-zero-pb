@@ -37,7 +37,11 @@ SESSION_COOKIE_SECURE = env_flag("SESSION_COOKIE_SECURE", APP_ENV == "production
 ENABLE_DEMO_DATA = env_flag("ENABLE_DEMO_DATA", APP_ENV != "production")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "").strip()
+PRIMARY_OWNER_EMAIL = os.getenv("PRIMARY_OWNER_EMAIL", "11zeropb@gmail.com").strip()
+ADMIN_EMAILS_RAW = os.getenv("ADMIN_EMAILS", "").strip()
 GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "").strip()
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+GOOGLE_MAPS_MAP_ID = os.getenv("GOOGLE_MAPS_MAP_ID", "").strip()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
 STRIPE_COUNTRY = os.getenv("STRIPE_COUNTRY", "US").strip().upper() or "US"
@@ -66,10 +70,10 @@ def build_content_security_policy() -> str:
             "form-action 'self'",
             "frame-ancestors 'none'",
             "object-src 'none'",
-            "img-src 'self' data: https://tile.openstreetmap.org",
-            "script-src 'self' https://www.googletagmanager.com",
+            "img-src 'self' data: https://tile.openstreetmap.org https://*.googleapis.com https://*.gstatic.com https://*.googleusercontent.com",
+            "script-src 'self' https://www.googletagmanager.com https://maps.googleapis.com",
             "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://nominatim.openstreetmap.org https://overpass-api.de https://www.openstreetmap.org https://api.stripe.com",
+            "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://nominatim.openstreetmap.org https://overpass-api.de https://www.openstreetmap.org https://api.stripe.com https://*.googleapis.com https://*.gstatic.com https://*.google.com",
         ]
     )
 
@@ -98,6 +102,22 @@ def verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
 
 def normalize_email(value: str) -> str:
     return value.strip().lower()
+
+
+def admin_email_set() -> set[str]:
+    items = {
+        normalize_email(item)
+        for item in [PRIMARY_OWNER_EMAIL, SUPPORT_EMAIL, *ADMIN_EMAILS_RAW.split(",")]
+        if normalize_email(item)
+    }
+    return items
+
+
+ADMIN_EMAILS = admin_email_set()
+
+
+def email_is_admin(email: str) -> bool:
+    return normalize_email(email) in ADMIN_EMAILS
 
 
 def slugify(value: str) -> str:
@@ -149,6 +169,16 @@ COURT_PLAYER_LEVEL_LABELS = {
     "intermediate": "Intermediate-heavy",
     "advanced": "Advanced-heavy",
     "mixed": "Mixed levels",
+}
+
+DIRECTORY_ACCESS_LABELS = {
+    "free": "Free",
+    "paid": "Paid",
+}
+
+DIRECTORY_SURFACE_LABELS = {
+    "indoor": "Indoor",
+    "outdoor": "Outdoor",
 }
 
 
@@ -254,6 +284,135 @@ def summarize_court_reports(rows: list[sqlite3.Row]) -> dict[str, dict]:
     return normalized
 
 
+def serialize_directory_court_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    access_kind = row["access_kind"]
+    surface_kind = row["surface_kind"]
+    court_count = int(row["court_count"] or 0)
+    website = (row["website"] or "").strip()
+    access_note = (row["access_note"] or "").strip()
+    amenities = (row["amenities"] or "").strip()
+
+    details = [f"{court_count} court{'s' if court_count != 1 else ''}"]
+    if access_note:
+        details.append(access_note)
+    if amenities:
+        details.append(amenities)
+
+    return {
+        "id": f"directory-{row['id']}",
+        "name": row["name"],
+        "location": row["location"],
+        "address": (row["address"] or row["location"]).strip(),
+        "accessKind": access_kind,
+        "accessLabel": DIRECTORY_ACCESS_LABELS.get(access_kind, "Check access"),
+        "surfaceKind": surface_kind,
+        "surfaceLabel": DIRECTORY_SURFACE_LABELS.get(surface_kind, "Surface not set"),
+        "details": details[:3],
+        "description": row["description"],
+        "tags": [access_kind, surface_kind],
+        "source": "directory",
+        "website": website,
+        "osmUrl": "",
+        "lat": row["lat"],
+        "lon": row["lon"],
+        "createdAt": row["created_at"],
+    }
+
+
+def serialize_admin_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    payload = serialize_listing_row(row) or {}
+    payload.update(
+        {
+            "seller_email": row["seller_email"],
+        }
+    )
+    return payload
+
+
+def serialize_admin_court_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    payload = serialize_directory_court_row(row) or {}
+    payload.update(
+        {
+            "record_id": row["id"],
+            "user_id": row["user_id"],
+            "owner_name": row["owner_name"],
+            "owner_email": row["owner_email"],
+            "court_count": row["court_count"],
+            "access_note": row["access_note"],
+            "amenities": row["amenities"],
+            "website": row["website"],
+        }
+    )
+    return payload
+
+
+def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "name": row["name"],
+        "location": row["location"],
+        "format": row["format"],
+        "level": row["level"],
+        "rate": row["rate"],
+        "email": row["email"],
+        "verified": bool(row["verified"]),
+        "experience": row["experience"],
+        "bio": row["bio"],
+        "availability": row["availability"],
+        "joined_at": row["joined_at"],
+        "rating": row["rating"],
+        "review_count": row["review_count"],
+        "owner_name": row["owner_name"],
+        "owner_email": row["owner_email"],
+    }
+
+
+def serialize_admin_trainer_review_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "trainer_id": row["trainer_id"],
+        "trainer_name": row["trainer_name"],
+        "reviewer_name": row["reviewer_name"],
+        "rating": row["rating"],
+        "comment": row["comment"],
+        "created_at": row["created_at"],
+    }
+
+
+def serialize_admin_court_report_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "court_id": row["court_id"],
+        "court_name": row["court_name"],
+        "court_location": row["court_location"],
+        "reviewer_name": row["reviewer_name"],
+        "condition_rating": row["condition_rating"],
+        "busyness_rating": row["busyness_rating"],
+        "player_level": row["player_level"],
+        "comment": row["comment"],
+        "created_at": row["created_at"],
+    }
+
+
 def stripe_profile_from_row(row: sqlite3.Row | dict | None) -> dict:
     row = row or {}
     account_id = row.get("stripe_account_id") if isinstance(row, dict) else row["stripe_account_id"]
@@ -308,6 +467,7 @@ def serialize_user(row: sqlite3.Row | None) -> dict | None:
         "id": row["id"],
         "name": row["name"],
         "email": row["email"],
+        "isAdmin": email_is_admin(row["email"]),
     }
 
     if "created_at" in row.keys():
@@ -389,11 +549,14 @@ def init_database() -> None:
               user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
               brand TEXT NOT NULL,
               model TEXT NOT NULL,
+              color TEXT NOT NULL DEFAULT '',
+              thickness_mm REAL,
               category TEXT NOT NULL,
               condition TEXT NOT NULL,
               price_usd INTEGER NOT NULL,
               location TEXT NOT NULL,
               notes TEXT NOT NULL,
+              image_data_json TEXT NOT NULL DEFAULT '[]',
               created_at TEXT NOT NULL
             );
 
@@ -454,12 +617,33 @@ def init_database() -> None:
               comment TEXT NOT NULL,
               created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS courts_directory (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+              name TEXT NOT NULL,
+              location TEXT NOT NULL,
+              address TEXT NOT NULL DEFAULT '',
+              access_kind TEXT NOT NULL,
+              surface_kind TEXT NOT NULL,
+              court_count INTEGER NOT NULL,
+              access_note TEXT NOT NULL DEFAULT '',
+              amenities TEXT NOT NULL DEFAULT '',
+              description TEXT NOT NULL,
+              website TEXT NOT NULL DEFAULT '',
+              lat REAL,
+              lon REAL,
+              created_at TEXT NOT NULL
+            );
             """
         )
       # fmt: on
 
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_court_reports_court_id ON court_reports(court_id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_courts_directory_created_at ON courts_directory(created_at)"
         )
 
         add_column_if_missing(connection, "users", "stripe_account_id", "TEXT")
@@ -469,6 +653,10 @@ def init_database() -> None:
         add_column_if_missing(connection, "users", "stripe_onboarding_complete", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_requirements_due_count", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_account_status_updated_at", "TEXT")
+        add_column_if_missing(connection, "listings", "color", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "listings", "thickness_mm", "REAL")
+        add_column_if_missing(connection, "listings", "image_data_json", "TEXT NOT NULL DEFAULT '[]'")
+        add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
 
         listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
         trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
@@ -479,68 +667,86 @@ def init_database() -> None:
             connection.executemany(
                 """
                 INSERT INTO listings (
-                  brand, model, category, condition, price_usd, location, notes, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                  brand, model, color, thickness_mm, category, condition, price_usd, location, notes, image_data_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         "Selkirk",
                         "LUXX Control Air",
+                        "Sky blue",
+                        16.0,
                         "control",
                         "Excellent",
                         165,
                         "Miami, FL",
                         "Edge guard is clean, face has light cosmetic wear, and the handle is freshly wrapped.",
+                        "[]",
                         "2026-06-01T12:00:00Z",
                     ),
                     (
                         "JOOLA",
                         "Perseus Shape",
+                        "Black",
+                        16.0,
                         "power",
                         "Very Good",
                         148,
                         "Austin, TX",
                         "Used for a few sessions, still lively off the face, with a small scuff near the throat.",
+                        "[]",
                         "2026-06-03T12:00:00Z",
                     ),
                     (
                         "Six Zero",
                         "Double Black Diamond",
+                        "Carbon black",
+                        16.0,
                         "hybrid",
                         "Excellent",
                         139,
                         "Naples, FL",
                         "Balanced feel with clean edges, no dead spots reported, and strong all-court control.",
+                        "[]",
                         "2026-06-05T12:00:00Z",
                     ),
                     (
                         "Paddletek",
                         "Bantam TKO-C",
+                        "Red",
+                        14.3,
                         "power",
                         "Good",
                         121,
                         "Scottsdale, AZ",
                         "A strong starter upgrade for players who want more pace without buying brand new.",
+                        "[]",
                         "2026-06-07T12:00:00Z",
                     ),
                     (
                         "Vatic Pro",
                         "Prism Flash",
+                        "Purple",
+                        16.0,
                         "control",
                         "Excellent",
                         111,
                         "Charlotte, NC",
                         "Soft touch at the kitchen, steady resets, and the original cover is included.",
+                        "[]",
                         "2026-06-09T12:00:00Z",
                     ),
                     (
                         "Bread & Butter",
                         "Filth",
+                        "Neon yellow",
+                        14.0,
                         "hybrid",
                         "Very Good",
                         133,
                         "Denver, CO",
                         "Crisp feel with clean cosmetics, lightly broken in and ready for tournament play.",
+                        "[]",
                         "2026-06-10T12:00:00Z",
                     ),
                 ],
@@ -857,6 +1063,61 @@ def row_to_dict(row: sqlite3.Row) -> dict:
     return {key: row[key] for key in row.keys()}
 
 
+def normalize_listing_image_payload(raw_images) -> list[str]:
+    if isinstance(raw_images, str):
+        raw_images = raw_images.strip()
+        if raw_images.startswith("data:image/"):
+            candidates = [raw_images]
+        else:
+            try:
+                decoded = json.loads(raw_images or "[]")
+                candidates = decoded if isinstance(decoded, list) else []
+            except json.JSONDecodeError:
+                candidates = []
+    elif isinstance(raw_images, list):
+        candidates = raw_images
+    else:
+        candidates = []
+
+    images: list[str] = []
+
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+
+        image = candidate.strip()
+        if not image.startswith("data:image/"):
+            continue
+        if len(image) > 1_600_000:
+            continue
+        if image in images:
+            continue
+
+        images.append(image)
+        if len(images) >= 4:
+            break
+
+    return images
+
+
+def parse_thickness_mm(raw_value) -> float | None:
+    raw = str(raw_value or "").strip()
+    cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == ".")
+
+    if not cleaned or cleaned.count(".") > 1:
+        return None
+
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+
+    if value < 8 or value > 25:
+        return None
+
+    return round(value, 1)
+
+
 def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
     row = row or {}
     seller_user_id = row.get("user_id") if isinstance(row, dict) else row["user_id"]
@@ -888,16 +1149,25 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         return None
 
     checkout_state = listing_checkout_state_from_row(row)
+    color = (row.get("color", "") if isinstance(row, dict) else row["color"] or "").strip()
+    thickness_mm = row.get("thickness_mm") if isinstance(row, dict) else row["thickness_mm"]
+    images = normalize_listing_image_payload(
+        row.get("image_data_json", "[]") if isinstance(row, dict) else row["image_data_json"]
+    )
 
     return {
         "id": row["id"],
         "brand": row["brand"],
         "model": row["model"],
+        "color": color,
+        "thickness_mm": thickness_mm,
         "category": row["category"],
         "condition": row["condition"],
         "price_usd": row["price_usd"],
         "location": row["location"],
         "notes": row["notes"],
+        "images": images,
+        "primary_image": images[0] if images else "",
         "created_at": row["created_at"],
         "seller_name": row["seller_name"],
         "seller_user_id": checkout_state["sellerUserId"],
@@ -914,6 +1184,9 @@ def site_config_payload() -> dict:
         "siteUrl": SITE_URL,
         "supportEmail": SUPPORT_EMAIL,
         "gaMeasurementId": GA_MEASUREMENT_ID,
+        "googleMapsEnabled": bool(GOOGLE_MAPS_API_KEY),
+        "googleMapsApiKey": GOOGLE_MAPS_API_KEY,
+        "googleMapsMapId": GOOGLE_MAPS_MAP_ID,
         "stripeConfigured": stripe_is_configured(),
         "stripeMode": stripe_mode(),
         "stripePublishableKeyPresent": bool(STRIPE_PUBLISHABLE_KEY),
@@ -1029,6 +1302,21 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
         return user
 
+    def require_admin(self, user: dict | None) -> bool:
+        if not user:
+            return False
+
+        if user.get("isAdmin"):
+            return True
+
+        self.send_json(
+            {
+                "error": "This area is only for the Eleven Zero PB owner account. Sign in with your moderator email first."
+            },
+            status=HTTPStatus.FORBIDDEN,
+        )
+        return False
+
     def session_cookie(self, token: str) -> str:
         secure_flag = "; Secure" if SESSION_COOKIE_SECURE else ""
         return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; Max-Age=2592000; SameSite=Lax{secure_flag}"
@@ -1097,12 +1385,30 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"authenticated": bool(user), "user": user})
             return
 
+        if parsed.path.startswith("/api/listings/"):
+            listing_id = parsed.path.rsplit("/", 1)[-1].strip()
+            if not listing_id.isdigit():
+                self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            item = self.fetch_listing_by_id(int(listing_id))
+            if not item:
+                self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            self.send_json({"item": item})
+            return
+
         if parsed.path == "/api/listings":
             self.send_json({"items": self.fetch_listings()})
             return
 
         if parsed.path == "/api/trainers":
             self.send_json({"items": self.fetch_trainers()})
+            return
+
+        if parsed.path == "/api/courts-directory":
+            self.send_json({"items": self.fetch_directory_courts()})
             return
 
         if parsed.path == "/api/trainer-reviews":
@@ -1134,6 +1440,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not user:
                 return
             self.send_json(self.build_dashboard(user["id"]))
+            return
+
+        if parsed.path == "/api/admin/dashboard":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.send_json(self.build_admin_dashboard())
             return
 
         if parsed.path == "/api/checkout/session-status":
@@ -1180,11 +1493,74 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_create_trainer(user, body)
             return
 
+        if parsed.path == "/api/courts-directory":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_create_directory_court(user, body)
+            return
+
         if parsed.path == "/api/stripe/connect/onboard":
             user = self.require_user()
             if not user:
                 return
             self.handle_stripe_onboarding(user)
+            return
+
+        if parsed.path == "/api/admin/listings/update":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_listing_update(body)
+            return
+
+        if parsed.path == "/api/admin/listings/delete":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_listing_delete(body)
+            return
+
+        if parsed.path == "/api/admin/courts/update":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_court_update(body)
+            return
+
+        if parsed.path == "/api/admin/courts/delete":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_court_delete(body)
+            return
+
+        if parsed.path == "/api/admin/trainers/update":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_trainer_update(body)
+            return
+
+        if parsed.path == "/api/admin/trainers/delete":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_trainer_delete(body)
+            return
+
+        if parsed.path == "/api/admin/trainer-reviews/delete":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_trainer_review_delete(body)
+            return
+
+        if parsed.path == "/api/admin/court-reports/delete":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_court_report_delete(body)
             return
 
         if parsed.path == "/api/stripe/connect/status/refresh":
@@ -1229,11 +1605,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.user_id,
                   listings.brand,
                   listings.model,
+                  listings.color,
+                  listings.thickness_mm,
                   listings.category,
                   listings.condition,
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,
@@ -1250,6 +1629,41 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchall()
 
         return [serialize_listing_row(row) for row in rows]
+
+    def fetch_listing_by_id(self, listing_id: int) -> dict | None:
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                  listings.id,
+                  listings.user_id,
+                  listings.brand,
+                  listings.model,
+                  listings.color,
+                  listings.thickness_mm,
+                  listings.category,
+                  listings.condition,
+                  listings.price_usd,
+                  listings.location,
+                  listings.notes,
+                  listings.image_data_json,
+                  listings.created_at,
+                  users.name AS seller_name,
+                  users.stripe_account_id,
+                  users.stripe_details_submitted,
+                  users.stripe_charges_enabled,
+                  users.stripe_payouts_enabled,
+                  users.stripe_onboarding_complete,
+                  users.stripe_requirements_due_count,
+                  users.stripe_account_status_updated_at
+                FROM listings
+                LEFT JOIN users ON users.id = listings.user_id
+                WHERE listings.id = ?
+                """,
+                (listing_id,),
+            ).fetchone()
+
+        return serialize_listing_row(row)
 
     def fetch_trainers(self) -> list[dict]:
         with closing(connect_db()) as connection:
@@ -1276,6 +1690,33 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchall()
 
         return [row_to_dict(row) for row in rows]
+
+    def fetch_directory_courts(self) -> list[dict]:
+        with closing(connect_db()) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                  id,
+                  user_id,
+                  name,
+                  location,
+                  address,
+                  access_kind,
+                  surface_kind,
+                  court_count,
+                  access_note,
+                  amenities,
+                  description,
+                  website,
+                  lat,
+                  lon,
+                  created_at
+                FROM courts_directory
+                ORDER BY created_at DESC, id DESC
+                """
+            ).fetchall()
+
+        return [serialize_directory_court_row(row) for row in rows]
 
     def fetch_reviews(self, trainer_id: str | None = None) -> list[dict]:
         query = """
@@ -1376,11 +1817,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.user_id,
                   listings.brand,
                   listings.model,
+                  listings.color,
+                  listings.thickness_mm,
                   listings.category,
                   listings.condition,
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,
@@ -1864,6 +2308,462 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "recentTrainers": [row_to_dict(row) for row in recent_trainers],
         }
 
+    def build_admin_dashboard(self) -> dict:
+        with closing(connect_db()) as connection:
+            user_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+            court_count = connection.execute("SELECT COUNT(*) FROM courts_directory").fetchone()[0]
+            trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
+            trainer_review_count = connection.execute("SELECT COUNT(*) FROM trainer_reviews").fetchone()[0]
+            court_report_count = connection.execute("SELECT COUNT(*) FROM court_reports").fetchone()[0]
+
+            listings = connection.execute(
+                """
+                SELECT
+                  listings.id,
+                  listings.user_id,
+                  listings.brand,
+                  listings.model,
+                  listings.color,
+                  listings.thickness_mm,
+                  listings.category,
+                  listings.condition,
+                  listings.price_usd,
+                  listings.location,
+                  listings.notes,
+                  listings.image_data_json,
+                  listings.created_at,
+                  users.name AS seller_name,
+                  users.email AS seller_email,
+                  users.stripe_account_id,
+                  users.stripe_details_submitted,
+                  users.stripe_charges_enabled,
+                  users.stripe_payouts_enabled,
+                  users.stripe_onboarding_complete,
+                  users.stripe_requirements_due_count,
+                  users.stripe_account_status_updated_at
+                FROM listings
+                LEFT JOIN users ON users.id = listings.user_id
+                ORDER BY listings.created_at DESC, listings.id DESC
+                LIMIT 16
+                """
+            ).fetchall()
+
+            courts = connection.execute(
+                """
+                SELECT
+                  courts_directory.id,
+                  courts_directory.user_id,
+                  courts_directory.name,
+                  courts_directory.location,
+                  courts_directory.address,
+                  courts_directory.access_kind,
+                  courts_directory.surface_kind,
+                  courts_directory.court_count,
+                  courts_directory.access_note,
+                  courts_directory.amenities,
+                  courts_directory.description,
+                  courts_directory.website,
+                  courts_directory.lat,
+                  courts_directory.lon,
+                  courts_directory.created_at,
+                  users.name AS owner_name,
+                  users.email AS owner_email
+                FROM courts_directory
+                LEFT JOIN users ON users.id = courts_directory.user_id
+                ORDER BY courts_directory.created_at DESC, courts_directory.id DESC
+                LIMIT 16
+                """
+            ).fetchall()
+
+            trainers = connection.execute(
+                """
+                SELECT
+                  trainers.id,
+                  trainers.user_id,
+                  trainers.name,
+                  trainers.location,
+                  trainers.format,
+                  trainers.level,
+                  trainers.rate,
+                  trainers.email,
+                  trainers.verified,
+                  trainers.experience,
+                  trainers.bio,
+                  trainers.availability,
+                  trainers.joined_at,
+                  trainers.rating,
+                  trainers.review_count,
+                  users.name AS owner_name,
+                  users.email AS owner_email
+                FROM trainers
+                LEFT JOIN users ON users.id = trainers.user_id
+                ORDER BY trainers.joined_at DESC, trainers.id DESC
+                LIMIT 16
+                """
+            ).fetchall()
+
+            trainer_reviews = connection.execute(
+                """
+                SELECT
+                  trainer_reviews.id,
+                  trainer_reviews.trainer_id,
+                  trainers.name AS trainer_name,
+                  trainer_reviews.reviewer_name,
+                  trainer_reviews.rating,
+                  trainer_reviews.comment,
+                  trainer_reviews.created_at
+                FROM trainer_reviews
+                JOIN trainers ON trainers.id = trainer_reviews.trainer_id
+                ORDER BY trainer_reviews.created_at DESC, trainer_reviews.id DESC
+                LIMIT 12
+                """
+            ).fetchall()
+
+            court_reports = connection.execute(
+                """
+                SELECT
+                  id,
+                  court_id,
+                  court_name,
+                  court_location,
+                  reviewer_name,
+                  condition_rating,
+                  busyness_rating,
+                  player_level,
+                  comment,
+                  created_at
+                FROM court_reports
+                ORDER BY created_at DESC, id DESC
+                LIMIT 12
+                """
+            ).fetchall()
+
+        return {
+            "stats": {
+                "users": user_count,
+                "listings": listing_count,
+                "courts": court_count,
+                "trainers": trainer_count,
+                "trainerReviews": trainer_review_count,
+                "courtReports": court_report_count,
+            },
+            "listings": [serialize_admin_listing_row(row) for row in listings],
+            "courts": [serialize_admin_court_row(row) for row in courts],
+            "trainers": [serialize_admin_trainer_row(row) for row in trainers],
+            "trainerReviews": [serialize_admin_trainer_review_row(row) for row in trainer_reviews],
+            "courtReports": [serialize_admin_court_report_row(row) for row in court_reports],
+        }
+
+    def handle_admin_listing_update(self, body: dict):
+        listing_id = int(body.get("id") or 0)
+        brand = str(body.get("brand", "")).strip()
+        model = str(body.get("model", "")).strip()
+        color = str(body.get("color", "")).strip()
+        thickness_mm = parse_thickness_mm(body.get("thickness"))
+        category = str(body.get("category", "")).strip().lower()
+        condition = str(body.get("condition", "")).strip()
+        location = str(body.get("location", "")).strip()
+        notes = str(body.get("notes", "")).strip()
+        price_raw = str(body.get("price", "")).strip()
+        digits = "".join(ch for ch in price_raw if ch.isdigit())
+        price_usd = int(digits) if digits else 0
+
+        if listing_id <= 0:
+            self.send_json({"error": "Choose a valid listing to update."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if not all([brand, model, color, category, condition, location, notes]) or price_usd <= 0:
+            self.send_json({"error": "Please complete every listing field before saving."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if category not in {"control", "power", "hybrid"}:
+            self.send_json({"error": "Listing category must be control, power, or hybrid."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if thickness_mm is None:
+            self.send_json({"error": "Add a valid paddle thickness in millimeters."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE listings
+                SET
+                  brand = ?,
+                  model = ?,
+                  color = ?,
+                  thickness_mm = ?,
+                  category = ?,
+                  condition = ?,
+                  price_usd = ?,
+                  location = ?,
+                  notes = ?
+                WHERE id = ?
+                """,
+                (brand, model, color, thickness_mm, category, condition, price_usd, location, notes, listing_id),
+            )
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Listing not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": f"{brand} {model} was updated."})
+
+    def handle_admin_listing_delete(self, body: dict):
+        listing_id = int(body.get("id") or 0)
+        if listing_id <= 0:
+            self.send_json({"error": "Choose a valid listing to remove."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute("DELETE FROM listings WHERE id = ?", (listing_id,))
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Listing not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": "Listing removed from the marketplace."})
+
+    def handle_admin_court_update(self, body: dict):
+        court_id = int(body.get("id") or 0)
+        name = str(body.get("name", "")).strip()
+        location = str(body.get("location", "")).strip()
+        address = str(body.get("address", "")).strip() or location
+        access_kind = str(body.get("accessKind", "")).strip().lower()
+        surface_kind = str(body.get("surfaceKind", "")).strip().lower()
+        access_note = str(body.get("accessNote", "")).strip()
+        amenities = str(body.get("amenities", "")).strip()
+        description = str(body.get("description", "")).strip()
+        website = str(body.get("website", "")).strip()
+
+        try:
+            court_count = int(str(body.get("courtCount", "")).strip() or "0")
+        except ValueError:
+            court_count = 0
+
+        if court_id <= 0:
+            self.send_json({"error": "Choose a valid court to update."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if not all([name, location, address, access_kind, surface_kind, description]) or court_count <= 0:
+            self.send_json({"error": "Please complete every court field before saving."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if access_kind not in {"free", "paid", "check"}:
+            self.send_json({"error": "Court access must be free, paid, or check."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if surface_kind not in {"indoor", "outdoor"}:
+            self.send_json({"error": "Court surface must be indoor or outdoor."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if website and not urlparse(website).scheme:
+            website = f"https://{website}"
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE courts_directory
+                SET
+                  name = ?,
+                  location = ?,
+                  address = ?,
+                  access_kind = ?,
+                  surface_kind = ?,
+                  court_count = ?,
+                  access_note = ?,
+                  amenities = ?,
+                  description = ?,
+                  website = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    location,
+                    address,
+                    access_kind,
+                    surface_kind,
+                    court_count,
+                    access_note,
+                    amenities,
+                    description,
+                    website,
+                    court_id,
+                ),
+            )
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Court not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": f"{name} was updated in the courts directory."})
+
+    def handle_admin_court_delete(self, body: dict):
+        court_id = int(body.get("id") or 0)
+        if court_id <= 0:
+            self.send_json({"error": "Choose a valid court to remove."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        directory_court_public_id = f"directory-{court_id}"
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute("DELETE FROM courts_directory WHERE id = ?", (court_id,))
+            connection.execute("DELETE FROM court_reports WHERE court_id = ?", (directory_court_public_id,))
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Court not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": "Court removed from the directory."})
+
+    def handle_admin_trainer_update(self, body: dict):
+        trainer_id = int(body.get("id") or 0)
+        name = str(body.get("name", "")).strip()
+        location = str(body.get("location", "")).strip()
+        format_value = str(body.get("format", "")).strip().lower()
+        level = str(body.get("level", "")).strip().lower()
+        rate = str(body.get("rate", "")).strip()
+        email = normalize_email(str(body.get("email", "")).strip())
+        experience = str(body.get("experience", "")).strip()
+        availability = str(body.get("availability", "")).strip()
+        bio = str(body.get("bio", "")).strip()
+        verified = bool(body.get("verified"))
+
+        if trainer_id <= 0:
+            self.send_json({"error": "Choose a valid trainer profile to update."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if not all([name, location, format_value, level, rate, email, experience, availability, bio]):
+            self.send_json({"error": "Please complete every trainer field before saving."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if format_value not in {"private", "group", "clinic", "virtual"}:
+            self.send_json({"error": "Trainer format is not valid."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if level not in {"beginner", "intermediate", "advanced"}:
+            self.send_json({"error": "Trainer level is not valid."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE trainers
+                SET
+                  name = ?,
+                  location = ?,
+                  format = ?,
+                  level = ?,
+                  rate = ?,
+                  email = ?,
+                  verified = ?,
+                  experience = ?,
+                  bio = ?,
+                  availability = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    location,
+                    format_value,
+                    level,
+                    rate,
+                    email,
+                    bool_to_int(verified),
+                    experience,
+                    bio,
+                    availability,
+                    trainer_id,
+                ),
+            )
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": f"{name} was updated."})
+
+    def handle_admin_trainer_delete(self, body: dict):
+        trainer_id = int(body.get("id") or 0)
+        if trainer_id <= 0:
+            self.send_json({"error": "Choose a valid trainer to remove."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute("DELETE FROM trainers WHERE id = ?", (trainer_id,))
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": "Trainer profile removed."})
+
+    def handle_admin_trainer_review_delete(self, body: dict):
+        review_id = int(body.get("id") or 0)
+        if review_id <= 0:
+            self.send_json({"error": "Choose a valid trainer review to remove."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            review_row = connection.execute(
+                "SELECT trainer_id, rating FROM trainer_reviews WHERE id = ?",
+                (review_id,),
+            ).fetchone()
+
+            if not review_row:
+                self.send_json({"error": "Trainer review not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            trainer_id = review_row["trainer_id"]
+            rating = int(review_row["rating"] or 0)
+
+            connection.execute("DELETE FROM trainer_reviews WHERE id = ?", (review_id,))
+
+            trainer = connection.execute(
+                "SELECT review_count, rating FROM trainers WHERE id = ?",
+                (trainer_id,),
+            ).fetchone()
+
+            if trainer:
+                review_count = max(int(trainer["review_count"] or 0) - 1, 0)
+                current_rating = float(trainer["rating"] or 0)
+                if review_count > 0:
+                    next_rating = max(((current_rating * (review_count + 1)) - rating) / review_count, 0)
+                else:
+                    next_rating = 0
+
+                connection.execute(
+                    "UPDATE trainers SET review_count = ?, rating = ? WHERE id = ?",
+                    (review_count, round(next_rating, 2), trainer_id),
+                )
+
+            connection.commit()
+
+        self.send_json({"ok": True, "message": "Trainer review removed."})
+
+    def handle_admin_court_report_delete(self, body: dict):
+        report_id = int(body.get("id") or 0)
+        if report_id <= 0:
+            self.send_json({"error": "Choose a valid court report to remove."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute("DELETE FROM court_reports WHERE id = ?", (report_id,))
+            connection.commit()
+
+        if cursor.rowcount <= 0:
+            self.send_json({"error": "Court report not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_json({"ok": True, "message": "Court report removed."})
+
     def handle_signup(self, body: dict):
         name = str(body.get("name", "")).strip()
         email = normalize_email(str(body.get("email", "")))
@@ -1970,18 +2870,28 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
     def handle_create_listing(self, user: dict, body: dict):
         brand = str(body.get("brand", "")).strip()
         model = str(body.get("model", "")).strip()
+        color = str(body.get("color", "")).strip()
+        thickness_mm = parse_thickness_mm(body.get("thickness"))
         category = str(body.get("category", "")).strip().lower()
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip()
+        images = normalize_listing_image_payload(body.get("images", []))
         price_raw = str(body.get("price", "")).strip()
 
         digits = "".join(ch for ch in price_raw if ch.isdigit())
         price_usd = int(digits) if digits else 0
 
-        if not all([brand, model, category, condition, location, notes]) or price_usd <= 0:
+        if not all([brand, model, color, category, condition, location, notes]) or price_usd <= 0:
             self.send_json(
                 {"error": "Please complete every listing field before publishing."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if thickness_mm is None:
+            self.send_json(
+                {"error": "Add the paddle thickness in millimeters so buyers can filter properly."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -1993,22 +2903,32 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if not images:
+            self.send_json(
+                {"error": "Add at least one paddle photo before publishing the listing."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         with closing(connect_db()) as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO listings (
-                  user_id, brand, model, category, condition, price_usd, location, notes, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  user_id, brand, model, color, thickness_mm, category, condition, price_usd, location, notes, image_data_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
                     brand,
                     model,
+                    color,
+                    thickness_mm,
                     category,
                     condition,
                     price_usd,
                     location,
                     notes,
+                    json.dumps(images),
                     utc_now(),
                 ),
             )
@@ -2021,11 +2941,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.user_id,
                   listings.brand,
                   listings.model,
+                  listings.color,
+                  listings.thickness_mm,
                   listings.category,
                   listings.condition,
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,
@@ -2051,6 +2974,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         level = str(body.get("level", "")).strip().lower()
         rate = str(body.get("rate", "")).strip()
         email = normalize_email(str(body.get("email", "")).strip() or user["email"])
+        experience = str(body.get("experience", "")).strip()
+        availability = str(body.get("availability", "")).strip()
+        bio = str(body.get("bio", "")).strip()
 
         if not all([name, location, format_value, level, rate, email]):
             self.send_json(
@@ -2067,12 +2993,17 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Trainer level is not valid."}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        experience = "New trainer profile · Account verified"
-        availability = "Reply through Eleven Zero PB"
-        bio = (
-            f"{name} joined Eleven Zero PB to offer {format_value} coaching for "
-            f"{level} players and start receiving direct intro requests."
-        )
+        if not experience:
+            experience = "New trainer profile · Account verified"
+
+        if not availability:
+            availability = "Reply through Eleven Zero PB"
+
+        if not bio:
+            bio = (
+                f"{name} joined Eleven Zero PB to offer {format_value} coaching for "
+                f"{level} players and start receiving direct intro requests."
+            )
 
         with closing(connect_db()) as connection:
             cursor = connection.execute(
@@ -2103,6 +3034,135 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchone()
 
         self.send_json({"ok": True, "item": row_to_dict(row)}, status=HTTPStatus.CREATED)
+
+    def handle_create_directory_court(self, user: dict, body: dict):
+        name = str(body.get("name", "")).strip()
+        location = str(body.get("location", "")).strip()
+        address = str(body.get("address", "")).strip() or location
+        access_kind = str(body.get("accessKind", "")).strip().lower()
+        surface_kind = str(body.get("surfaceKind", "")).strip().lower()
+        access_note = str(body.get("accessNote", "")).strip()
+        amenities = str(body.get("amenities", "")).strip()
+        description = str(body.get("description", "")).strip()
+        website = str(body.get("website", "")).strip()
+        court_count_raw = str(body.get("courtCount", "")).strip()
+
+        try:
+            lat = float(body.get("lat")) if body.get("lat") not in {None, ""} else None
+            lon = float(body.get("lon")) if body.get("lon") not in {None, ""} else None
+        except (TypeError, ValueError):
+            self.send_json(
+                {"error": "Court coordinates were invalid. Try a more specific city or address."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        try:
+            court_count = int(court_count_raw or "0")
+        except ValueError:
+            court_count = 0
+
+        if not all([name, location, access_kind, surface_kind, description]) or court_count <= 0:
+            self.send_json(
+                {"error": "Please complete every court field before publishing it."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if access_kind not in {"free", "paid"}:
+            self.send_json(
+                {"error": "Court access must be either free or paid."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if surface_kind not in {"indoor", "outdoor"}:
+            self.send_json(
+                {"error": "Court surface must be indoor or outdoor."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if len(description) < 12:
+            self.send_json(
+                {"error": "Add a short court description so players understand the setup."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if website and not urlparse(website).scheme:
+            website = f"https://{website}"
+
+        with closing(connect_db()) as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO courts_directory (
+                  user_id,
+                  name,
+                  location,
+                  address,
+                  access_kind,
+                  surface_kind,
+                  court_count,
+                  access_note,
+                  amenities,
+                  description,
+                  website,
+                  lat,
+                  lon,
+                  created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user["id"],
+                    name,
+                    location,
+                    address,
+                    access_kind,
+                    surface_kind,
+                    court_count,
+                    access_note,
+                    amenities,
+                    description,
+                    website,
+                    lat,
+                    lon,
+                    utc_now(),
+                ),
+            )
+            connection.commit()
+            row = connection.execute(
+                """
+                SELECT
+                  id,
+                  user_id,
+                  name,
+                  location,
+                  address,
+                  access_kind,
+                  surface_kind,
+                  court_count,
+                  access_note,
+                  amenities,
+                  description,
+                  website,
+                  lat,
+                  lon,
+                  created_at
+                FROM courts_directory
+                WHERE id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+
+        self.send_json(
+            {
+                "ok": True,
+                "item": serialize_directory_court_row(row),
+                "message": f"{name} is now live in the courts directory.",
+            },
+            status=HTTPStatus.CREATED,
+        )
 
     def handle_create_review(self, user: dict, body: dict):
         trainer_id = int(body.get("trainerId") or 0)
