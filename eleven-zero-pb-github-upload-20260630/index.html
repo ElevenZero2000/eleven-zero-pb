@@ -8,7 +8,7 @@
       name="description"
       content="Eleven Zero PB is a live pickleball marketplace with sign-in, listings, trainers, and court discovery."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260630b" />
+    <link rel="stylesheet" href="./styles.css?v=20260701c" />
   </head>
   <body data-nav="shop">
     <div class="page-shell">
@@ -143,6 +143,72 @@
             </button>
           </div>
 
+          <form class="listing-search-panel reveal" data-listing-search-form>
+            <label class="listing-search-field listing-search-field-wide">
+              Search listings
+              <input
+                type="search"
+                name="query"
+                placeholder="Brand, model, seller, location, or notes"
+                autocomplete="off"
+              />
+            </label>
+
+            <label class="listing-search-field">
+              Brand
+              <select name="brand">
+                <option value="">All brands</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Color
+              <select name="color">
+                <option value="">All colors</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Thickness
+              <select name="thickness">
+                <option value="">Any thickness</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Condition
+              <select name="condition">
+                <option value="">Any condition</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Max price
+              <input type="number" name="maxPrice" min="0" step="1" placeholder="250" />
+            </label>
+
+            <label class="listing-search-field">
+              Sort by
+              <select name="sort">
+                <option value="relevance">Best match</option>
+                <option value="newest">Newest first</option>
+                <option value="price-asc">Price: low to high</option>
+                <option value="price-desc">Price: high to low</option>
+                <option value="photos">Most photos</option>
+              </select>
+            </label>
+
+            <div class="listing-search-actions">
+              <button class="button button-secondary listing-reset-button" type="button" data-listing-reset>
+                Reset filters
+              </button>
+            </div>
+          </form>
+
+          <p class="listing-search-summary reveal" data-listing-search-summary>
+            Browse the live marketplace and narrow listings by the details that matter most.
+          </p>
+
           <div class="results-meta reveal">
             <div>
               <p class="eyebrow">Current view</p>
@@ -190,6 +256,14 @@
                 <input type="text" name="model" placeholder="Ex: Double Black Diamond" />
               </label>
               <label>
+                Paddle color
+                <input type="text" name="color" placeholder="Ex: Carbon black" />
+              </label>
+              <label>
+                Thickness (mm)
+                <input type="number" name="thickness" min="8" max="25" step="0.1" placeholder="16.0" />
+              </label>
+              <label>
                 Play style
                 <select name="category">
                   <option value="control">Control</option>
@@ -221,6 +295,14 @@
                   placeholder="Describe wear, grip, edge guard, or anything a buyer should know."
                 ></textarea>
               </label>
+              <label class="seller-file-field">
+                Listing photos
+                <input type="file" name="photos" accept="image/*" multiple />
+              </label>
+              <p class="seller-form-help">
+                Add up to 4 photos. We’ll optimize them before publishing so buyers can open the full listing page and see the paddle better.
+              </p>
+              <div class="seller-photo-preview" data-photo-preview></div>
               <button class="button button-dark" type="submit">
                 Publish Listing
               </button>
@@ -257,7 +339,7 @@
       </footer>
     </div>
 
-    <script src="./app.js?v=20260630a"></script>
-    <script src="./marketplace.js?v=20260630a"></script>
+    <script src="./app.js?v=20260701a"></script>
+    <script src="./marketplace.js?v=20260701c"></script>
   </body>
 </html>
