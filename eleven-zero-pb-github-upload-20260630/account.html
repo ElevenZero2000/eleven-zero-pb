@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260630b" />
+    <link rel="stylesheet" href="./styles.css?v=20260701c" />
   </head>
   <body data-nav="account">
     <div class="page-shell">
@@ -45,6 +45,9 @@
               <a class="button button-primary" href="./index.html#sell">Create Listing</a>
               <a class="button button-secondary" href="./trainers.html#join">Join as Trainer</a>
               <a class="button button-secondary" href="#seller-payouts">Set Up Payouts</a>
+              <a class="button button-secondary is-hidden" href="#owner-tools" data-owner-anchor>
+                Owner tools
+              </a>
             </div>
 
             <div class="hero-points">
@@ -132,9 +135,82 @@
               </div>
             </article>
 
+            <article class="dashboard-card dashboard-card-wide owner-help-card">
+              <div class="dashboard-card-head">
+                <div>
+                  <p class="eyebrow">Moderator access</p>
+                  <h3>Owner tools live inside this dashboard</h3>
+                </div>
+
+                <span class="dashboard-pill">Support email</span>
+              </div>
+
+              <p class="dashboard-copy" data-owner-help-copy>
+                If you sign in with <strong data-support-email>11zeropb@gmail.com</strong>, this dashboard unlocks the live moderator panel for listings, courts, trainers, and reviews.
+              </p>
+            </article>
+
             <div class="seller-status dashboard-status" aria-live="polite" data-account-status>
               Sign in to load your dashboard.
             </div>
+
+            <section class="admin-panel is-hidden" id="owner-tools" data-admin-panel>
+              <div class="dashboard-card dashboard-card-wide">
+                <div class="dashboard-card-head">
+                  <div>
+                    <p class="eyebrow">Owner tools</p>
+                    <h3>Moderator controls for live website content</h3>
+                  </div>
+
+                  <span class="dashboard-pill" data-admin-pill>Owner only</span>
+                </div>
+
+                <p class="dashboard-copy" data-admin-summary>
+                  Sign in with the Eleven Zero PB owner email to manage live listings, courts, trainers, and reviews.
+                </p>
+
+                <div class="admin-stats-grid" data-admin-stats></div>
+
+                <div class="seller-status dashboard-status" aria-live="polite" data-admin-status>
+                  Owner tools will appear here after the moderator account is detected.
+                </div>
+              </div>
+
+              <div class="admin-grid">
+                <article class="dashboard-card">
+                  <p class="eyebrow">Marketplace listings</p>
+                  <h3>Edit or remove listings</h3>
+                  <div class="admin-record-list" data-admin-listings></div>
+                </article>
+
+                <article class="dashboard-card">
+                  <p class="eyebrow">Courts directory</p>
+                  <h3>Edit or remove courts</h3>
+                  <div class="admin-record-list" data-admin-courts></div>
+                </article>
+
+                <article class="dashboard-card">
+                  <p class="eyebrow">Trainer profiles</p>
+                  <h3>Edit or remove trainers</h3>
+                  <div class="admin-record-list" data-admin-trainers></div>
+                </article>
+
+                <article class="dashboard-card">
+                  <p class="eyebrow">Community reviews</p>
+                  <h3>Remove trainer or court reports</h3>
+                  <div class="admin-review-columns">
+                    <div>
+                      <strong class="admin-review-title">Trainer reviews</strong>
+                      <div class="admin-record-list" data-admin-trainer-reviews></div>
+                    </div>
+                    <div>
+                      <strong class="admin-review-title">Court reports</strong>
+                      <div class="admin-record-list" data-admin-court-reports></div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
           </div>
         </section>
       </main>
@@ -163,7 +239,7 @@
       </footer>
     </div>
 
-    <script src="./app.js?v=20260629b"></script>
-    <script src="./account.js?v=20260629b"></script>
+    <script src="./app.js?v=20260701a"></script>
+    <script src="./account.js?v=20260701c"></script>
   </body>
 </html>
