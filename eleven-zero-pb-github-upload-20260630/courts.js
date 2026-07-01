@@ -164,6 +164,15 @@ const courtReportStatus = document.querySelector("[data-court-report-status]");
 const courtReportTarget = document.querySelector("[data-court-report-target]");
 const courtDirectoryForm = document.querySelector("[data-court-directory-form]");
 const courtDirectoryStatus = document.querySelector("[data-court-directory-status]");
+const courtKeywordInput = document.querySelector("[data-court-keyword]");
+const courtSortSelect = document.querySelector("[data-court-sort]");
+const courtConditionSelect = document.querySelector("[data-court-condition]");
+const courtBusynessSelect = document.querySelector("[data-court-busyness]");
+const courtPlayerLevelSelect = document.querySelector("[data-court-player-level]");
+const courtResetFiltersButton = document.querySelector("[data-court-reset-filters]");
+const courtToolsSummary = document.querySelector("[data-court-tools-summary]");
+const courtDetailModal = document.querySelector("[data-court-detail-modal]");
+const courtDetailBody = document.querySelector("[data-court-detail-body]");
 
 const searchInput = finderForm?.querySelector('input[name="query"]');
 const radiusSelect = finderForm?.querySelector('select[name="radius"]');
@@ -191,6 +200,7 @@ const state = {
   source: "directory",
   locationLabel: "Official courts directory",
   lastQuery: "",
+  searchGeo: null,
   radiusMiles: Number(radiusSelect?.value || 25),
   isSearching: false,
   visibleCourts: [],
@@ -198,6 +208,12 @@ const state = {
   courtSummaries: {},
   courtReportsByCourt: {},
   isSubmittingCourtReport: false,
+  keywordFilter: "",
+  sortMode: "recommended",
+  conditionFilter: "",
+  busynessFilter: "",
+  playerLevelFilter: "",
+  detailCourtId: "",
 };
 
 const mapState = {
@@ -286,6 +302,184 @@ function setCourtDirectoryStatus(message, tone = "neutral") {
   if (tone === "success") courtDirectoryStatus.classList.add("is-success");
   if (tone === "warning") courtDirectoryStatus.classList.add("is-warning");
   if (tone === "error") courtDirectoryStatus.classList.add("is-error");
+}
+
+function courtSummaryFor(court) {
+  return state.courtSummaries[court?.id] || null;
+}
+
+function roundDistanceMiles(value) {
+  if (!Number.isFinite(value)) return null;
+  return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+}
+
+function formatDistanceMiles(value) {
+  if (!Number.isFinite(value)) return "";
+  if (value < 10) return `${value.toFixed(1)} mi`;
+  return `${Math.round(value)} mi`;
+}
+
+function busynessKeyFromSummary(summary) {
+  if (!summary) return "";
+
+  if (summary.busynessAverage >= 3.5) return "packed";
+  if (summary.busynessAverage >= 2.5) return "busy";
+  if (summary.busynessAverage >= 1.5) return "moderate";
+  return "quiet";
+}
+
+function matchesKeywordFilter(court) {
+  const keyword = state.keywordFilter.trim().toLowerCase();
+  if (!keyword) return true;
+
+  const summary = courtSummaryFor(court);
+  const searchableParts = [
+    court.name,
+    court.location,
+    court.address,
+    court.description,
+    ...(Array.isArray(court.details) ? court.details : []),
+    court.accessLabel,
+    court.surfaceLabel,
+    summary?.conditionLabel,
+    summary?.busynessLabel,
+    summary?.playerLevelLabel,
+    summary?.reportCount ? `${summary.reportCount} reports` : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return searchableParts.includes(keyword);
+}
+
+function matchesConditionFilter(court) {
+  if (!state.conditionFilter) return true;
+  const summary = courtSummaryFor(court);
+  if (!summary) return false;
+
+  if (state.conditionFilter === "great") return summary.conditionAverage >= 4.5;
+  if (state.conditionFilter === "solid") return summary.conditionAverage >= 3.5;
+  if (state.conditionFilter === "playable") return summary.conditionAverage >= 2.5;
+  return true;
+}
+
+function matchesBusynessFilter(court) {
+  if (!state.busynessFilter) return true;
+  const summary = courtSummaryFor(court);
+  if (!summary) return false;
+  return busynessKeyFromSummary(summary) === state.busynessFilter;
+}
+
+function matchesPlayerLevelFilter(court) {
+  if (!state.playerLevelFilter) return true;
+  const summary = courtSummaryFor(court);
+  if (!summary) return false;
+  return summary.playerLevel === state.playerLevelFilter;
+}
+
+function matchesRefineFilters(court) {
+  return (
+    matchesKeywordFilter(court) &&
+    matchesConditionFilter(court) &&
+    matchesBusynessFilter(court) &&
+    matchesPlayerLevelFilter(court)
+  );
+}
+
+function compareText(left, right) {
+  return String(left || "").localeCompare(String(right || ""));
+}
+
+function recommendedCourtScore(court) {
+  const summary = courtSummaryFor(court);
+  const reportCount = summary?.reportCount || 0;
+  const conditionAverage = summary?.conditionAverage || 0;
+  const distanceScore = Number.isFinite(court.distanceMiles)
+    ? Math.max(0, 100 - court.distanceMiles)
+    : 0;
+  const sourceScore = court.source === "directory" ? 18 : 8;
+  const accessScore =
+    court.accessKind === "free" ? 10 : court.accessKind === "paid" ? 8 : 4;
+
+  return reportCount * 12 + conditionAverage * 10 + distanceScore + sourceScore + accessScore;
+}
+
+function sortVisibleCourts(courts) {
+  const accessOrder = { free: 0, paid: 1, check: 2 };
+
+  return [...courts].sort((left, right) => {
+    const leftSummary = courtSummaryFor(left);
+    const rightSummary = courtSummaryFor(right);
+
+    if (state.sortMode === "closest") {
+      const distanceDelta =
+        (left.distanceMiles ?? Number.POSITIVE_INFINITY) -
+        (right.distanceMiles ?? Number.POSITIVE_INFINITY);
+      if (distanceDelta !== 0) return distanceDelta;
+    }
+
+    if (state.sortMode === "rating") {
+      const ratingDelta =
+        (rightSummary?.conditionAverage || 0) - (leftSummary?.conditionAverage || 0);
+      if (ratingDelta !== 0) return ratingDelta;
+
+      const reviewDelta = (rightSummary?.reportCount || 0) - (leftSummary?.reportCount || 0);
+      if (reviewDelta !== 0) return reviewDelta;
+    }
+
+    if (state.sortMode === "reports") {
+      const reviewDelta = (rightSummary?.reportCount || 0) - (leftSummary?.reportCount || 0);
+      if (reviewDelta !== 0) return reviewDelta;
+
+      const ratingDelta =
+        (rightSummary?.conditionAverage || 0) - (leftSummary?.conditionAverage || 0);
+      if (ratingDelta !== 0) return ratingDelta;
+    }
+
+    if (state.sortMode === "recommended") {
+      const scoreDelta = recommendedCourtScore(right) - recommendedCourtScore(left);
+      if (scoreDelta !== 0) return scoreDelta;
+    }
+
+    if (state.sortMode === "name") {
+      return compareText(left.name, right.name);
+    }
+
+    const accessDelta = (accessOrder[left.accessKind] ?? 9) - (accessOrder[right.accessKind] ?? 9);
+    if (accessDelta !== 0) return accessDelta;
+
+    const distanceDelta =
+      (left.distanceMiles ?? Number.POSITIVE_INFINITY) -
+      (right.distanceMiles ?? Number.POSITIVE_INFINITY);
+    if (distanceDelta !== 0) return distanceDelta;
+
+    return compareText(left.name, right.name);
+  });
+}
+
+function updateCourtToolsSummary(visibleCourts, allCourts) {
+  if (!courtToolsSummary) return;
+
+  const ratedCount = visibleCourts.filter((court) => (courtSummaryFor(court)?.reportCount || 0) > 0)
+    .length;
+  const quietCount = visibleCourts.filter(
+    (court) => busynessKeyFromSummary(courtSummaryFor(court)) === "quiet"
+  ).length;
+  const beginnerCount = visibleCourts.filter(
+    (court) => courtSummaryFor(court)?.playerLevel === "beginner"
+  ).length;
+
+  const notes = [
+    `${visibleCourts.length} showing`,
+    `${allCourts.length} in this view`,
+    `${ratedCount} rated`,
+    beginnerCount ? `${beginnerCount} beginner-friendly` : "",
+    quietCount ? `${quietCount} quiet` : "",
+    state.sortMode === "closest" && state.source === "live" ? "sorted by distance" : "",
+  ].filter(Boolean);
+
+  courtToolsSummary.textContent = notes.join(" · ");
 }
 
 function setCourtReportSubmitting(nextValue) {
@@ -508,6 +702,154 @@ function renderCourtCommunity(court) {
   );
 }
 
+function buildCourtInsightsMarkup(court) {
+  const summary = courtSummaryFor(court);
+  const metrics = [];
+
+  if (Number.isFinite(court.distanceMiles)) {
+    metrics.push({ label: "Distance", value: formatDistanceMiles(court.distanceMiles) });
+  }
+
+  if (summary) {
+    metrics.push({ label: "Condition", value: `${summary.conditionAverage} / 5` });
+    metrics.push({ label: "Crowd", value: summary.busynessLabel });
+    metrics.push({ label: "Level", value: summary.playerLevelLabel });
+  } else {
+    metrics.push({ label: "Condition", value: "No ratings yet" });
+    metrics.push({ label: "Crowd", value: "Waiting on reports" });
+    metrics.push({ label: "Level", value: "Waiting on reports" });
+  }
+
+  metrics.push({
+    label: "Source",
+    value: court.source === "directory" ? "Saved directory" : "Live map data",
+  });
+
+  return `
+    <div class="court-insight-grid">
+      ${metrics
+        .map(
+          (item) => `
+            <article class="court-insight-card">
+              <strong>${escapeHtml(item.value)}</strong>
+              <span>${escapeHtml(item.label)}</span>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCourtDetailModal(court) {
+  if (!courtDetailBody || !court) return;
+
+  const summary = courtSummaryFor(court);
+  const reports = state.courtReportsByCourt[court.id] || [];
+  const googleMapsUrl = buildGoogleMapsUrl(court);
+  const detailList = (court.details || [])
+    .filter(Boolean)
+    .map((detail) => `<li>${escapeHtml(detail)}</li>`)
+    .join("");
+
+  const quickReportsMarkup = reports.length
+    ? reports
+        .slice(0, 3)
+        .map(
+          (item) => `
+            <article class="court-detail-note">
+              <div class="court-detail-note-head">
+                <strong>${escapeHtml(item.reviewerName)}</strong>
+                <span>${escapeHtml(formatCourtDate(item.createdAt))}</span>
+              </div>
+              <p>${escapeHtml(item.comment)}</p>
+            </article>
+          `
+        )
+        .join("")
+    : `<article class="court-detail-note court-detail-note-empty"><p>No player notes yet for this court.</p></article>`;
+
+  courtDetailBody.innerHTML = `
+    <div class="court-detail-topline">
+      ${buildTagMarkup(court)}
+      ${summary ? `<span class="court-detail-report-pill">${escapeHtml(String(summary.reportCount))} player report${summary.reportCount === 1 ? "" : "s"}</span>` : ""}
+    </div>
+    <h2 id="court-detail-title">${escapeHtml(court.name)}</h2>
+    <p class="court-detail-location">${escapeHtml(court.location)}</p>
+    ${court.address ? `<p class="court-detail-address">${escapeHtml(court.address)}</p>` : ""}
+    ${buildCourtInsightsMarkup(court)}
+    <div class="court-detail-layout">
+      <div class="court-detail-main">
+        <p class="court-detail-copy">${escapeHtml(court.description)}</p>
+        ${detailList ? `<ul class="court-detail-list">${detailList}</ul>` : ""}
+        ${buildCourtReportQuickMarkup(court)}
+        <div class="court-detail-actions">
+          <button class="button button-secondary" type="button" data-map-focus="${escapeHtml(
+            court.id
+          )}">Show on map</button>
+          <button class="button button-secondary" type="button" data-rate-court="${escapeHtml(
+            court.id
+          )}">Rate this court</button>
+          ${
+            googleMapsUrl
+              ? `<a class="button button-primary" href="${escapeHtml(
+                  googleMapsUrl
+                )}" target="_blank" rel="noreferrer">Open in Google Maps</a>`
+              : ""
+          }
+        </div>
+      </div>
+      <aside class="court-detail-side">
+        ${
+          court.website
+            ? `<a class="text-link" href="${escapeHtml(
+                court.website
+              )}" target="_blank" rel="noreferrer">Visit venue website</a>`
+            : ""
+        }
+        ${
+          court.osmUrl
+            ? `<a class="text-link" href="${escapeHtml(
+                court.osmUrl
+              )}" target="_blank" rel="noreferrer">Open map reference</a>`
+            : ""
+        }
+        ${
+          court.createdAt
+            ? `<p class="court-detail-meta">Added ${escapeHtml(formatCourtDate(court.createdAt))}</p>`
+            : ""
+        }
+        <div class="court-detail-notes">
+          <strong>Recent player notes</strong>
+          ${quickReportsMarkup}
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
+function openCourtDetail(courtId) {
+  const court =
+    state.visibleCourts.find((entry) => entry.id === courtId) ||
+    state.courts.find((entry) => entry.id === courtId);
+
+  if (!court || !courtDetailModal) return;
+
+  state.detailCourtId = court.id;
+  renderCourtDetailModal(court);
+  courtDetailModal.hidden = false;
+  courtDetailModal.classList.add("is-open");
+  document.body.classList.add("has-modal-open");
+}
+
+function closeCourtDetail() {
+  if (!courtDetailModal) return;
+  state.detailCourtId = "";
+  courtDetailModal.hidden = true;
+  courtDetailModal.classList.remove("is-open");
+  document.body.classList.remove("has-modal-open");
+}
+
 function setSearching(nextValue) {
   state.isSearching = nextValue;
 
@@ -638,6 +980,12 @@ function buildLinkMarkup(court) {
   const links = [];
   const googleMapsUrl = buildGoogleMapsUrl(court);
 
+  links.push(
+    `<button class="text-link text-link-button" type="button" data-view-court="${escapeHtml(
+      court.id
+    )}">View details</button>`
+  );
+
   if (Number.isFinite(court.lat) && Number.isFinite(court.lon)) {
     links.push(
       `<button class="text-link text-link-button" type="button" data-map-focus="${escapeHtml(
@@ -694,6 +1042,7 @@ function renderCourtCard(court) {
           ? `<p class="court-address">${escapeHtml(court.address)}</p>`
           : ""
       }
+      ${buildCourtInsightsMarkup(court)}
       <div class="court-details">
         ${buildDetailMarkup(court.details)}
       </div>
@@ -755,6 +1104,19 @@ function distanceMilesBetween(latA, lonA, latB, lonB) {
     Math.cos(startLat) * Math.cos(endLat) * Math.sin(dLon / 2) ** 2;
 
   return 2 * earthRadiusMiles * Math.asin(Math.sqrt(a));
+}
+
+function attachDistanceMiles(court, geo) {
+  if (!geo || !Number.isFinite(court?.lat) || !Number.isFinite(court?.lon)) {
+    return { ...court, distanceMiles: null };
+  }
+
+  return {
+    ...court,
+    distanceMiles: roundDistanceMiles(
+      distanceMilesBetween(court.lat, court.lon, geo.lat, geo.lon)
+    ),
+  };
 }
 
 function latLonToWorld(lat, lon, zoom) {
@@ -835,6 +1197,9 @@ function buildMapSelection(court) {
     <p class="court-map-selection-copy">${escapeHtml(court.description)}</p>
     ${reportMarkup}
     <div class="court-map-popup-links">
+      <button class="text-link text-link-button text-link-popup" type="button" data-view-court="${escapeHtml(
+        court.id
+      )}">View details</button>
       ${websiteMarkup}${googleMapsMarkup}${mapMarkup}
       <button class="text-link text-link-button text-link-popup" type="button" data-rate-court="${escapeHtml(
         court.id
@@ -883,10 +1248,16 @@ async function loadCourtReportDetails(court) {
 
     state.courtReportsByCourt[court.id] = response.items || [];
     renderCourtCommunity(court);
+    if (state.detailCourtId === court.id) {
+      renderCourtDetailModal(court);
+    }
   } catch {
     if (state.activeCourtId !== court.id) return;
     state.courtReportsByCourt[court.id] = [];
     renderCourtCommunity(court);
+    if (state.detailCourtId === court.id) {
+      renderCourtDetailModal(court);
+    }
   }
 }
 
@@ -1415,12 +1786,19 @@ function renderResults({ fitMap = false } = {}) {
   updateFilterUi();
   updateSummary(state.courts);
 
-  const visibleCourts = state.courts.filter((court) =>
-    matchesFilter(court, state.activeFilter)
+  const visibleCourts = sortVisibleCourts(
+    state.courts.filter(
+      (court) => matchesFilter(court, state.activeFilter) && matchesRefineFilters(court)
+    )
   );
   state.visibleCourts = visibleCourts;
 
+  if (state.detailCourtId && !visibleCourts.some((court) => court.id === state.detailCourtId)) {
+    closeCourtDetail();
+  }
+
   updateResultsMeta(visibleCourts, state.courts);
+  updateCourtToolsSummary(visibleCourts, state.courts);
   syncMapWithCourts(visibleCourts, { fitBounds: fitMap });
 
   if (!visibleCourts.length) {
@@ -1695,7 +2073,7 @@ function getDirectoryCourtsWithinRadius(geo, radiusMiles) {
     }
 
     return distanceMilesBetween(court.lat, court.lon, geo.lat, geo.lon) <= radiusMiles;
-  });
+  }).map((court) => attachDistanceMiles(court, geo));
 }
 
 function mergeCourtCollections(primaryCourts, secondaryCourts = []) {
@@ -1814,6 +2192,7 @@ out center tags;
       elements
         .map((element) => normalizeCourtElement(element, geo.label))
         .filter(Boolean)
+        .map((court) => attachDistanceMiles(court, geo))
     )
   );
 
@@ -1835,6 +2214,7 @@ async function runLiveSearch(query, radiusMiles) {
     state.source = "live";
     state.locationLabel = geo.label;
     state.lastQuery = query;
+    state.searchGeo = geo;
     state.radiusMiles = radiusMiles;
 
     await loadCourtSummaries(combinedCourts);
@@ -1857,6 +2237,7 @@ async function runLiveSearch(query, radiusMiles) {
     state.courts = [...state.directoryCourts];
     state.source = "directory";
     state.locationLabel = "Official courts directory";
+    state.searchGeo = null;
     await loadCourtSummaries(state.courts);
 
     renderResults({ fitMap: true });
@@ -1908,6 +2289,63 @@ function initializeQuickSearch() {
   });
 }
 
+function initializeCourtTools() {
+  courtKeywordInput?.addEventListener("input", () => {
+    state.keywordFilter = courtKeywordInput.value.trim();
+    renderResults({ fitMap: false });
+  });
+
+  courtSortSelect?.addEventListener("change", () => {
+    state.sortMode = courtSortSelect.value || "recommended";
+    renderResults({ fitMap: false });
+  });
+
+  courtConditionSelect?.addEventListener("change", () => {
+    state.conditionFilter = courtConditionSelect.value || "";
+    renderResults({ fitMap: false });
+  });
+
+  courtBusynessSelect?.addEventListener("change", () => {
+    state.busynessFilter = courtBusynessSelect.value || "";
+    renderResults({ fitMap: false });
+  });
+
+  courtPlayerLevelSelect?.addEventListener("change", () => {
+    state.playerLevelFilter = courtPlayerLevelSelect.value || "";
+    renderResults({ fitMap: false });
+  });
+
+  courtResetFiltersButton?.addEventListener("click", () => {
+    state.keywordFilter = "";
+    state.sortMode = "recommended";
+    state.conditionFilter = "";
+    state.busynessFilter = "";
+    state.playerLevelFilter = "";
+
+    if (courtKeywordInput) courtKeywordInput.value = "";
+    if (courtSortSelect) courtSortSelect.value = "recommended";
+    if (courtConditionSelect) courtConditionSelect.value = "";
+    if (courtBusynessSelect) courtBusynessSelect.value = "";
+    if (courtPlayerLevelSelect) courtPlayerLevelSelect.value = "";
+
+    renderResults({ fitMap: false });
+  });
+}
+
+function initializeCourtDetailModal() {
+  courtDetailModal?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-court-detail-close]")) {
+      closeCourtDetail();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.detailCourtId) {
+      closeCourtDetail();
+    }
+  });
+}
+
 function initializeReveal() {
   const revealItems = Array.from(document.querySelectorAll(".reveal"));
 
@@ -1931,6 +2369,14 @@ function initializeReveal() {
 }
 
 function handleResultInteraction(event) {
+  const viewButton = event.target.closest("[data-view-court]");
+  if (viewButton) {
+    const courtId = viewButton.dataset.viewCourt || "";
+    setActiveCourt(courtId, { centerMap: false, scrollMap: false });
+    openCourtDetail(courtId);
+    return;
+  }
+
   const focusButton = event.target.closest("[data-map-focus]");
   if (focusButton) {
     focusCourtOnMap(focusButton.dataset.mapFocus || "");
@@ -1944,6 +2390,7 @@ function handleResultInteraction(event) {
       scrollMap: false,
       scrollReport: true,
     });
+    closeCourtDetail();
     return;
   }
 
@@ -2049,6 +2496,8 @@ async function initializeFinder() {
   await ElevenZeroApp.boot;
   hydrateSearchPreference();
   initializeReveal();
+  initializeCourtTools();
+  initializeCourtDetailModal();
   await initializeCourtMap();
   initializeFilters();
   initializeQuickSearch();
@@ -2057,6 +2506,7 @@ async function initializeFinder() {
   finderForm?.addEventListener("submit", handleSearchSubmit);
   resultsGrid?.addEventListener("click", handleResultInteraction);
   mapSelection?.addEventListener("click", handleResultInteraction);
+  courtDetailBody?.addEventListener("click", handleResultInteraction);
   courtReportForm?.addEventListener("submit", handleCourtReportSubmit);
   courtDirectoryForm?.addEventListener("submit", handleCourtDirectorySubmit);
   renderResults({ fitMap: true });
