@@ -20,6 +20,7 @@ const listingState = {
   sortMode: "relevance",
   draftImages: [],
   imageProcessing: false,
+  sellerDraftSavedAt: "",
 };
 
 const listingGrid = document.querySelector("[data-listings-grid]");
@@ -44,6 +45,7 @@ const sortSelect = searchForm?.querySelector('select[name="sort"]');
 const resetSearchButton = document.querySelector("[data-listing-reset]");
 const listingSearchSummary = document.querySelector("[data-listing-search-summary]");
 const listingBrandPills = document.querySelector("[data-listing-brand-pills]");
+const listingActiveFilters = document.querySelector("[data-listing-active-filters]");
 const photoInput = listingForm?.querySelector('input[name="photos"]');
 const photoPreview = document.querySelector("[data-photo-preview]");
 const photoDropzone = document.querySelector("[data-photo-dropzone]");
@@ -53,8 +55,496 @@ const sellerReadinessPill = document.querySelector("[data-seller-readiness-pill]
 const sellerReadinessCopy = document.querySelector("[data-seller-readiness-copy]");
 const sellerReadinessGrid = document.querySelector("[data-seller-readiness-grid]");
 const sellerLivePreview = document.querySelector("[data-seller-live-preview]");
+const sellerNotesCounter = document.querySelector("[data-seller-notes-counter]");
+const sellerDraftStatus = document.querySelector("[data-seller-draft-status]");
+const clearSellerDraftButton = document.querySelector("[data-clear-seller-draft]");
 const shippingModeInput = listingForm?.querySelector('select[name="shippingMode"]');
 const shippingFlatField = listingForm?.querySelector("[data-shipping-flat-field]");
+
+const MARKETPLACE_BROWSE_STORAGE_KEY = "elevenZeroPbMarketplaceBrowseState";
+const SELLER_DRAFT_STORAGE_KEY = "elevenZeroPbSellerDraft";
+const MARKETPLACE_QUERY_KEYS = {
+  filter: "shopStyle",
+  query: "shopQuery",
+  location: "shopLocation",
+  brand: "shopBrand",
+  color: "shopColor",
+  thickness: "shopThickness",
+  condition: "shopCondition",
+  minPrice: "shopMin",
+  maxPrice: "shopMax",
+  photoMode: "shopPhotos",
+  sortMode: "shopSort",
+};
+const MARKETPLACE_FILTERS = new Set(["all", ...Object.keys(listingThemes)]);
+const MARKETPLACE_SORT_MODES = new Set(["relevance", "newest", "price-asc", "price-desc", "photos"]);
+const MARKETPLACE_PHOTO_MODES = new Set(["", "1", "2", "3"]);
+const SELLER_DRAFT_DEFAULTS = {
+  category: "control",
+  condition: "Excellent",
+  shippingMode: "calculated",
+};
+
+function safeParseJson(value) {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function readStorageJson(key) {
+  try {
+    return safeParseJson(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorageItem(key) {
+  try {
+    window.localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeBrowseState(raw = {}) {
+  const nextFilter = String(raw.filter || "all").trim().toLowerCase();
+  const nextPhotoMode = String(raw.photoMode || "").trim();
+  const nextSortMode = String(raw.sortMode || "relevance").trim();
+
+  return {
+    filter: MARKETPLACE_FILTERS.has(nextFilter) ? nextFilter : "all",
+    query: String(raw.query || "").trim(),
+    location: String(raw.location || "").trim(),
+    brand: String(raw.brand || "").trim(),
+    color: String(raw.color || "").trim(),
+    thickness: String(raw.thickness || "").trim(),
+    condition: String(raw.condition || "").trim(),
+    minPrice: String(raw.minPrice || "").trim(),
+    maxPrice: String(raw.maxPrice || "").trim(),
+    photoMode: MARKETPLACE_PHOTO_MODES.has(nextPhotoMode) ? nextPhotoMode : "",
+    sortMode: MARKETPLACE_SORT_MODES.has(nextSortMode) ? nextSortMode : "relevance",
+  };
+}
+
+function getMarketplaceBrowseState() {
+  return normalizeBrowseState({
+    filter: listingState.filter,
+    query: listingState.query,
+    location: listingState.location,
+    brand: listingState.brand,
+    color: listingState.color,
+    thickness: listingState.thickness,
+    condition: listingState.condition,
+    minPrice: listingState.minPrice,
+    maxPrice: listingState.maxPrice,
+    photoMode: listingState.photoMode,
+    sortMode: listingState.sortMode,
+  });
+}
+
+function marketplaceBrowseStateHasValues(state = getMarketplaceBrowseState()) {
+  return Boolean(
+    state.filter !== "all" ||
+      state.query ||
+      state.location ||
+      state.brand ||
+      state.color ||
+      state.thickness ||
+      state.condition ||
+      state.minPrice ||
+      state.maxPrice ||
+      state.photoMode ||
+      state.sortMode !== "relevance"
+  );
+}
+
+function syncSearchInputsFromState() {
+  if (searchInput) searchInput.value = listingState.query;
+  if (locationInput) locationInput.value = listingState.location;
+  if (brandSelect) brandSelect.value = listingState.brand;
+  if (colorSelect) colorSelect.value = listingState.color;
+  if (thicknessSelect) thicknessSelect.value = listingState.thickness;
+  if (conditionSelect) conditionSelect.value = listingState.condition;
+  if (minPriceInput) minPriceInput.value = listingState.minPrice;
+  if (maxPriceInput) maxPriceInput.value = listingState.maxPrice;
+  if (photoSelect) photoSelect.value = listingState.photoMode;
+  if (sortSelect) sortSelect.value = listingState.sortMode;
+}
+
+function applyMarketplaceBrowseState(rawState = {}) {
+  const nextState = normalizeBrowseState(rawState);
+  Object.assign(listingState, nextState);
+  syncSearchInputsFromState();
+}
+
+function readMarketplaceBrowseStateFromUrl() {
+  const url = new URL(window.location.href);
+  const nextState = {};
+  let hasValue = false;
+
+  Object.entries(MARKETPLACE_QUERY_KEYS).forEach(([stateKey, queryKey]) => {
+    if (!url.searchParams.has(queryKey)) return;
+    nextState[stateKey] = url.searchParams.get(queryKey) || "";
+    hasValue = true;
+  });
+
+  return hasValue ? normalizeBrowseState(nextState) : null;
+}
+
+function writeMarketplaceBrowseStateToUrl(state = getMarketplaceBrowseState()) {
+  const url = new URL(window.location.href);
+
+  Object.values(MARKETPLACE_QUERY_KEYS).forEach((queryKey) => {
+    url.searchParams.delete(queryKey);
+  });
+
+  if (state.filter !== "all") {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.filter, state.filter);
+  }
+  if (state.query) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.query, state.query);
+  }
+  if (state.location) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.location, state.location);
+  }
+  if (state.brand) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.brand, state.brand);
+  }
+  if (state.color) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.color, state.color);
+  }
+  if (state.thickness) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.thickness, state.thickness);
+  }
+  if (state.condition) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.condition, state.condition);
+  }
+  if (state.minPrice) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.minPrice, state.minPrice);
+  }
+  if (state.maxPrice) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.maxPrice, state.maxPrice);
+  }
+  if (state.photoMode) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.photoMode, state.photoMode);
+  }
+  if (state.sortMode !== "relevance") {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.sortMode, state.sortMode);
+  }
+
+  const query = url.searchParams.toString();
+  const nextUrl = `${url.pathname}${query ? `?${query}` : ""}${url.hash}`;
+  window.history.replaceState({}, document.title, nextUrl);
+}
+
+function persistMarketplaceBrowseState() {
+  const state = getMarketplaceBrowseState();
+
+  if (marketplaceBrowseStateHasValues(state)) {
+    writeStorageJson(MARKETPLACE_BROWSE_STORAGE_KEY, state);
+  } else {
+    removeStorageItem(MARKETPLACE_BROWSE_STORAGE_KEY);
+  }
+
+  writeMarketplaceBrowseStateToUrl(state);
+}
+
+function restoreMarketplaceBrowseState() {
+  const urlState = readMarketplaceBrowseStateFromUrl();
+  const storedState = readStorageJson(MARKETPLACE_BROWSE_STORAGE_KEY);
+  const nextState = urlState || storedState;
+
+  if (!nextState) {
+    syncSearchInputsFromState();
+    return;
+  }
+
+  applyMarketplaceBrowseState(nextState);
+}
+
+function getActiveMarketplaceFilters() {
+  const photoLabels = {
+    "1": "Has photos",
+    "2": "2+ photos",
+    "3": "3+ photos",
+  };
+
+  const activeFilters = [
+    listingState.filter !== "all"
+      ? {
+          key: "filter",
+          label: "Style",
+          value: listingThemes[listingState.filter]?.label || listingState.filter,
+        }
+      : null,
+    listingState.brand ? { key: "brand", label: "Brand", value: listingState.brand } : null,
+    listingState.color ? { key: "color", label: "Color", value: listingState.color } : null,
+    listingState.thickness
+      ? { key: "thickness", label: "Thickness", value: `${listingState.thickness} mm` }
+      : null,
+    listingState.condition
+      ? { key: "condition", label: "Condition", value: listingState.condition }
+      : null,
+    listingState.location
+      ? { key: "location", label: "Location", value: listingState.location }
+      : null,
+    listingState.minPrice ? { key: "minPrice", label: "Min", value: `$${listingState.minPrice}` } : null,
+    listingState.maxPrice ? { key: "maxPrice", label: "Max", value: `$${listingState.maxPrice}` } : null,
+    listingState.photoMode
+      ? { key: "photoMode", label: "Photos", value: photoLabels[listingState.photoMode] || listingState.photoMode }
+      : null,
+    listingState.query ? { key: "query", label: "Search", value: listingState.query } : null,
+    listingState.sortMode !== "relevance"
+      ? { key: "sortMode", label: "Sort", value: describeSortMode(listingState.sortMode) }
+      : null,
+  ].filter(Boolean);
+
+  return activeFilters;
+}
+
+function clearMarketplaceFilter(filterKey) {
+  const resetValues = {
+    filter: "all",
+    brand: "",
+    color: "",
+    thickness: "",
+    condition: "",
+    location: "",
+    minPrice: "",
+    maxPrice: "",
+    photoMode: "",
+    query: "",
+    sortMode: "relevance",
+  };
+
+  if (!(filterKey in resetValues)) return;
+
+  listingState[filterKey] = resetValues[filterKey];
+  syncSearchInputsFromState();
+  persistMarketplaceBrowseState();
+  renderListings();
+}
+
+function renderActiveFilters() {
+  if (!listingActiveFilters) return;
+
+  const activeFilters = getActiveMarketplaceFilters();
+  listingActiveFilters.classList.toggle("is-empty", activeFilters.length === 0);
+
+  if (!activeFilters.length) {
+    listingActiveFilters.innerHTML = "";
+    return;
+  }
+
+  listingActiveFilters.innerHTML = `
+    <span class="listing-active-filters-label">Active filters</span>
+    ${activeFilters
+      .map(
+        (filter) => `
+          <button
+            class="listing-active-filter-chip"
+            type="button"
+            data-remove-filter="${ElevenZeroApp.escapeHtml(filter.key)}"
+            aria-label="${ElevenZeroApp.escapeHtml(`Remove ${filter.label} filter`)}"
+          >
+            <span>${ElevenZeroApp.escapeHtml(`${filter.label}: ${filter.value}`)}</span>
+            <strong>×</strong>
+          </button>
+        `
+      )
+      .join("")}
+    <button class="listing-active-filter-clear" type="button" data-clear-all-filters>
+      Clear all
+    </button>
+  `;
+
+  listingActiveFilters.querySelectorAll("[data-remove-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clearMarketplaceFilter(button.dataset.removeFilter || "");
+    });
+  });
+
+  listingActiveFilters.querySelector("[data-clear-all-filters]")?.addEventListener("click", () => {
+    resetSearchState();
+  });
+}
+
+function getSellerDraftFieldSnapshot() {
+  if (!listingForm) return {};
+
+  const snapshot = {};
+  const formData = new FormData(listingForm);
+
+  for (const [key, value] of formData.entries()) {
+    if (key === "photos") continue;
+    snapshot[key] = String(value || "").trim();
+  }
+
+  return snapshot;
+}
+
+function sellerDraftHasContent(fields = getSellerDraftFieldSnapshot()) {
+  return Object.entries(fields).some(([key, value]) => {
+    const normalizedValue = String(value || "").trim();
+
+    if (key === "category") {
+      return normalizedValue && normalizedValue !== SELLER_DRAFT_DEFAULTS.category;
+    }
+
+    if (key === "condition") {
+      return normalizedValue && normalizedValue !== SELLER_DRAFT_DEFAULTS.condition;
+    }
+
+    if (key === "shippingMode") {
+      return normalizedValue && normalizedValue !== SELLER_DRAFT_DEFAULTS.shippingMode;
+    }
+
+    return Boolean(normalizedValue);
+  });
+}
+
+function formatSavedTimeLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "recently";
+
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function updateSellerNotesCounter() {
+  if (!sellerNotesCounter || !listingForm) return;
+
+  const notes = listingForm.querySelector('textarea[name="notes"]')?.value?.trim() || "";
+  const count = notes.length;
+
+  if (!count) {
+    sellerNotesCounter.textContent =
+      "0 characters · buyers respond best to clear wear, grip, and edge-guard details.";
+    return;
+  }
+
+  if (count < 60) {
+    sellerNotesCounter.textContent = `${count} characters · add a little more detail so buyers trust the condition faster.`;
+    return;
+  }
+
+  if (count <= 320) {
+    sellerNotesCounter.textContent = `${count} characters · great length for a clear, buyer-friendly listing.`;
+    return;
+  }
+
+  sellerNotesCounter.textContent = `${count} characters · strong detail. Keep it skimmable so buyers can scan it quickly.`;
+}
+
+function renderSellerDraftStatus(overrideMessage = "") {
+  if (!sellerDraftStatus) return;
+
+  const formHasContent = sellerDraftHasContent();
+  const hasPhotos = listingState.draftImages.length > 0;
+  const hasAnythingToClear = formHasContent || hasPhotos;
+
+  if (clearSellerDraftButton) {
+    clearSellerDraftButton.disabled = !hasAnythingToClear;
+  }
+
+  if (overrideMessage) {
+    sellerDraftStatus.textContent = overrideMessage;
+    return;
+  }
+
+  if (listingState.sellerDraftSavedAt && formHasContent) {
+    sellerDraftStatus.textContent = `Draft saved on this device · updated ${formatSavedTimeLabel(
+      listingState.sellerDraftSavedAt
+    )}. ${hasPhotos ? "Photos stay in this tab until you publish." : "Add photos whenever you’re ready."}`;
+    return;
+  }
+
+  if (hasPhotos) {
+    sellerDraftStatus.textContent =
+      "Photos are ready in this tab. Listing details save automatically on this device while you work.";
+    return;
+  }
+
+  sellerDraftStatus.textContent = "Listing details can be saved on this device while you work.";
+}
+
+function saveSellerDraft() {
+  const fields = getSellerDraftFieldSnapshot();
+
+  if (!sellerDraftHasContent(fields)) {
+    listingState.sellerDraftSavedAt = "";
+    removeStorageItem(SELLER_DRAFT_STORAGE_KEY);
+    renderSellerDraftStatus();
+    return;
+  }
+
+  const payload = {
+    fields,
+    savedAt: new Date().toISOString(),
+  };
+
+  const saved = writeStorageJson(SELLER_DRAFT_STORAGE_KEY, payload);
+  listingState.sellerDraftSavedAt = saved ? payload.savedAt : "";
+  renderSellerDraftStatus();
+}
+
+function restoreSellerDraft() {
+  if (!listingForm) return;
+
+  const draft = readStorageJson(SELLER_DRAFT_STORAGE_KEY);
+  if (!draft?.fields || typeof draft.fields !== "object") {
+    renderSellerDraftStatus();
+    return;
+  }
+
+  Object.entries(draft.fields).forEach(([name, value]) => {
+    const field = listingForm.elements?.namedItem?.(name);
+    if (!field || !("value" in field)) return;
+    field.value = String(value || "");
+  });
+
+  listingState.sellerDraftSavedAt = String(draft.savedAt || "");
+  syncShippingFormState();
+  updateSellerNotesCounter();
+  renderSellerDraftStatus();
+}
+
+function clearSellerDraft() {
+  if (listingForm) {
+    listingForm.reset();
+  }
+
+  if (photoInput) {
+    photoInput.value = "";
+  }
+
+  listingState.draftImages = [];
+  listingState.sellerDraftSavedAt = "";
+  removeStorageItem(SELLER_DRAFT_STORAGE_KEY);
+  syncShippingFormState();
+  updateSellerNotesCounter();
+  renderPhotoPreview();
+  renderSellerReadiness();
+  renderSellerLivePreview();
+  renderSellerDraftStatus("Saved draft cleared from this device. Start a fresh listing anytime.");
+}
 
 function clearCheckoutParams() {
   const url = new URL(window.location.href);
@@ -316,7 +806,7 @@ function renderSellerLivePreview() {
             <p class="product-brand">${ElevenZeroApp.escapeHtml(brand)}</p>
             <h3>${ElevenZeroApp.escapeHtml(model)}</h3>
           </div>
-          <span class="price">${ElevenZeroApp.escapeHtml(price || "Add price")}</span>
+          <span class="price">${ElevenZeroApp.escapeHtml(formatMoneyLabel(price) || "Add price")}</span>
         </div>
         <div class="seller-preview-specs">${specs}</div>
         <p class="seller-preview-copy">${ElevenZeroApp.escapeHtml(
@@ -599,8 +1089,10 @@ function renderListingCard(item) {
       <div class="card-body">
         <div class="card-headline">
           <div>
-            <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
-            <h3>${ElevenZeroApp.escapeHtml(item.model)}</h3>
+            <a class="listing-title-link" href="${detailHref}">
+              <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
+              <h3>${ElevenZeroApp.escapeHtml(item.model)}</h3>
+            </a>
           </div>
           <span class="price">${ElevenZeroApp.formatMoney(item.price_usd)}</span>
         </div>
@@ -790,6 +1282,10 @@ function refreshSearchOptions() {
   if (sortSelect) sortSelect.value = listingState.sortMode;
   if (maxPriceInput) maxPriceInput.value = listingState.maxPrice;
   if (photoSelect) photoSelect.value = listingState.photoMode;
+  if (brandSelect) listingState.brand = brandSelect.value || "";
+  if (colorSelect) listingState.color = colorSelect.value || "";
+  if (thicknessSelect) listingState.thickness = thicknessSelect.value || "";
+  if (conditionSelect) listingState.condition = conditionSelect.value || "";
 }
 
 function renderBrandPills() {
@@ -838,6 +1334,7 @@ function renderBrandPills() {
       const nextBrand = button.dataset.quickBrand || "";
       listingState.brand = listingState.brand === nextBrand ? "" : nextBrand;
       if (brandSelect) brandSelect.value = listingState.brand;
+      persistMarketplaceBrowseState();
       renderListings();
     });
   });
@@ -963,6 +1460,7 @@ function renderPhotoPreview() {
       </div>
     `;
     updatePhotoMeta();
+    renderSellerDraftStatus();
     renderSellerReadiness();
     renderSellerLivePreview();
     return;
@@ -975,6 +1473,7 @@ function renderPhotoPreview() {
       </div>
     `;
     updatePhotoMeta();
+    renderSellerDraftStatus();
     renderSellerReadiness();
     renderSellerLivePreview();
     return;
@@ -1010,6 +1509,7 @@ function renderPhotoPreview() {
     .join("");
 
   updatePhotoMeta();
+  renderSellerDraftStatus();
   renderSellerReadiness();
   renderSellerLivePreview();
 }
@@ -1055,6 +1555,7 @@ function renderListings() {
 
   renderSearchSummary(visible);
   renderBrandPills();
+  renderActiveFilters();
   renderSellerReadiness();
   renderSellerLivePreview();
 
@@ -1109,6 +1610,7 @@ async function loadListings() {
   const response = await ElevenZeroApp.request("/api/listings");
   listingState.items = response.items || [];
   refreshSearchOptions();
+  persistMarketplaceBrowseState();
   renderListings();
 }
 
@@ -1287,6 +1789,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
   } finally {
     listingState.imageProcessing = false;
     if (photoInput) photoInput.value = "";
+    renderPhotoPreview();
   }
 }
 
@@ -1328,7 +1831,12 @@ async function handleListingSubmit(event) {
 
     listingForm.reset();
     listingState.draftImages = [];
+    listingState.sellerDraftSavedAt = "";
+    removeStorageItem(SELLER_DRAFT_STORAGE_KEY);
+    syncShippingFormState();
+    updateSellerNotesCounter();
     renderPhotoPreview();
+    renderSellerDraftStatus();
 
     const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
     ElevenZeroApp.setStatus(
@@ -1357,9 +1865,8 @@ function syncSearchState() {
   listingState.maxPrice = maxPriceInput?.value?.trim() || "";
   listingState.photoMode = photoSelect?.value || "";
   listingState.sortMode = sortSelect?.value || "relevance";
+  persistMarketplaceBrowseState();
   renderListings();
-  renderSellerReadiness();
-  renderSellerLivePreview();
 }
 
 function resetSearchState() {
@@ -1386,9 +1893,8 @@ function resetSearchState() {
   if (photoSelect) photoSelect.value = "";
   if (sortSelect) sortSelect.value = "relevance";
 
+  persistMarketplaceBrowseState();
   renderListings();
-  renderSellerReadiness();
-  renderSellerLivePreview();
 }
 
 function removeDraftPhoto(index) {
@@ -1423,7 +1929,10 @@ function moveDraftPhotoToCover(index) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
+  restoreMarketplaceBrowseState();
+  restoreSellerDraft();
   syncShippingFormState();
+  updateSellerNotesCounter();
   renderPhotoPreview();
   renderSellerReadiness();
   renderSellerLivePreview();
@@ -1433,6 +1942,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   filterButtons.forEach((button) => {
     button.addEventListener("click", () => {
       listingState.filter = button.dataset.filter || "all";
+      persistMarketplaceBrowseState();
       renderListings();
     });
   });
@@ -1452,14 +1962,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   photoInput?.addEventListener("change", handlePhotoSelection);
   listingForm?.addEventListener("submit", handleListingSubmit);
   listingForm?.addEventListener("input", () => {
+    updateSellerNotesCounter();
+    saveSellerDraft();
     renderSellerReadiness();
     renderSellerLivePreview();
   });
   listingForm?.addEventListener("change", () => {
     syncShippingFormState();
+    updateSellerNotesCounter();
+    saveSellerDraft();
     renderSellerReadiness();
     renderSellerLivePreview();
   });
+  clearSellerDraftButton?.addEventListener("click", clearSellerDraft);
   photoDropzone?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
