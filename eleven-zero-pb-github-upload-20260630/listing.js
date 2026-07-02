@@ -3,14 +3,33 @@ const contentNode = document.querySelector("[data-listing-content]");
 const storyNode = document.querySelector("[data-listing-story]");
 const relatedNode = document.querySelector("[data-related-shell]");
 
+function createDefaultShippingState() {
+  return {
+    line1: "",
+    line2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "US",
+    quote: null,
+    busy: false,
+    statusMessage: "Add your delivery address below so we can estimate shipping before checkout.",
+    statusTone: "neutral",
+  };
+}
+
 const listingDetailState = {
   item: null,
   relatedItems: [],
   selectedImageIndex: 0,
+  lightboxOpen: false,
   busy: false,
   statusMessage: "We’ll show checkout messages and seller setup updates here.",
   statusTone: "neutral",
+  shipping: createDefaultShippingState(),
 };
+
+let listingLightboxElements = null;
 
 function formatThickness(value) {
   const numeric = Number(value);
@@ -46,6 +65,171 @@ function listingPhotoLabel(item) {
   if (!total) return "No photos";
   if (total === 1) return "1 photo";
   return `${total} photos`;
+}
+
+function getListingImages(item = listingDetailState.item) {
+  return item?.images?.length ? item.images : [];
+}
+
+function normalizeSelectedImageIndex(images, requestedIndex = listingDetailState.selectedImageIndex) {
+  const total = images.length;
+  if (!total) return 0;
+
+  const numericIndex = Number(requestedIndex || 0);
+  const normalizedIndex = Number.isFinite(numericIndex) ? numericIndex : 0;
+  return ((normalizedIndex % total) + total) % total;
+}
+
+function ensureLightbox() {
+  if (listingLightboxElements) return listingLightboxElements;
+
+  const modal = document.createElement("div");
+  modal.className = "listing-lightbox";
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="listing-lightbox-backdrop" data-lightbox-backdrop></div>
+    <div class="listing-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Listing photo viewer">
+      <button class="listing-lightbox-close" type="button" data-lightbox-close aria-label="Close photo viewer">
+        ×
+      </button>
+      <div class="listing-lightbox-stage">
+        <button
+          class="listing-lightbox-nav listing-lightbox-nav-prev"
+          type="button"
+          data-lightbox-prev
+          aria-label="Previous photo"
+        >
+          ‹
+        </button>
+        <figure class="listing-lightbox-figure">
+          <img class="listing-lightbox-image" src="" alt="" />
+          <figcaption class="listing-lightbox-meta">
+            <strong data-lightbox-counter></strong>
+            <span data-lightbox-caption></span>
+          </figcaption>
+        </figure>
+        <button
+          class="listing-lightbox-nav listing-lightbox-nav-next"
+          type="button"
+          data-lightbox-next
+          aria-label="Next photo"
+        >
+          ›
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.append(modal);
+
+  const elements = {
+    modal,
+    image: modal.querySelector(".listing-lightbox-image"),
+    counter: modal.querySelector("[data-lightbox-counter]"),
+    caption: modal.querySelector("[data-lightbox-caption]"),
+    prev: modal.querySelector("[data-lightbox-prev]"),
+    next: modal.querySelector("[data-lightbox-next]"),
+  };
+
+  modal.querySelector("[data-lightbox-backdrop]")?.addEventListener("click", () => closeLightbox());
+  modal.querySelector("[data-lightbox-close]")?.addEventListener("click", () => closeLightbox());
+  elements.prev?.addEventListener("click", () => stepSelectedImage(-1, { keepLightboxOpen: true }));
+  elements.next?.addEventListener("click", () => stepSelectedImage(1, { keepLightboxOpen: true }));
+
+  listingLightboxElements = elements;
+  return listingLightboxElements;
+}
+
+function renderLightbox(item = listingDetailState.item) {
+  const elements = ensureLightbox();
+  const images = getListingImages(item);
+
+  if (!listingDetailState.lightboxOpen || !images.length || !item) {
+    elements.modal.hidden = true;
+    document.body.classList.remove("has-modal-open");
+    return;
+  }
+
+  listingDetailState.selectedImageIndex = normalizeSelectedImageIndex(images);
+  const selectedImage = images[listingDetailState.selectedImageIndex];
+  const title = `${item.brand} ${item.model}`;
+
+  elements.image.src = selectedImage;
+  elements.image.alt = title;
+  elements.counter.textContent = `Photo ${listingDetailState.selectedImageIndex + 1} of ${images.length}`;
+  elements.caption.textContent = title;
+  elements.prev.hidden = images.length <= 1;
+  elements.next.hidden = images.length <= 1;
+  elements.modal.hidden = false;
+  document.body.classList.add("has-modal-open");
+}
+
+function openLightbox() {
+  const images = getListingImages();
+  if (!images.length) return;
+  listingDetailState.lightboxOpen = true;
+  renderLightbox(listingDetailState.item);
+}
+
+function closeLightbox() {
+  listingDetailState.lightboxOpen = false;
+  renderLightbox(listingDetailState.item);
+}
+
+function setSelectedImage(index, options = {}) {
+  const item = listingDetailState.item;
+  const images = getListingImages(item);
+  if (!images.length || !item) return;
+
+  listingDetailState.selectedImageIndex = normalizeSelectedImageIndex(images, index);
+  if (options.openLightbox) {
+    listingDetailState.lightboxOpen = true;
+  }
+  renderGallery(item);
+  renderLightbox(item);
+}
+
+function stepSelectedImage(delta, options = {}) {
+  const item = listingDetailState.item;
+  const images = getListingImages(item);
+  if (!images.length || !item) return;
+
+  const nextIndex = normalizeSelectedImageIndex(
+    images,
+    listingDetailState.selectedImageIndex + Number(delta || 0)
+  );
+
+  listingDetailState.selectedImageIndex = nextIndex;
+  if (options.keepLightboxOpen) {
+    listingDetailState.lightboxOpen = true;
+  }
+  renderGallery(item);
+  renderLightbox(item);
+}
+
+function handleListingKeyboard(event) {
+  if (!listingDetailState.lightboxOpen) return;
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeLightbox();
+    return;
+  }
+
+  if (event.key === "ArrowRight") {
+    event.preventDefault();
+    stepSelectedImage(1, { keepLightboxOpen: true });
+    return;
+  }
+
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    stepSelectedImage(-1, { keepLightboxOpen: true });
+  }
+}
+
+function currentListingUrl() {
+  return window.location.href;
 }
 
 function getListingIdFromUrl() {
@@ -118,6 +302,73 @@ function setDetailStatus(message, tone = "neutral") {
   ElevenZeroApp.setStatus(statusNode, message, tone);
 }
 
+function setShippingStatus(message, tone = "neutral") {
+  listingDetailState.shipping.statusMessage = message;
+  listingDetailState.shipping.statusTone = tone;
+  const statusNode = storyNode?.querySelector("[data-shipping-status]");
+  if (!statusNode) return;
+  ElevenZeroApp.setStatus(statusNode, message, tone);
+}
+
+function formatMoneyFromCents(cents) {
+  return ElevenZeroApp.formatMoney(Number(cents || 0) / 100);
+}
+
+function getShippingPolicy(item) {
+  const shipping = item?.shipping || {};
+  const mode = shipping.mode || "calculated";
+  const label =
+    shipping.label ||
+    (mode === "free"
+      ? "Free shipping"
+      : mode === "flat"
+        ? "Flat shipping"
+        : "Calculated shipping at checkout");
+
+  return {
+    mode,
+    label,
+    note: shipping.note || "",
+    originZip: shipping.originZip || "",
+    weightOz: shipping.weightOz || null,
+    lengthIn: shipping.lengthIn || null,
+    widthIn: shipping.widthIn || null,
+    heightIn: shipping.heightIn || null,
+    explanation:
+      shipping.explanation ||
+      (mode === "free"
+        ? "Seller is covering shipping on this listing."
+        : mode === "flat"
+          ? "Seller set one shipping amount for every U.S. destination."
+          : "Enter your delivery address below and we’ll estimate the delivered total before checkout."),
+  };
+}
+
+function getShippingAddressPayload() {
+  const shipping = listingDetailState.shipping || createDefaultShippingState();
+  return {
+    line1: shipping.line1,
+    line2: shipping.line2,
+    city: shipping.city,
+    state: shipping.state,
+    postalCode: shipping.postalCode,
+    country: shipping.country || "US",
+  };
+}
+
+function shippingQuoteReady() {
+  return Boolean(listingDetailState.shipping?.quote);
+}
+
+function getEstimatedTotalCents(item) {
+  const baseCents = Math.max(0, Number(item?.price_usd || 0)) * 100;
+  return baseCents + Number(listingDetailState.shipping?.quote?.amountCents || 0);
+}
+
+function scrollToShippingPanel() {
+  document.getElementById("shipping")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function buildRelatedListings(item, allItems) {
   return [...(allItems || [])]
     .filter((candidate) => Number(candidate.id) !== Number(item.id))
@@ -142,7 +393,8 @@ function buildRelatedListings(item, allItems) {
 function renderGallery(item) {
   if (!galleryNode) return;
 
-  const images = item.images?.length ? item.images : [];
+  const images = getListingImages(item);
+  listingDetailState.selectedImageIndex = normalizeSelectedImageIndex(images);
   const selectedImage = images[listingDetailState.selectedImageIndex] || images[0] || "";
 
   if (!selectedImage) {
@@ -169,21 +421,55 @@ function renderGallery(item) {
     .join("");
 
   galleryNode.innerHTML = `
+    <div class="listing-gallery-toolbar">
+      <span class="listing-gallery-count">
+        ${ElevenZeroApp.escapeHtml(`Photo ${listingDetailState.selectedImageIndex + 1} of ${images.length}`)}
+      </span>
+      <button class="text-link-button listing-gallery-open" type="button" data-open-lightbox>
+        Open full photo
+      </button>
+    </div>
     <div class="listing-main-photo">
-      <img
-        src="${ElevenZeroApp.escapeHtml(selectedImage)}"
-        alt="${ElevenZeroApp.escapeHtml(`${item.brand} ${item.model}`)}"
-      />
+      <button class="listing-main-photo-button" type="button" data-open-lightbox>
+        <img
+          src="${ElevenZeroApp.escapeHtml(selectedImage)}"
+          alt="${ElevenZeroApp.escapeHtml(`${item.brand} ${item.model}`)}"
+        />
+        <span class="listing-main-photo-hint">Tap to enlarge</span>
+      </button>
+      ${
+        images.length > 1
+          ? `
+            <button class="listing-gallery-nav listing-gallery-nav-prev" type="button" data-gallery-prev aria-label="Previous photo">
+              ‹
+            </button>
+            <button class="listing-gallery-nav listing-gallery-nav-next" type="button" data-gallery-next aria-label="Next photo">
+              ›
+            </button>
+          `
+          : ""
+      }
     </div>
     <div class="listing-thumb-row">
       ${thumbnails}
     </div>
   `;
 
+  galleryNode.querySelectorAll("[data-open-lightbox]").forEach((button) => {
+    button.addEventListener("click", () => openLightbox());
+  });
+
+  galleryNode.querySelector("[data-gallery-prev]")?.addEventListener("click", () => {
+    stepSelectedImage(-1);
+  });
+
+  galleryNode.querySelector("[data-gallery-next]")?.addEventListener("click", () => {
+    stepSelectedImage(1);
+  });
+
   galleryNode.querySelectorAll("[data-thumb-index]").forEach((button) => {
     button.addEventListener("click", () => {
-      listingDetailState.selectedImageIndex = Number(button.dataset.thumbIndex || 0);
-      renderGallery(item);
+      setSelectedImage(Number(button.dataset.thumbIndex || 0));
     });
   });
 }
@@ -191,7 +477,39 @@ function renderGallery(item) {
 function renderContent(item) {
   if (!contentNode) return;
 
-  const actionState = getListingActionState(item);
+  const baseActionState = getListingActionState(item);
+  const shippingPolicy = getShippingPolicy(item);
+  const shippingQuote = listingDetailState.shipping.quote;
+  const shippingEstimatedTotal = shippingQuote ? getEstimatedTotalCents(item) : 0;
+  const actionState = { ...baseActionState };
+
+  if (baseActionState.action === "checkout" && !shippingQuote) {
+    actionState.action = "shipping";
+    actionState.buttonLabel =
+      shippingPolicy.mode === "calculated" ? "Estimate shipping first" : "Confirm shipping first";
+    actionState.statusLabel = "Address needed";
+    actionState.reason =
+      shippingPolicy.mode === "calculated"
+        ? "Add your delivery address below so we can calculate shipping before secure checkout opens."
+        : `${shippingPolicy.label}. Add your delivery address below so we can confirm the delivered total before checkout opens.`;
+    actionState.tone = "pending";
+  } else if (baseActionState.action === "checkout" && shippingQuote) {
+    actionState.buttonLabel = "Continue to Stripe";
+    actionState.statusLabel = shippingQuote.isEstimate ? "Estimated total ready" : "Delivered total ready";
+    actionState.reason = `${formatMoneyFromCents(shippingQuote.amountCents)} ${
+      shippingQuote.isEstimate ? "estimated shipping" : "shipping"
+    } to ${shippingQuote.destinationSummary}. ${
+      shippingQuote.isEstimate ? "Estimated" : "Delivered"
+    } total ${formatMoneyFromCents(shippingEstimatedTotal)}.`;
+    actionState.tone = "ready";
+  } else if (baseActionState.action === "auth" && shippingQuote) {
+    actionState.reason = `${formatMoneyFromCents(
+      shippingQuote.amountCents
+    )} ${shippingQuote.isEstimate ? "estimated shipping" : "shipping"} to ${
+      shippingQuote.destinationSummary
+    }. Sign in to continue to Stripe checkout.`;
+  }
+
   const sellerName = item.seller_name || "Community seller";
   const thickness = formatThickness(item.thickness_mm);
   const specPills = [
@@ -204,6 +522,13 @@ function renderContent(item) {
     .join("");
 
   const busyLabel = listingDetailState.busy ? "Opening checkout..." : actionState.buttonLabel;
+  const totalNote = shippingQuote
+    ? `${shippingQuote.isEstimate ? "Estimated" : "Delivered"} total ${formatMoneyFromCents(
+        shippingEstimatedTotal
+      )}`
+    : shippingPolicy.mode === "calculated"
+      ? "Enter your delivery address below to estimate shipping."
+      : "Enter your delivery address below to confirm the delivered total.";
 
   contentNode.innerHTML = `
     <p class="eyebrow">Marketplace listing</p>
@@ -212,7 +537,12 @@ function renderContent(item) {
         <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
         <h1>${ElevenZeroApp.escapeHtml(item.model)}</h1>
       </div>
-      <span class="listing-detail-price">${ElevenZeroApp.formatMoney(item.price_usd)}</span>
+      <div class="listing-detail-price-block">
+        <span class="listing-detail-price">${ElevenZeroApp.formatMoney(item.price_usd)}</span>
+        <span class="listing-detail-total-note${shippingQuote ? "" : " is-muted"}">
+          ${ElevenZeroApp.escapeHtml(totalNote)}
+        </span>
+      </div>
     </div>
     <div class="listing-detail-specs">${specPills}</div>
     <p class="listing-detail-copy">${ElevenZeroApp.escapeHtml(item.notes)}</p>
@@ -233,6 +563,16 @@ function renderContent(item) {
         <strong>Photos</strong>
         <span>${ElevenZeroApp.escapeHtml(listingPhotoLabel(item))}</span>
       </article>
+      <article>
+        <strong>Shipping</strong>
+        <span>${ElevenZeroApp.escapeHtml(shippingPolicy.label)}</span>
+      </article>
+    </div>
+    <div class="listing-detail-actions-bar">
+      <a class="button button-secondary" href="./index.html#listings">Back to shop</a>
+      <button class="button button-secondary" type="button" data-copy-listing-link>
+        Copy listing link
+      </button>
     </div>
     <div class="listing-purchase-row listing-purchase-row-detail">
       <div class="listing-purchase-copy">
@@ -270,15 +610,30 @@ function renderContent(item) {
     const action = contentNode.querySelector("[data-detail-buy]")?.dataset.buyAction || "disabled";
     if (action === "disabled") return;
 
+    if (action === "shipping") {
+      setDetailStatus("Add your delivery address below, then click Estimate shipping first.", "warning");
+      scrollToShippingPanel();
+      return;
+    }
+
     if (action === "auth") {
       setDetailStatus("Please sign in first so we can open secure checkout for this listing.", "warning");
       window.setTimeout(() => {
-        ElevenZeroApp.redirectToAuth(`${window.location.pathname}${window.location.search}`);
+        ElevenZeroApp.redirectToAuth(`${window.location.pathname}${window.location.search}#shipping`);
       }, 700);
       return;
     }
 
     await handleBuyListing(item.id);
+  });
+
+  contentNode.querySelector("[data-copy-listing-link]")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(currentListingUrl());
+      setDetailStatus("Listing link copied. You can paste it anywhere to share this paddle.", "success");
+    } catch {
+      setDetailStatus("Copy did not work in this browser. You can still copy the page URL from the address bar.", "warning");
+    }
   });
 }
 
@@ -287,8 +642,155 @@ function renderStory(item) {
 
   const thickness = formatThickness(item.thickness_mm);
   const actionState = getListingActionState(item);
+  const shippingPolicy = getShippingPolicy(item);
+  const shipping = listingDetailState.shipping;
+  const quote = shipping.quote;
+  const estimateButtonLabel = shipping.busy
+    ? shippingPolicy.mode === "calculated"
+      ? "Calculating..."
+      : "Confirming..."
+    : shippingPolicy.mode === "calculated"
+      ? "Estimate shipping"
+      : "Confirm shipping";
+  const checkoutSnapshotLabel =
+    actionState.action === "checkout"
+      ? (quote ? (quote.isEstimate ? "Estimated total ready" : "Delivered total ready") : "Delivery address needed")
+      : actionState.statusLabel;
+  const shippingIntro =
+    shippingPolicy.mode === "free"
+      ? "This seller offers free shipping. Enter the buyer address below so we can confirm the delivered total before checkout."
+      : shippingPolicy.mode === "flat"
+        ? "This seller uses one flat shipping fee. Enter the buyer address below so we can confirm the delivered total before checkout."
+        : "Enter the buyer address below and we’ll estimate U.S. shipping for this paddle before Stripe checkout opens.";
+  const shippingMeta = [
+    shippingPolicy.originZip ? `Origin ZIP ${shippingPolicy.originZip}` : "",
+    shippingPolicy.weightOz ? `${Number(shippingPolicy.weightOz).toFixed(1).replace(/\.0$/, "")} oz packed weight` : "",
+    shippingPolicy.lengthIn && shippingPolicy.widthIn && shippingPolicy.heightIn
+      ? `${Number(shippingPolicy.lengthIn).toFixed(1).replace(/\.0$/, "")} × ${Number(
+          shippingPolicy.widthIn
+        ).toFixed(1).replace(/\.0$/, "")} × ${Number(shippingPolicy.heightIn).toFixed(1).replace(/\.0$/, "")} in`
+      : "",
+  ].filter(Boolean);
+  const shippingNote = shippingPolicy.note || "";
 
   storyNode.innerHTML = `
+    <article class="listing-detail-panel listing-detail-panel-wide listing-shipping-panel" id="shipping">
+      <p class="eyebrow">Shipping estimate</p>
+      <h2>See the delivered total before checkout.</h2>
+      <p>${ElevenZeroApp.escapeHtml(shippingIntro)}</p>
+      <div class="listing-shipping-policy">
+        <div>
+          <strong>Seller shipping setup</strong>
+          <span>${ElevenZeroApp.escapeHtml(shippingPolicy.label)}</span>
+        </div>
+        <p>${ElevenZeroApp.escapeHtml(shippingPolicy.explanation)}</p>
+        ${
+          shippingMeta.length || shippingNote
+            ? `
+              <div class="listing-shipping-policy-meta">
+                ${shippingMeta.map((itemLabel) => `<span>${ElevenZeroApp.escapeHtml(itemLabel)}</span>`).join("")}
+                ${shippingNote ? `<span>${ElevenZeroApp.escapeHtml(shippingNote)}</span>` : ""}
+              </div>
+            `
+            : ""
+        }
+      </div>
+      <form class="listing-shipping-form" data-shipping-form>
+        <div class="listing-shipping-grid">
+          <label>
+            <span>Street address</span>
+            <input
+              type="text"
+              name="line1"
+              placeholder="123 Main Street"
+              value="${ElevenZeroApp.escapeHtml(shipping.line1)}"
+            />
+          </label>
+          <label>
+            <span>Apartment, suite, etc. (optional)</span>
+            <input
+              type="text"
+              name="line2"
+              placeholder="Suite 4B"
+              value="${ElevenZeroApp.escapeHtml(shipping.line2)}"
+            />
+          </label>
+          <label>
+            <span>City</span>
+            <input
+              type="text"
+              name="city"
+              placeholder="Miami"
+              value="${ElevenZeroApp.escapeHtml(shipping.city)}"
+            />
+          </label>
+          <label>
+            <span>State</span>
+            <input
+              type="text"
+              name="state"
+              placeholder="FL"
+              value="${ElevenZeroApp.escapeHtml(shipping.state)}"
+            />
+          </label>
+          <label>
+            <span>ZIP code</span>
+            <input
+              type="text"
+              name="postalCode"
+              inputmode="numeric"
+              placeholder="33101"
+              value="${ElevenZeroApp.escapeHtml(shipping.postalCode)}"
+            />
+          </label>
+          <label>
+            <span>Country</span>
+            <input type="text" name="country" value="US" readonly />
+          </label>
+        </div>
+        <div class="listing-shipping-actions">
+          <button class="button button-dark" type="submit" ${shipping.busy ? "disabled" : ""}>
+            ${ElevenZeroApp.escapeHtml(estimateButtonLabel)}
+          </button>
+          <span class="listing-shipping-help">
+            ${
+              shippingPolicy.mode === "calculated"
+                ? "Carrier-ready estimates are using the seller shipping setup right now."
+                : "This shipping policy will carry into checkout after you confirm the address."
+            }
+          </span>
+        </div>
+        <div class="seller-status listing-detail-status" aria-live="polite" data-shipping-status>
+          ${ElevenZeroApp.escapeHtml(shipping.statusMessage)}
+        </div>
+        ${
+          quote
+            ? `
+              <div class="listing-shipping-quote-grid">
+                <article>
+                  <strong>${quote.isEstimate ? "Estimated shipping" : "Shipping"}</strong>
+                  <span>${ElevenZeroApp.escapeHtml(formatMoneyFromCents(quote.amountCents))}</span>
+                </article>
+                <article>
+                  <strong>Destination</strong>
+                  <span>${ElevenZeroApp.escapeHtml(quote.destinationSummary)}</span>
+                </article>
+                <article>
+                  <strong>Service level</strong>
+                  <span>${ElevenZeroApp.escapeHtml(quote.serviceLevel)}</span>
+                </article>
+                <article>
+                  <strong>${quote.isEstimate ? "Estimated total" : "Delivered total"}</strong>
+                  <span>${ElevenZeroApp.escapeHtml(
+                    formatMoneyFromCents(quote.estimatedTotalCents)
+                  )}</span>
+                </article>
+              </div>
+            `
+            : ""
+        }
+      </form>
+    </article>
     <article class="listing-detail-panel">
       <p class="eyebrow">Listing notes</p>
       <h2>${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(item.model)}</h2>
@@ -321,7 +823,7 @@ function renderStory(item) {
       <div class="listing-detail-bullets">
         <div>
           <strong>Checkout</strong>
-          <span>${ElevenZeroApp.escapeHtml(actionState.statusLabel)}</span>
+          <span>${ElevenZeroApp.escapeHtml(checkoutSnapshotLabel)}</span>
         </div>
         <div>
           <strong>Listing age</strong>
@@ -340,6 +842,13 @@ function renderStory(item) {
       </div>
     </article>
   `;
+
+  ElevenZeroApp.setStatus(
+    storyNode.querySelector("[data-shipping-status]"),
+    shipping.statusMessage,
+    shipping.statusTone
+  );
+  bindShippingForm();
 }
 
 function renderRelatedListings(item) {
@@ -398,6 +907,8 @@ function renderRelatedListings(item) {
 }
 
 function renderNotFound() {
+  closeLightbox();
+
   if (galleryNode) {
     galleryNode.innerHTML = `
       <div class="listing-detail-gallery-empty">
@@ -422,14 +933,101 @@ function renderNotFound() {
   }
 }
 
+function updateShippingDraftFromForm(form) {
+  const formData = new FormData(form);
+  listingDetailState.shipping = {
+    ...listingDetailState.shipping,
+    line1: String(formData.get("line1") || "").trim(),
+    line2: String(formData.get("line2") || "").trim(),
+    city: String(formData.get("city") || "").trim(),
+    state: String(formData.get("state") || "").trim(),
+    postalCode: String(formData.get("postalCode") || "").trim(),
+    country: String(formData.get("country") || "US").trim() || "US",
+  };
+}
+
+function bindShippingForm() {
+  const form = storyNode?.querySelector("[data-shipping-form]");
+  if (!form) return;
+
+  form.addEventListener("submit", handleShippingQuoteSubmit);
+
+  form.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("change", () => {
+      updateShippingDraftFromForm(form);
+
+      if (!listingDetailState.shipping.quote || !listingDetailState.item) {
+        return;
+      }
+
+      listingDetailState.shipping.quote = null;
+      listingDetailState.shipping.statusMessage =
+        "Address updated. Estimate shipping again so the final total stays accurate.";
+      listingDetailState.shipping.statusTone = "warning";
+      renderContent(listingDetailState.item);
+      renderStory(listingDetailState.item);
+    });
+  });
+}
+
+async function handleShippingQuoteSubmit(event) {
+  event.preventDefault();
+  if (!listingDetailState.item) return;
+
+  const form = event.currentTarget;
+  updateShippingDraftFromForm(form);
+  listingDetailState.shipping.busy = true;
+  renderStory(listingDetailState.item);
+
+  try {
+    const response = await ElevenZeroApp.request("/api/shipping/quote", {
+      method: "POST",
+      body: {
+        listingId: listingDetailState.item.id,
+        shippingAddress: getShippingAddressPayload(),
+      },
+    });
+
+    listingDetailState.shipping.quote = response.quote || null;
+    setShippingStatus(
+      response.message ||
+        "Shipping estimate is ready. Your delivered total will carry into checkout.",
+      "success"
+    );
+    renderContent(listingDetailState.item);
+    renderStory(listingDetailState.item);
+  } catch (error) {
+    listingDetailState.shipping.quote = null;
+    setShippingStatus(error.message, "error");
+    renderContent(listingDetailState.item);
+    renderStory(listingDetailState.item);
+  } finally {
+    listingDetailState.shipping.busy = false;
+    renderStory(listingDetailState.item);
+  }
+}
+
 async function handleBuyListing(listingId) {
+  if (!listingDetailState.item) {
+    return;
+  }
+
+  if (!shippingQuoteReady()) {
+    setDetailStatus("Add your delivery address below and estimate shipping first.", "warning");
+    scrollToShippingPanel();
+    return;
+  }
+
   listingDetailState.busy = true;
   renderContent(listingDetailState.item);
 
   try {
     const response = await ElevenZeroApp.request("/api/checkout/create-session", {
       method: "POST",
-      body: { listingId },
+      body: {
+        listingId,
+        shippingAddress: getShippingAddressPayload(),
+      },
     });
 
     setDetailStatus(
@@ -466,17 +1064,24 @@ async function loadListingDetail() {
     listingDetailState.item = item;
     listingDetailState.relatedItems = buildRelatedListings(item, listingFeed.items || []);
     listingDetailState.selectedImageIndex = 0;
+    listingDetailState.lightboxOpen = false;
+    listingDetailState.shipping = createDefaultShippingState();
     document.title = `${item.brand} ${item.model} · Eleven Zero PB`;
     renderGallery(item);
+    renderLightbox(item);
     renderContent(item);
     renderStory(item);
     renderRelatedListings(item);
+    if (window.location.hash === "#shipping") {
+      window.setTimeout(() => scrollToShippingPanel(), 120);
+    }
   } catch {
     renderNotFound();
   }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  document.addEventListener("keydown", handleListingKeyboard);
   await ElevenZeroApp.boot;
   await loadListingDetail();
 });
