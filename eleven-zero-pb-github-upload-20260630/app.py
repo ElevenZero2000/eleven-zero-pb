@@ -4,6 +4,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import closing
@@ -42,11 +43,126 @@ ADMIN_EMAILS_RAW = os.getenv("ADMIN_EMAILS", "").strip()
 GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "").strip()
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 GOOGLE_MAPS_MAP_ID = os.getenv("GOOGLE_MAPS_MAP_ID", "").strip()
+SHIPPO_API_KEY = os.getenv("SHIPPO_API_KEY", "").strip()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
 STRIPE_COUNTRY = os.getenv("STRIPE_COUNTRY", "US").strip().upper() or "US"
 STRIPE_PLATFORM_FEE_PERCENT = float(os.getenv("PLATFORM_FEE_PERCENT", "8.5"))
 STRIPE_API_BASE = "https://api.stripe.com/v1"
+
+US_STATE_NAMES = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+    "DC": "District of Columbia",
+    "PR": "Puerto Rico",
+}
+US_STATE_LOOKUP = {
+    **{code: code for code in US_STATE_NAMES},
+    **{name.upper(): code for code, name in US_STATE_NAMES.items()},
+}
+US_STATE_REGION = {
+    "CT": "northeast",
+    "MA": "northeast",
+    "ME": "northeast",
+    "NH": "northeast",
+    "NJ": "northeast",
+    "NY": "northeast",
+    "PA": "northeast",
+    "RI": "northeast",
+    "VT": "northeast",
+    "AL": "south",
+    "AR": "south",
+    "DC": "south",
+    "DE": "south",
+    "FL": "south",
+    "GA": "south",
+    "KY": "south",
+    "LA": "south",
+    "MD": "south",
+    "MS": "south",
+    "NC": "south",
+    "OK": "south",
+    "SC": "south",
+    "TN": "south",
+    "TX": "south",
+    "VA": "south",
+    "WV": "south",
+    "IA": "midwest",
+    "IL": "midwest",
+    "IN": "midwest",
+    "KS": "midwest",
+    "MI": "midwest",
+    "MN": "midwest",
+    "MO": "midwest",
+    "ND": "midwest",
+    "NE": "midwest",
+    "OH": "midwest",
+    "SD": "midwest",
+    "WI": "midwest",
+    "AK": "west",
+    "AZ": "west",
+    "CA": "west",
+    "CO": "west",
+    "HI": "west",
+    "ID": "west",
+    "MT": "west",
+    "NM": "west",
+    "NV": "west",
+    "OR": "west",
+    "UT": "west",
+    "WA": "west",
+    "WY": "west",
+    "PR": "territory",
+}
+ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
 
 
 def cache_control_for_path(path: str) -> str:
@@ -118,6 +234,423 @@ ADMIN_EMAILS = admin_email_set()
 
 def email_is_admin(email: str) -> bool:
     return normalize_email(email) in ADMIN_EMAILS
+
+
+def compact_whitespace(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def row_value(row: sqlite3.Row | dict | None, key: str, default=None):
+    if row is None:
+        return default
+
+    if isinstance(row, dict):
+        return row.get(key, default)
+
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return default
+
+
+def normalize_us_state(value: str) -> str:
+    raw = compact_whitespace(value).upper().replace(".", "")
+    return US_STATE_LOOKUP.get(raw, "")
+
+
+def normalize_compare_text(value: str) -> str:
+    return "".join(ch.lower() for ch in compact_whitespace(value) if ch.isalnum())
+
+
+def extract_city_from_location(location: str) -> str:
+    text = compact_whitespace(location)
+    if not text:
+        return ""
+    return compact_whitespace(text.split(",", 1)[0])
+
+
+def extract_state_from_location(location: str) -> str:
+    text = compact_whitespace(location)
+    if not text:
+        return ""
+
+    parts = [compact_whitespace(part) for part in text.split(",") if compact_whitespace(part)]
+    candidates = list(reversed(parts)) or [text]
+    for candidate in candidates:
+        normalized = normalize_us_state(candidate)
+        if normalized:
+            return normalized
+
+        for token in reversed(candidate.replace(",", " ").split()):
+            normalized = normalize_us_state(token)
+            if normalized:
+                return normalized
+
+    return ""
+
+
+def normalize_shipping_address(raw_address) -> dict:
+    address = raw_address if isinstance(raw_address, dict) else {}
+    country = compact_whitespace(address.get("country", "US")).upper() or "US"
+
+    return {
+        "line1": compact_whitespace(address.get("line1", "")),
+        "line2": compact_whitespace(address.get("line2", "")),
+        "city": compact_whitespace(address.get("city", "")),
+        "state": normalize_us_state(address.get("state", "")),
+        "postalCode": compact_whitespace(address.get("postalCode", "")).upper(),
+        "country": country,
+    }
+
+
+def parse_zip_code(value) -> str:
+    zip_code = compact_whitespace(value).upper()
+    return zip_code if ZIP_CODE_RE.fullmatch(zip_code) else ""
+
+
+def parse_whole_dollar_amount(raw_value) -> int:
+    digits = "".join(ch for ch in str(raw_value or "").strip() if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def parse_shipping_weight_oz(raw_value) -> float | None:
+    raw = str(raw_value or "").strip()
+    cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == ".")
+
+    if not raw:
+        return None
+
+    if not cleaned or cleaned.count(".") > 1:
+        return None
+
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+
+    if value < 1 or value > 320:
+        return None
+
+    return round(value, 1)
+
+
+def parse_shipping_dimension_in(raw_value) -> float | None:
+    raw = str(raw_value or "").strip()
+    cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == ".")
+
+    if not raw:
+        return None
+
+    if not cleaned or cleaned.count(".") > 1:
+        return None
+
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+
+    if value < 1 or value > 72:
+        return None
+
+    return round(value, 1)
+
+
+def shippo_is_configured() -> bool:
+    return bool(SHIPPO_API_KEY)
+
+
+def shipping_policy_from_row(row: sqlite3.Row | dict | None) -> dict:
+    mode_raw = str(row_value(row, "shipping_mode", "calculated") or "calculated").strip().lower()
+    mode = mode_raw if mode_raw in {"calculated", "flat", "free"} else "calculated"
+    flat_usd = int(row_value(row, "shipping_flat_usd", 0) or 0)
+    origin_zip = parse_zip_code(row_value(row, "shipping_origin_zip", ""))
+    origin_street1 = compact_whitespace(row_value(row, "shipping_origin_street1", ""))
+    weight_oz = parse_shipping_weight_oz(row_value(row, "shipping_weight_oz", ""))
+    length_in = parse_shipping_dimension_in(row_value(row, "shipping_length_in", ""))
+    width_in = parse_shipping_dimension_in(row_value(row, "shipping_width_in", ""))
+    height_in = parse_shipping_dimension_in(row_value(row, "shipping_height_in", ""))
+    note = compact_whitespace(row_value(row, "shipping_note", ""))
+
+    if mode == "free":
+        label = "Free shipping"
+        explanation = "Seller is covering shipping on this listing."
+    elif mode == "flat":
+        label = f"Flat shipping · ${flat_usd}"
+        explanation = "Seller set one shipping amount for every U.S. destination."
+    else:
+        label = "Calculated shipping at checkout"
+        explanation = (
+            "Buyer enters the delivery address first, then Eleven Zero PB estimates the shipped total."
+        )
+
+    return {
+        "mode": mode,
+        "modeLabel": {
+            "calculated": "Calculated",
+            "flat": "Flat",
+            "free": "Free",
+        }.get(mode, "Calculated"),
+        "flatUsd": flat_usd,
+        "originZip": origin_zip,
+        "originStreetReady": bool(origin_street1),
+        "weightOz": weight_oz,
+        "lengthIn": length_in,
+        "widthIn": width_in,
+        "heightIn": height_in,
+        "note": note,
+        "label": label,
+        "explanation": explanation,
+        "carrierReady": bool(origin_zip and weight_oz and length_in and width_in and height_in),
+    }
+
+
+def build_shippo_rate_quote_for_listing(
+    listing_row: sqlite3.Row | dict,
+    address: dict,
+    shipping_policy: dict,
+    price_cents: int,
+) -> dict | None:
+    if not shippo_is_configured():
+        return None
+
+    origin_location = compact_whitespace(row_value(listing_row, "location", "") or "")
+    origin_state = extract_state_from_location(origin_location)
+    origin_city = extract_city_from_location(origin_location)
+    origin_street1 = compact_whitespace(row_value(listing_row, "shipping_origin_street1", ""))
+    origin_zip = shipping_policy["originZip"]
+    weight_oz = shipping_policy["weightOz"]
+    length_in = shipping_policy["lengthIn"]
+    width_in = shipping_policy["widthIn"]
+    height_in = shipping_policy["heightIn"]
+
+    if not all([origin_street1, origin_city, origin_state, origin_zip, weight_oz, length_in, width_in, height_in]):
+        return None
+
+    shipment_payload = {
+        "address_from": {
+            "name": compact_whitespace(row_value(listing_row, "seller_name", "")) or "Eleven Zero PB seller",
+            "street1": origin_street1,
+            "city": origin_city,
+            "state": origin_state,
+            "zip": origin_zip,
+            "country": "US",
+            "email": SUPPORT_EMAIL or PRIMARY_OWNER_EMAIL,
+        },
+        "address_to": {
+            "name": "Eleven Zero PB buyer",
+            "street1": address["line1"],
+            "street2": address["line2"],
+            "city": address["city"],
+            "state": address["state"],
+            "zip": address["postalCode"],
+            "country": address["country"],
+        },
+        "parcels": [
+            {
+                "length": str(length_in),
+                "width": str(width_in),
+                "height": str(height_in),
+                "distance_unit": "in",
+                "weight": str(round(float(weight_oz) / 16, 2)),
+                "mass_unit": "lb",
+            }
+        ],
+        "async": False,
+    }
+
+    shipment = shippo_request("/shipments/", shipment_payload)
+    rates = shipment.get("rates") or []
+
+    best_rate = None
+    for rate in rates:
+        currency = str(rate.get("currency") or rate.get("currency_local") or "").upper()
+        if currency and currency != "USD":
+            continue
+        amount_raw = rate.get("amount") or rate.get("amount_local")
+        try:
+            amount_value = float(amount_raw)
+        except (TypeError, ValueError):
+            continue
+        if amount_value < 0:
+            continue
+        if best_rate is None or amount_value < best_rate["amount_value"]:
+            best_rate = {
+                "amount_value": amount_value,
+                "provider": str(rate.get("provider") or "Carrier"),
+                "service_name": (
+                    str(rate.get("servicelevel_name") or "").strip()
+                    or str((rate.get("servicelevel") or {}).get("name") or "").strip()
+                    or "Shipping rate"
+                ),
+                "estimated_days": rate.get("estimated_days"),
+            }
+
+    if not best_rate:
+        return None
+
+    amount_cents = int(round(best_rate["amount_value"] * 100))
+    estimated_days = best_rate["estimated_days"]
+    service_level = best_rate["service_name"]
+    if isinstance(estimated_days, int) and estimated_days > 0:
+        service_level = f"{service_level} · {estimated_days} day{'s' if estimated_days != 1 else ''}"
+
+    destination_summary = f"{address['city']}, {address['state']} {address['postalCode']}"
+
+    return {
+        "amount_cents": amount_cents,
+        "amount_usd": round(amount_cents / 100, 2),
+        "estimated_total_cents": price_cents + amount_cents,
+        "estimated_total_usd": round((price_cents + amount_cents) / 100, 2),
+        "service_level": service_level,
+        "label": f"Live shipping to {address['city']}, {address['state']}",
+        "summary": f"{best_rate['provider']} {service_level} for {destination_summary}",
+        "destination_summary": destination_summary,
+        "destination_state": address["state"],
+        "postal_code": address["postalCode"],
+        "address": address,
+        "rate_kind": "live",
+        "is_estimate": False,
+        "provider_label": f"{best_rate['provider']} live rate",
+        "policy_label": shipping_policy["label"],
+    }
+
+
+def build_shipping_quote_for_listing(listing_row: sqlite3.Row | dict, raw_address) -> dict:
+    address = normalize_shipping_address(raw_address)
+    missing = [
+        label
+        for label, value in [
+            ("street address", address["line1"]),
+            ("city", address["city"]),
+            ("state", address["state"]),
+            ("ZIP code", address["postalCode"]),
+        ]
+        if not value
+    ]
+
+    if missing:
+        if len(missing) == 1:
+            missing_text = missing[0]
+        else:
+            missing_text = ", ".join(missing[:-1]) + f", and {missing[-1]}"
+        raise ValueError(f"Add your {missing_text} so we can estimate shipping.")
+
+    if address["country"] != "US":
+        raise ValueError("Shipping estimates are live for U.S. delivery addresses right now.")
+
+    if not ZIP_CODE_RE.fullmatch(address["postalCode"]):
+        raise ValueError("Enter a valid U.S. ZIP code so we can estimate shipping.")
+
+    shipping_policy = shipping_policy_from_row(listing_row)
+    price_usd = int(row_value(listing_row, "price_usd", 0) or 0)
+    price_cents = max(price_usd, 0) * 100
+    destination_summary = f"{address['city']}, {address['state']} {address['postalCode']}"
+
+    if shipping_policy["mode"] == "free":
+        return {
+            "amount_cents": 0,
+            "amount_usd": 0,
+            "estimated_total_cents": price_cents,
+            "estimated_total_usd": round(price_cents / 100, 2),
+            "service_level": "Free shipping",
+            "label": "Free shipping",
+            "summary": f"Seller included shipping for {destination_summary}",
+            "destination_summary": destination_summary,
+            "destination_state": address["state"],
+            "postal_code": address["postalCode"],
+            "address": address,
+            "rate_kind": "free",
+            "is_estimate": False,
+            "provider_label": "Seller included shipping",
+            "policy_label": shipping_policy["label"],
+        }
+
+    if shipping_policy["mode"] == "flat":
+        amount_cents = max(0, shipping_policy["flatUsd"]) * 100
+        return {
+            "amount_cents": amount_cents,
+            "amount_usd": round(amount_cents / 100, 2),
+            "estimated_total_cents": price_cents + amount_cents,
+            "estimated_total_usd": round((price_cents + amount_cents) / 100, 2),
+            "service_level": "Flat shipping",
+            "label": "Flat shipping",
+            "summary": f"Seller-set flat shipping for {destination_summary}",
+            "destination_summary": destination_summary,
+            "destination_state": address["state"],
+            "postal_code": address["postalCode"],
+            "address": address,
+            "rate_kind": "flat",
+            "is_estimate": False,
+            "provider_label": "Seller-set flat shipping",
+            "policy_label": shipping_policy["label"],
+        }
+
+    try:
+        shippo_quote = build_shippo_rate_quote_for_listing(listing_row, address, shipping_policy, price_cents)
+    except ValueError:
+        shippo_quote = None
+
+    if shippo_quote:
+        return shippo_quote
+
+    origin_location = compact_whitespace(row_value(listing_row, "location", "") or "")
+    origin_state = extract_state_from_location(origin_location)
+    origin_city = extract_city_from_location(origin_location)
+    destination_state = address["state"]
+    destination_city = address["city"]
+    origin_zip = shipping_policy["originZip"]
+    origin_zip_prefix = origin_zip[:3] if len(origin_zip) >= 3 else ""
+    destination_zip_prefix = address["postalCode"][:3]
+
+    if destination_state in {"AK", "HI", "PR"} or origin_state in {"AK", "HI", "PR"}:
+        amount_cents = 3200
+        service_level = "Extended U.S. estimate"
+    elif origin_zip_prefix and origin_zip_prefix == destination_zip_prefix:
+        amount_cents = 700
+        service_level = "Nearby estimate"
+    elif origin_state and origin_state == destination_state:
+        amount_cents = 900
+        service_level = "In-state estimate"
+        if origin_city and normalize_compare_text(origin_city) == normalize_compare_text(destination_city):
+            amount_cents = 700
+            service_level = "Local estimate"
+    elif origin_state and US_STATE_REGION.get(origin_state) == US_STATE_REGION.get(destination_state):
+        amount_cents = 1300
+        service_level = "Regional estimate"
+    elif origin_state:
+        amount_cents = 1800
+        service_level = "Domestic estimate"
+    else:
+        amount_cents = 1500
+        service_level = "Standard estimate"
+
+    package_weight_oz = shipping_policy["weightOz"] or 24.0
+    if package_weight_oz > 64:
+        amount_cents += 900
+    elif package_weight_oz > 32:
+        amount_cents += 500
+    elif package_weight_oz > 16:
+        amount_cents += 200
+
+    label = f"Estimated shipping to {destination_city}, {destination_state}"
+
+    return {
+        "amount_cents": amount_cents,
+        "amount_usd": round(amount_cents / 100, 2),
+        "estimated_total_cents": price_cents + amount_cents,
+        "estimated_total_usd": round((price_cents + amount_cents) / 100, 2),
+        "service_level": service_level,
+        "label": label,
+        "summary": f"{service_level} for {destination_summary}",
+        "destination_summary": destination_summary,
+        "destination_state": destination_state,
+        "postal_code": address["postalCode"],
+        "address": address,
+        "rate_kind": "estimate",
+        "is_estimate": True,
+        "provider_label": "Eleven Zero PB estimate",
+        "policy_label": shipping_policy["label"],
+    }
 
 
 def slugify(value: str) -> str:
@@ -522,6 +1055,37 @@ def stripe_request(method: str, path: str, data: dict | None = None) -> dict:
         raise ValueError("Stripe could not be reached right now.") from exc
 
 
+def shippo_request(path: str, payload: dict) -> dict:
+    if not shippo_is_configured():
+        raise RuntimeError("Shippo is not configured yet.")
+
+    request = Request(
+        f"https://api.goshippo.com{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Authorization", f"ShippoToken {SHIPPO_API_KEY}")
+    request.add_header("Content-Type", "application/json")
+
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8") or "{}")
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        detail = parsed.get("detail")
+        if isinstance(detail, list):
+            message = "; ".join(str(item) for item in detail if item)
+        else:
+            message = str(detail or raw or "Shippo request failed.")
+        raise ValueError(message) from exc
+    except URLError as exc:
+        raise ValueError("Shippo could not be reached right now.") from exc
+
+
 def init_database() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -556,6 +1120,15 @@ def init_database() -> None:
               price_usd INTEGER NOT NULL,
               location TEXT NOT NULL,
               notes TEXT NOT NULL,
+              shipping_mode TEXT NOT NULL DEFAULT 'calculated',
+              shipping_flat_usd INTEGER NOT NULL DEFAULT 0,
+              shipping_origin_zip TEXT NOT NULL DEFAULT '',
+              shipping_origin_street1 TEXT NOT NULL DEFAULT '',
+              shipping_weight_oz REAL,
+              shipping_length_in REAL,
+              shipping_width_in REAL,
+              shipping_height_in REAL,
+              shipping_note TEXT NOT NULL DEFAULT '',
               image_data_json TEXT NOT NULL DEFAULT '[]',
               created_at TEXT NOT NULL
             );
@@ -596,6 +1169,9 @@ def init_database() -> None:
               stripe_checkout_session_id TEXT NOT NULL UNIQUE,
               stripe_payment_intent_id TEXT,
               amount_total_cents INTEGER NOT NULL,
+              shipping_amount_cents INTEGER NOT NULL DEFAULT 0,
+              shipping_label TEXT NOT NULL DEFAULT '',
+              shipping_address_json TEXT NOT NULL DEFAULT '{}',
               platform_fee_cents INTEGER NOT NULL,
               stripe_payment_status TEXT NOT NULL DEFAULT 'unpaid',
               stripe_session_status TEXT NOT NULL DEFAULT 'open',
@@ -655,7 +1231,19 @@ def init_database() -> None:
         add_column_if_missing(connection, "users", "stripe_account_status_updated_at", "TEXT")
         add_column_if_missing(connection, "listings", "color", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "listings", "thickness_mm", "REAL")
+        add_column_if_missing(connection, "listings", "shipping_mode", "TEXT NOT NULL DEFAULT 'calculated'")
+        add_column_if_missing(connection, "listings", "shipping_flat_usd", "INTEGER NOT NULL DEFAULT 0")
+        add_column_if_missing(connection, "listings", "shipping_origin_zip", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "listings", "shipping_origin_street1", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "listings", "shipping_weight_oz", "REAL")
+        add_column_if_missing(connection, "listings", "shipping_length_in", "REAL")
+        add_column_if_missing(connection, "listings", "shipping_width_in", "REAL")
+        add_column_if_missing(connection, "listings", "shipping_height_in", "REAL")
+        add_column_if_missing(connection, "listings", "shipping_note", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "listings", "image_data_json", "TEXT NOT NULL DEFAULT '[]'")
+        add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
+        add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
 
         listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
@@ -1118,11 +1706,51 @@ def parse_thickness_mm(raw_value) -> float | None:
     return round(value, 1)
 
 
+DEMO_LISTING_IMAGE_MAP = {
+    ("selkirk", "luxx control air"): [
+        "https://images.pexels.com/photos/17299531/pexels-photo-17299531/free-photo-of-pickleball-paddle-on-blue-background.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/30864598/pexels-photo-30864598/free-photo-of-pickleball-player-on-outdoor-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/29820785/pexels-photo-29820785/free-photo-of-shadow-play-on-a-sunny-pickleball-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    ],
+    ("joola", "perseus shape"): [
+        "https://images.pexels.com/photos/30864598/pexels-photo-30864598/free-photo-of-pickleball-player-on-outdoor-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/17333854/pexels-photo-17333854/free-photo-of-young-man-and-woman-standing-on-a-pickleball-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/37143606/pexels-photo-37143606/free-photo-of-aerial-view-of-outdoor-pickleball-courts-in-philadelphia.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    ],
+    ("six zero", "double black diamond"): [
+        "https://images.pexels.com/photos/17333854/pexels-photo-17333854/free-photo-of-young-man-and-woman-standing-on-a-pickleball-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/17299531/pexels-photo-17299531/free-photo-of-pickleball-paddle-on-blue-background.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/32975182/pexels-photo-32975182/free-photo-of-woman-playing-pickleball-in-indoor-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    ],
+    ("paddletek", "bantam tko-c"): [
+        "https://images.pexels.com/photos/32975182/pexels-photo-32975182/free-photo-of-woman-playing-pickleball-in-indoor-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/29820785/pexels-photo-29820785/free-photo-of-shadow-play-on-a-sunny-pickleball-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/30864598/pexels-photo-30864598/free-photo-of-pickleball-player-on-outdoor-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    ],
+    ("vatic pro", "prism flash"): [
+        "https://images.pexels.com/photos/29820785/pexels-photo-29820785/free-photo-of-shadow-play-on-a-sunny-pickleball-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/37143606/pexels-photo-37143606/free-photo-of-aerial-view-of-outdoor-pickleball-courts-in-philadelphia.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/17299531/pexels-photo-17299531/free-photo-of-pickleball-paddle-on-blue-background.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    ],
+    ("bread & butter", "filth"): [
+        "https://images.pexels.com/photos/37143606/pexels-photo-37143606/free-photo-of-aerial-view-of-outdoor-pickleball-courts-in-philadelphia.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/17299531/pexels-photo-17299531/free-photo-of-pickleball-paddle-on-blue-background.jpeg?auto=compress&cs=tinysrgb&w=1600",
+        "https://images.pexels.com/photos/30864598/pexels-photo-30864598/free-photo-of-pickleball-player-on-outdoor-court.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    ],
+}
+
+
+def demo_listing_images_for_row(row: sqlite3.Row | dict | None) -> list[str]:
+    brand = compact_whitespace(row_value(row, "brand", "")).lower()
+    model = compact_whitespace(row_value(row, "model", "")).lower()
+    return DEMO_LISTING_IMAGE_MAP.get((brand, model), [])
+
+
 def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
     row = row or {}
-    seller_user_id = row.get("user_id") if isinstance(row, dict) else row["user_id"]
+    seller_user_id = row_value(row, "user_id")
     seller_profile = stripe_profile_from_row(row)
-    price_usd = int(row.get("price_usd", 0) if isinstance(row, dict) else row["price_usd"] or 0)
+    price_usd = int(row_value(row, "price_usd", 0) or 0)
 
     if not stripe_is_configured():
         reason = "Platform checkout will turn on after Stripe keys are connected."
@@ -1149,11 +1777,12 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         return None
 
     checkout_state = listing_checkout_state_from_row(row)
-    color = (row.get("color", "") if isinstance(row, dict) else row["color"] or "").strip()
-    thickness_mm = row.get("thickness_mm") if isinstance(row, dict) else row["thickness_mm"]
-    images = normalize_listing_image_payload(
-        row.get("image_data_json", "[]") if isinstance(row, dict) else row["image_data_json"]
-    )
+    color = compact_whitespace(row_value(row, "color", ""))
+    thickness_mm = row_value(row, "thickness_mm")
+    images = normalize_listing_image_payload(row_value(row, "image_data_json", "[]"))
+    if not images:
+        images = demo_listing_images_for_row(row)
+    shipping_policy = shipping_policy_from_row(row)
 
     return {
         "id": row["id"],
@@ -1170,6 +1799,8 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         "primary_image": images[0] if images else "",
         "created_at": row["created_at"],
         "seller_name": row["seller_name"],
+        "shipping": shipping_policy,
+        "shipping_policy_label": shipping_policy["label"],
         "seller_user_id": checkout_state["sellerUserId"],
         "seller_has_connected_account": checkout_state["sellerProfile"]["hasAccount"],
         "seller_ready_for_payouts": checkout_state["sellerProfile"]["readyForPayouts"],
@@ -1187,6 +1818,7 @@ def site_config_payload() -> dict:
         "googleMapsEnabled": bool(GOOGLE_MAPS_API_KEY),
         "googleMapsApiKey": GOOGLE_MAPS_API_KEY,
         "googleMapsMapId": GOOGLE_MAPS_MAP_ID,
+        "shippoConfigured": bool(SHIPPO_API_KEY),
         "stripeConfigured": stripe_is_configured(),
         "stripeMode": stripe_mode(),
         "stripePublishableKeyPresent": bool(STRIPE_PUBLISHABLE_KEY),
@@ -1573,6 +2205,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == "/api/shipping/quote":
+            self.handle_shipping_quote(body)
+            return
+
         if parsed.path == "/api/checkout/create-session":
             user = self.require_user()
             if not user:
@@ -1612,6 +2248,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.shipping_mode,
+                  listings.shipping_flat_usd,
+                  listings.shipping_origin_zip,
+                  listings.shipping_origin_street1,
+                  listings.shipping_weight_oz,
+                  listings.shipping_length_in,
+                  listings.shipping_width_in,
+                  listings.shipping_height_in,
+                  listings.shipping_note,
                   listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
@@ -1646,6 +2291,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.shipping_mode,
+                  listings.shipping_flat_usd,
+                  listings.shipping_origin_zip,
+                  listings.shipping_origin_street1,
+                  listings.shipping_weight_oz,
+                  listings.shipping_length_in,
+                  listings.shipping_width_in,
+                  listings.shipping_height_in,
+                  listings.shipping_note,
                   listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
@@ -1824,6 +2478,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.shipping_mode,
+                  listings.shipping_flat_usd,
+                  listings.shipping_origin_zip,
+                  listings.shipping_origin_street1,
+                  listings.shipping_weight_oz,
+                  listings.shipping_length_in,
+                  listings.shipping_width_in,
+                  listings.shipping_height_in,
+                  listings.shipping_note,
                   listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
@@ -2057,6 +2720,18 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        try:
+            shipping_quote = build_shipping_quote_for_listing(
+                listing_row,
+                body.get("shippingAddress", {}),
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        shipping_cents = int(shipping_quote["amount_cents"])
+        final_total_cents = total_cents + shipping_cents
+
         platform_fee_cents = min(
             total_cents - 1,
             max(0, int(round(total_cents * STRIPE_PLATFORM_FEE_PERCENT / 100))),
@@ -2074,12 +2749,21 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "line_items[0][price_data][unit_amount]": str(total_cents),
             "line_items[0][price_data][product_data][name]": product_name,
             "line_items[0][price_data][product_data][description]": listing["notes"][:180],
+            "line_items[1][quantity]": "1",
+            "line_items[1][price_data][currency]": "usd",
+            "line_items[1][price_data][unit_amount]": str(shipping_cents),
+            "line_items[1][price_data][product_data][name]": "Estimated shipping",
+            "line_items[1][price_data][product_data][description]": shipping_quote["summary"],
             "payment_intent_data[application_fee_amount]": str(platform_fee_cents),
             "payment_intent_data[transfer_data][destination]": seller_profile["connectedAccountId"],
+            "shipping_address_collection[allowed_countries][0]": "US",
+            "phone_number_collection[enabled]": "true",
             "metadata[platform]": "Eleven Zero PB",
             "metadata[listing_id]": str(listing["id"]),
             "metadata[buyer_user_id]": str(user["id"]),
             "metadata[seller_user_id]": str(seller_user_id),
+            "metadata[shipping_summary]": shipping_quote["summary"],
+            "metadata[shipping_postal_code]": shipping_quote["postal_code"],
         }
 
         try:
@@ -2107,12 +2791,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   stripe_checkout_session_id,
                   stripe_payment_intent_id,
                   amount_total_cents,
+                  shipping_amount_cents,
+                  shipping_label,
+                  shipping_address_json,
                   platform_fee_cents,
                   stripe_payment_status,
                   stripe_session_status,
                   status,
                   created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     listing["id"],
@@ -2120,7 +2807,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     seller_user_id,
                     session_id,
                     str(session.get("payment_intent") or ""),
-                    total_cents,
+                    final_total_cents,
+                    shipping_cents,
+                    shipping_quote["label"],
+                    json.dumps(shipping_quote["address"], separators=(",", ":")),
                     platform_fee_cents,
                     str(session.get("payment_status") or "unpaid"),
                     str(session.get("status") or "open"),
@@ -2145,8 +2835,66 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "platformFeePercent": STRIPE_PLATFORM_FEE_PERCENT,
                     "platformFeeCents": platform_fee_cents,
                 },
+                "shipping": {
+                    "amountCents": shipping_cents,
+                    "amountUsd": round(shipping_cents / 100, 2),
+                    "label": shipping_quote["label"],
+                    "estimatedTotalCents": final_total_cents,
+                    "estimatedTotalUsd": round(final_total_cents / 100, 2),
+                },
             },
             status=HTTPStatus.CREATED,
+        )
+
+    def handle_shipping_quote(self, body: dict):
+        listing_id_raw = str(body.get("listingId", "")).strip()
+
+        if not listing_id_raw.isdigit():
+            self.send_json(
+                {"error": "Choose a valid listing before estimating shipping."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        listing_row = self.fetch_listing_checkout_row(int(listing_id_raw))
+        if not listing_row:
+            self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        try:
+            quote = build_shipping_quote_for_listing(listing_row, body.get("shippingAddress", {}))
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if quote["rate_kind"] == "free":
+            message = f"Free shipping confirmed for {quote['destination_summary']}."
+        elif quote["rate_kind"] == "flat":
+            message = f"Flat shipping to {quote['destination_summary']} is ${quote['amount_usd']:.0f}."
+        elif quote["rate_kind"] == "live":
+            message = f"Live {quote['provider_label'].lower()} to {quote['destination_summary']} is ${quote['amount_usd']:.2f}."
+        else:
+            message = f"Estimated shipping to {quote['destination_summary']} is ${quote['amount_usd']:.0f}."
+
+        self.send_json(
+            {
+                "ok": True,
+                "message": message,
+                "quote": {
+                    "amountCents": quote["amount_cents"],
+                    "amountUsd": quote["amount_usd"],
+                    "estimatedTotalCents": quote["estimated_total_cents"],
+                    "estimatedTotalUsd": quote["estimated_total_usd"],
+                    "label": quote["label"],
+                    "summary": quote["summary"],
+                    "destinationSummary": quote["destination_summary"],
+                    "serviceLevel": quote["service_level"],
+                    "rateKind": quote["rate_kind"],
+                    "isEstimate": quote["is_estimate"],
+                    "providerLabel": quote["provider_label"],
+                    "policyLabel": quote["policy_label"],
+                },
+            }
         )
 
     def handle_checkout_session_status(self, user: dict, session_id: str):
@@ -2237,6 +2985,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "listingTitle": listing_title or "Eleven Zero PB listing",
                     "sellerName": order_row["seller_name"] or "Eleven Zero PB seller",
                     "amountTotalCents": order_row["amount_total_cents"],
+                    "shippingAmountCents": order_row["shipping_amount_cents"],
+                    "shippingLabel": order_row["shipping_label"],
                     "platformFeeCents": order_row["platform_fee_cents"],
                 },
             }
@@ -2331,6 +3081,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.shipping_mode,
+                  listings.shipping_flat_usd,
+                  listings.shipping_origin_zip,
+                  listings.shipping_origin_street1,
+                  listings.shipping_weight_oz,
+                  listings.shipping_length_in,
+                  listings.shipping_width_in,
+                  listings.shipping_height_in,
+                  listings.shipping_note,
                   listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
@@ -2877,10 +3636,29 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip()
         images = normalize_listing_image_payload(body.get("images", []))
-        price_raw = str(body.get("price", "")).strip()
-
-        digits = "".join(ch for ch in price_raw if ch.isdigit())
-        price_usd = int(digits) if digits else 0
+        price_usd = parse_whole_dollar_amount(body.get("price"))
+        shipping_mode = str(body.get("shippingMode", "")).strip().lower() or "calculated"
+        shipping_flat_usd = parse_whole_dollar_amount(body.get("shippingFlat"))
+        shipping_origin_zip_raw = str(body.get("shippingOriginZip", "")).strip()
+        shipping_origin_zip = parse_zip_code(shipping_origin_zip_raw)
+        shipping_origin_street1 = compact_whitespace(body.get("shippingOriginStreet1", ""))
+        shipping_weight_raw = str(body.get("shippingWeightOz", "")).strip()
+        shipping_weight_oz = (
+            parse_shipping_weight_oz(shipping_weight_raw) if shipping_weight_raw else 24.0
+        )
+        shipping_length_raw = str(body.get("shippingLengthIn", "")).strip()
+        shipping_width_raw = str(body.get("shippingWidthIn", "")).strip()
+        shipping_height_raw = str(body.get("shippingHeightIn", "")).strip()
+        shipping_length_in = (
+            parse_shipping_dimension_in(shipping_length_raw) if shipping_length_raw else None
+        )
+        shipping_width_in = (
+            parse_shipping_dimension_in(shipping_width_raw) if shipping_width_raw else None
+        )
+        shipping_height_in = (
+            parse_shipping_dimension_in(shipping_height_raw) if shipping_height_raw else None
+        )
+        shipping_note = str(body.get("shippingNote", "")).strip()
 
         if not all([brand, model, color, category, condition, location, notes]) or price_usd <= 0:
             self.send_json(
@@ -2903,6 +3681,60 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if shipping_mode not in {"calculated", "flat", "free"}:
+            self.send_json(
+                {"error": "Choose calculated, flat, or free shipping for this listing."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if shipping_origin_zip_raw and not shipping_origin_zip:
+            self.send_json(
+                {"error": "Add a valid U.S. ZIP code for where this paddle ships from."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if shipping_weight_raw and shipping_weight_oz is None:
+            self.send_json(
+                {"error": "Add a realistic packed weight in ounces so shipping stays accurate."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        invalid_dimension_fields = []
+        if shipping_length_raw and shipping_length_in is None:
+            invalid_dimension_fields.append("length")
+        if shipping_width_raw and shipping_width_in is None:
+            invalid_dimension_fields.append("width")
+        if shipping_height_raw and shipping_height_in is None:
+            invalid_dimension_fields.append("height")
+
+        if invalid_dimension_fields:
+            dimension_text = ", ".join(invalid_dimension_fields)
+            self.send_json(
+                {"error": f"Add a realistic packed box {dimension_text} in inches so carrier-ready shipping stays accurate."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if shipping_mode == "calculated" and not shipping_origin_zip:
+            self.send_json(
+                {"error": "Add the shipping origin ZIP code so buyer shipping can be calculated better."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if shipping_mode == "flat" and shipping_flat_usd <= 0:
+            self.send_json(
+                {"error": "Add the flat shipping amount buyers should pay for this listing."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if shipping_mode == "free":
+            shipping_flat_usd = 0
+
         if not images:
             self.send_json(
                 {"error": "Add at least one paddle photo before publishing the listing."},
@@ -2914,8 +3746,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             cursor = connection.execute(
                 """
                 INSERT INTO listings (
-                  user_id, brand, model, color, thickness_mm, category, condition, price_usd, location, notes, image_data_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  user_id, brand, model, color, thickness_mm, category, condition, price_usd, location, notes,
+                  shipping_mode, shipping_flat_usd, shipping_origin_zip, shipping_origin_street1, shipping_weight_oz,
+                  shipping_length_in, shipping_width_in, shipping_height_in, shipping_note,
+                  image_data_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
@@ -2928,6 +3763,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     price_usd,
                     location,
                     notes,
+                    shipping_mode,
+                    shipping_flat_usd,
+                    shipping_origin_zip,
+                    shipping_origin_street1,
+                    shipping_weight_oz,
+                    shipping_length_in,
+                    shipping_width_in,
+                    shipping_height_in,
+                    shipping_note,
                     json.dumps(images),
                     utc_now(),
                 ),
@@ -2948,6 +3792,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.price_usd,
                   listings.location,
                   listings.notes,
+                  listings.shipping_mode,
+                  listings.shipping_flat_usd,
+                  listings.shipping_origin_zip,
+                  listings.shipping_origin_street1,
+                  listings.shipping_weight_oz,
+                  listings.shipping_length_in,
+                  listings.shipping_width_in,
+                  listings.shipping_height_in,
+                  listings.shipping_note,
                   listings.image_data_json,
                   listings.created_at,
                   users.name AS seller_name,
@@ -3111,7 +3964,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   lat,
                   lon,
                   created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
