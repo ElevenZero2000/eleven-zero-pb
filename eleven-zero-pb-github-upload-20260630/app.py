@@ -36,6 +36,7 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(DATA_DIR / "eleven_zero_pb.db"))).
 SESSION_COOKIE = os.getenv("SESSION_COOKIE_NAME", "eleven_zero_session")
 SESSION_COOKIE_SECURE = env_flag("SESSION_COOKIE_SECURE", APP_ENV == "production")
 ENABLE_DEMO_DATA = env_flag("ENABLE_DEMO_DATA", APP_ENV != "production")
+ENABLE_STARTER_LISTINGS = env_flag("ENABLE_STARTER_LISTINGS", True)
 SITE_URL = os.getenv("SITE_URL", "").strip()
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "").strip()
 PRIMARY_OWNER_EMAIL = os.getenv("PRIMARY_OWNER_EMAIL", "11zeropb@gmail.com").strip()
@@ -1251,7 +1252,7 @@ def init_database() -> None:
         review_count = connection.execute("SELECT COUNT(*) FROM trainer_reviews").fetchone()[0]
         court_report_count = connection.execute("SELECT COUNT(*) FROM court_reports").fetchone()[0]
 
-        if ENABLE_DEMO_DATA and not listing_count:
+        if ENABLE_STARTER_LISTINGS and not listing_count:
             connection.executemany(
                 """
                 INSERT INTO listings (
