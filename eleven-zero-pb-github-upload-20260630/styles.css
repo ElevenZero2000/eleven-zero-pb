@@ -621,8 +621,10 @@ select {
 }
 
 .mini-right {
-  right: 12px;
-  top: 92px;
+  position: static;
+  margin-top: 18px;
+  margin-left: auto;
+  width: min(100%, 280px);
 }
 
 .marquee-band {
