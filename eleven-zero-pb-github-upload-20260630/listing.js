@@ -2,6 +2,7 @@ const galleryNode = document.querySelector("[data-listing-gallery]");
 const contentNode = document.querySelector("[data-listing-content]");
 const storyNode = document.querySelector("[data-listing-story]");
 const relatedNode = document.querySelector("[data-related-shell]");
+const SHIPPING_DRAFT_STORAGE_KEY = "elevenZeroPbShippingAddressDraft";
 
 function createDefaultShippingState() {
   return {
@@ -30,6 +31,89 @@ const listingDetailState = {
 };
 
 let listingLightboxElements = null;
+
+function safeParseJson(value) {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function readStorageJson(key) {
+  try {
+    return safeParseJson(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorageItem(key) {
+  try {
+    window.localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getShippingDraftSnapshot() {
+  return {
+    line1: String(listingDetailState.shipping?.line1 || "").trim(),
+    line2: String(listingDetailState.shipping?.line2 || "").trim(),
+    city: String(listingDetailState.shipping?.city || "").trim(),
+    state: String(listingDetailState.shipping?.state || "").trim(),
+    postalCode: String(listingDetailState.shipping?.postalCode || "").trim(),
+    country: String(listingDetailState.shipping?.country || "US").trim() || "US",
+  };
+}
+
+function shippingDraftHasContent(snapshot = getShippingDraftSnapshot()) {
+  return Boolean(
+    snapshot.line1 || snapshot.line2 || snapshot.city || snapshot.state || snapshot.postalCode
+  );
+}
+
+function restoreShippingDraftState() {
+  const savedDraft = readStorageJson(SHIPPING_DRAFT_STORAGE_KEY);
+  const defaults = createDefaultShippingState();
+
+  if (!savedDraft || typeof savedDraft !== "object") {
+    return defaults;
+  }
+
+  return {
+    ...defaults,
+    line1: String(savedDraft.line1 || "").trim(),
+    line2: String(savedDraft.line2 || "").trim(),
+    city: String(savedDraft.city || "").trim(),
+    state: String(savedDraft.state || "").trim(),
+    postalCode: String(savedDraft.postalCode || "").trim(),
+    country: String(savedDraft.country || "US").trim() || "US",
+  };
+}
+
+function persistShippingDraft() {
+  const snapshot = getShippingDraftSnapshot();
+
+  if (!shippingDraftHasContent(snapshot)) {
+    removeStorageItem(SHIPPING_DRAFT_STORAGE_KEY);
+    return;
+  }
+
+  writeStorageJson(SHIPPING_DRAFT_STORAGE_KEY, snapshot);
+}
 
 function formatThickness(value) {
   const numeric = Number(value);
@@ -944,6 +1028,7 @@ function updateShippingDraftFromForm(form) {
     postalCode: String(formData.get("postalCode") || "").trim(),
     country: String(formData.get("country") || "US").trim() || "US",
   };
+  persistShippingDraft();
 }
 
 function bindShippingForm() {
@@ -953,7 +1038,7 @@ function bindShippingForm() {
   form.addEventListener("submit", handleShippingQuoteSubmit);
 
   form.querySelectorAll("input").forEach((input) => {
-    input.addEventListener("change", () => {
+    const handleDraftUpdate = () => {
       updateShippingDraftFromForm(form);
 
       if (!listingDetailState.shipping.quote || !listingDetailState.item) {
@@ -966,7 +1051,10 @@ function bindShippingForm() {
       listingDetailState.shipping.statusTone = "warning";
       renderContent(listingDetailState.item);
       renderStory(listingDetailState.item);
-    });
+    };
+
+    input.addEventListener("input", handleDraftUpdate);
+    input.addEventListener("change", handleDraftUpdate);
   });
 }
 
@@ -1065,7 +1153,7 @@ async function loadListingDetail() {
     listingDetailState.relatedItems = buildRelatedListings(item, listingFeed.items || []);
     listingDetailState.selectedImageIndex = 0;
     listingDetailState.lightboxOpen = false;
-    listingDetailState.shipping = createDefaultShippingState();
+    listingDetailState.shipping = restoreShippingDraftState();
     document.title = `${item.brand} ${item.model} · Eleven Zero PB`;
     renderGallery(item);
     renderLightbox(item);
