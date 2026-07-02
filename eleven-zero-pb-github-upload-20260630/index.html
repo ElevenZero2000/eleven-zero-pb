@@ -8,7 +8,7 @@
       name="description"
       content="Eleven Zero PB is a live pickleball marketplace with sign-in, listings, trainers, and court discovery."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260702b" />
+    <link rel="stylesheet" href="./styles.css?v=20260702c" />
   </head>
   <body data-nav="shop">
     <div class="page-shell">
@@ -273,6 +273,8 @@
             <span class="listing-quick-brands-label">Popular brands will appear here once listings load.</span>
           </div>
 
+          <div class="listing-active-filters reveal" data-listing-active-filters></div>
+
           <p class="listing-search-summary reveal" data-listing-search-summary>
             Browse the live marketplace and narrow listings by the details that matter most.
           </p>
@@ -448,6 +450,9 @@
                   rows="4"
                   placeholder="Describe wear, grip, edge guard, or anything a buyer should know."
                 ></textarea>
+                <span class="seller-field-meta" data-seller-notes-counter>
+                  0 characters · buyers respond best to clear wear, grip, and edge-guard details.
+                </span>
               </label>
               <div class="seller-photo-upload">
                 <label class="seller-file-dropzone" data-photo-dropzone tabindex="0">
@@ -475,6 +480,14 @@
               <button class="button button-dark" type="submit">
                 Publish Listing
               </button>
+              <div class="seller-draft-toolbar">
+                <span class="seller-draft-status" data-seller-draft-status>
+                  Listing details can be saved on this device while you work.
+                </span>
+                <button class="text-link-button seller-draft-clear" type="button" data-clear-seller-draft>
+                  Clear saved draft
+                </button>
+              </div>
               <div class="seller-status" aria-live="polite" data-seller-status>
                 Sign in first, then publish your paddle into the live marketplace.
               </div>
@@ -509,6 +522,6 @@
     </div>
 
     <script src="./app.js?v=20260701d"></script>
-    <script src="./marketplace.js?v=20260702b"></script>
+    <script src="./marketplace.js?v=20260702c"></script>
   </body>
 </html>
