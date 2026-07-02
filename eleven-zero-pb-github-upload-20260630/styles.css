@@ -932,6 +932,57 @@ select {
   background: rgba(8, 233, 90, 0.14);
 }
 
+.listing-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0 22px;
+}
+
+.listing-active-filters.is-empty {
+  display: none;
+}
+
+.listing-active-filters-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(3, 45, 23, 0.06);
+  color: rgba(18, 18, 18, 0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.listing-active-filter-chip,
+.listing-active-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.listing-active-filter-chip strong {
+  font-size: 0.96rem;
+  line-height: 1;
+}
+
+.listing-active-filter-clear {
+  background: transparent;
+  color: rgba(18, 18, 18, 0.68);
+}
+
 .product-grid,
 .steps-grid,
 .value-stack {
@@ -1138,6 +1189,15 @@ select {
   font-size: 1.85rem;
   line-height: 0.94;
   text-transform: uppercase;
+}
+
+.listing-title-link {
+  display: block;
+  color: inherit;
+}
+
+.listing-title-link:hover {
+  color: var(--acid-deep);
 }
 
 .product-copy {
@@ -1673,6 +1733,48 @@ select {
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.03em;
+}
+
+.seller-field-meta {
+  display: inline-flex;
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.seller-draft-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: -4px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.seller-draft-status {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.seller-draft-clear {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.seller-draft-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .seller-photo-preview {
