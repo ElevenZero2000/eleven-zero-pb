@@ -8,7 +8,7 @@
       name="description"
       content="Eleven Zero PB is a live pickleball marketplace with sign-in, listings, trainers, and court discovery."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260701c" />
+    <link rel="stylesheet" href="./styles.css?v=20260702b" />
   </head>
   <body data-nav="shop">
     <div class="page-shell">
@@ -75,14 +75,16 @@
                 <span class="price" data-listing-count>0 listings</span>
               </div>
 
-              <div class="paddle-stage paddle-stage-large">
+              <div class="feature-photo-shell">
                 <img
-                  class="stage-brand-shape"
-                  src="./assets/brand-shape.png"
-                  alt=""
+                  class="feature-photo"
+                  src="https://images.pexels.com/photos/17333854/pexels-photo-17333854/free-photo-of-young-man-and-woman-standing-on-a-pickleball-court.jpeg?auto=compress&cs=tinysrgb&w=1600"
+                  alt="Couple having fun playing pickleball outdoors at sunset"
                 />
-                <div class="paddle-graphic paddle-carbon"></div>
-                <div class="ball-dot"></div>
+                <div class="feature-photo-copy">
+                  <span>Homepage photo direction</span>
+                  <strong>Community-led play</strong>
+                </div>
               </div>
 
               <div class="feature-details">
@@ -128,6 +130,43 @@
             </p>
           </div>
 
+          <article class="section-spotlight section-spotlight-soft reveal">
+            <div class="section-spotlight-photo">
+              <img
+                src="https://images.pexels.com/photos/17299531/pexels-photo-17299531/free-photo-of-pickleball-paddle-on-blue-background.jpeg?auto=compress&cs=tinysrgb&w=1600"
+                alt="Pickleball paddle and ball close-up on blue background"
+              />
+            </div>
+            <div class="section-spotlight-copy">
+              <p class="eyebrow">Approved shop direction</p>
+              <h3>A cleaner marketplace that feels more premium right away.</h3>
+              <p>
+                We’re leaning into the product-focused look here so buyers can
+                compare paddles faster and trust what they’re seeing.
+              </p>
+              <div class="section-spotlight-pills">
+                <span class="section-spotlight-pill">Brand</span>
+                <span class="section-spotlight-pill">Color</span>
+                <span class="section-spotlight-pill">Thickness</span>
+                <span class="section-spotlight-pill">Photo detail</span>
+              </div>
+              <div class="section-spotlight-list">
+                <article>
+                  <strong>Better product feel</strong>
+                  <span>Sharper visuals make listings feel more serious and easier to trust.</span>
+                </article>
+                <article>
+                  <strong>Faster search</strong>
+                  <span>Brand, condition, price, and paddle details stay front and center.</span>
+                </article>
+                <article>
+                  <strong>Built for growth</strong>
+                  <span>This layout gives us room for checkout, moderation, and featured gear later.</span>
+                </article>
+              </div>
+            </div>
+          </article>
+
           <div class="filter-row reveal" role="tablist" aria-label="Listing filters">
             <button class="filter-chip is-active" type="button" data-filter="all">
               All
@@ -150,6 +189,16 @@
                 type="search"
                 name="query"
                 placeholder="Brand, model, seller, location, or notes"
+                autocomplete="off"
+              />
+            </label>
+
+            <label class="listing-search-field">
+              Location
+              <input
+                type="search"
+                name="location"
+                placeholder="Miami, Austin, zip, or state"
                 autocomplete="off"
               />
             </label>
@@ -183,8 +232,23 @@
             </label>
 
             <label class="listing-search-field">
+              Min price
+              <input type="number" name="minPrice" min="0" step="1" placeholder="60" />
+            </label>
+
+            <label class="listing-search-field">
               Max price
               <input type="number" name="maxPrice" min="0" step="1" placeholder="250" />
+            </label>
+
+            <label class="listing-search-field">
+              Photos
+              <select name="photos">
+                <option value="">Any photo count</option>
+                <option value="1">Has photos</option>
+                <option value="2">2+ photos</option>
+                <option value="3">3+ photos</option>
+              </select>
             </label>
 
             <label class="listing-search-field">
@@ -204,6 +268,10 @@
               </button>
             </div>
           </form>
+
+          <div class="listing-quick-brands reveal" data-listing-brand-pills>
+            <span class="listing-quick-brands-label">Popular brands will appear here once listings load.</span>
+          </div>
 
           <p class="listing-search-summary reveal" data-listing-search-summary>
             Browse the live marketplace and narrow listings by the details that matter most.
@@ -244,6 +312,34 @@
                   <span>Account, listing form, database save, and instant live update.</span>
                 </div>
               </div>
+
+              <article class="seller-launch-panel">
+                <div class="seller-launch-head">
+                  <strong data-seller-readiness-title>Publishing checklist</strong>
+                  <span class="seller-launch-pill" data-seller-readiness-pill>4-step flow</span>
+                </div>
+                <p class="seller-launch-copy" data-seller-readiness-copy>
+                  Sign in, add your paddle details, upload photos, and publish into the live marketplace.
+                </p>
+                <div class="seller-launch-grid" data-seller-readiness-grid>
+                  <article class="seller-launch-item">
+                    <strong>Account</strong>
+                    <span>Sign in first</span>
+                  </article>
+                  <article class="seller-launch-item">
+                    <strong>Basics</strong>
+                    <span>Brand, model, price</span>
+                  </article>
+                  <article class="seller-launch-item">
+                    <strong>Photos</strong>
+                    <span>Add at least one</span>
+                  </article>
+                  <article class="seller-launch-item">
+                    <strong>Checkout later</strong>
+                    <span>Finish payouts in Account</span>
+                  </article>
+                </div>
+              </article>
             </div>
 
             <form class="seller-form" data-seller-form>
@@ -287,6 +383,64 @@
                 Ships from
                 <input type="text" name="location" placeholder="Ex: Miami, FL" />
               </label>
+              <article class="seller-form-block">
+                <div class="seller-form-block-head">
+                  <p class="eyebrow">Shipping setup</p>
+                  <p class="seller-form-help">
+                    No pickup on this listing. Buyers will see the delivered total before checkout.
+                  </p>
+                </div>
+                <label>
+                  Shipping style
+                  <select name="shippingMode" data-shipping-mode>
+                    <option value="calculated">Calculated at checkout (Recommended)</option>
+                    <option value="flat">Flat shipping fee</option>
+                    <option value="free">Free shipping</option>
+                  </select>
+                </label>
+                <label data-shipping-flat-field class="seller-conditional-field is-hidden">
+                  Flat shipping amount
+                  <input type="text" name="shippingFlat" placeholder="$12" />
+                </label>
+                <label>
+                  Ships from ZIP code
+                  <input type="text" name="shippingOriginZip" placeholder="33101" />
+                </label>
+                <label>
+                  Private street address
+                  <input
+                    type="text"
+                    name="shippingOriginStreet1"
+                    placeholder="Used only for live carrier rates"
+                  />
+                </label>
+                <label>
+                  Packed weight (oz)
+                  <input type="number" name="shippingWeightOz" min="1" max="320" step="0.1" placeholder="24" />
+                </label>
+                <div class="seller-inline-grid">
+                  <label>
+                    Box length (in)
+                    <input type="number" name="shippingLengthIn" min="1" max="72" step="0.1" placeholder="16" />
+                  </label>
+                  <label>
+                    Box width (in)
+                    <input type="number" name="shippingWidthIn" min="1" max="72" step="0.1" placeholder="8" />
+                  </label>
+                  <label>
+                    Box height (in)
+                    <input type="number" name="shippingHeightIn" min="1" max="72" step="0.1" placeholder="3" />
+                  </label>
+                </div>
+                <label>
+                  Shipping note (optional)
+                  <input
+                    type="text"
+                    name="shippingNote"
+                    placeholder="Ex: Ships in 1–2 business days"
+                  />
+                </label>
+              </article>
               <label>
                 Condition notes
                 <textarea
@@ -295,14 +449,29 @@
                   placeholder="Describe wear, grip, edge guard, or anything a buyer should know."
                 ></textarea>
               </label>
-              <label class="seller-file-field">
-                Listing photos
-                <input type="file" name="photos" accept="image/*" multiple />
-              </label>
-              <p class="seller-form-help">
-                Add up to 4 photos. We’ll optimize them before publishing so buyers can open the full listing page and see the paddle better.
-              </p>
+              <div class="seller-photo-upload">
+                <label class="seller-file-dropzone" data-photo-dropzone tabindex="0">
+                  <span class="seller-file-kicker">Listing photos</span>
+                  <strong>Drop paddle photos here or click to upload</strong>
+                  <span>Up to 4 images · JPG, PNG, or WebP · choose your cover photo before publishing</span>
+                  <input type="file" name="photos" accept="image/*" multiple />
+                </label>
+                <div class="seller-photo-toolbar">
+                  <p class="seller-form-help">
+                    Add up to 4 photos. We’ll optimize them before publishing so buyers can open the full listing page and see the paddle better.
+                  </p>
+                  <span class="seller-photo-meta" data-photo-meta>0 of 4 photos selected.</span>
+                </div>
+              </div>
               <div class="seller-photo-preview" data-photo-preview></div>
+              <article class="seller-preview-card">
+                <p class="eyebrow">Live listing preview</p>
+                <div class="seller-preview-shell" data-seller-live-preview>
+                  <div class="seller-preview-empty">
+                    Start typing and adding photos to see how your marketplace listing will feel before you publish it.
+                  </div>
+                </div>
+              </article>
               <button class="button button-dark" type="submit">
                 Publish Listing
               </button>
@@ -339,7 +508,7 @@
       </footer>
     </div>
 
-    <script src="./app.js?v=20260701a"></script>
-    <script src="./marketplace.js?v=20260701c"></script>
+    <script src="./app.js?v=20260701d"></script>
+    <script src="./marketplace.js?v=20260702b"></script>
   </body>
 </html>
