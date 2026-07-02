@@ -186,7 +186,7 @@ def build_content_security_policy() -> str:
             "form-action 'self'",
             "frame-ancestors 'none'",
             "object-src 'none'",
-            "img-src 'self' data: https://tile.openstreetmap.org https://*.googleapis.com https://*.gstatic.com https://*.googleusercontent.com",
+            "img-src 'self' data: https://images.pexels.com https://tile.openstreetmap.org https://*.googleapis.com https://*.gstatic.com https://*.googleusercontent.com",
             "script-src 'self' https://www.googletagmanager.com https://maps.googleapis.com",
             "style-src 'self' 'unsafe-inline'",
             "connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://nominatim.openstreetmap.org https://overpass-api.de https://www.openstreetmap.org https://api.stripe.com https://*.googleapis.com https://*.gstatic.com https://*.google.com",
