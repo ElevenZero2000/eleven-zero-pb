@@ -321,6 +321,10 @@ select {
 }
 
 .hero-visual {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-content: start;
   padding: 24px;
   background:
     radial-gradient(circle at top right, rgba(8, 233, 90, 0.12), transparent 20%),
@@ -361,6 +365,7 @@ select {
 }
 
 .spotlight {
+  grid-column: 1 / -1;
   padding: 24px;
 }
 
@@ -580,15 +585,21 @@ select {
   text-transform: uppercase;
 }
 
+.feature-details {
+  display: grid;
+  gap: 14px;
+}
+
 .feature-meta {
   flex-wrap: wrap;
-  margin-top: 16px;
+  margin-top: 0;
   color: rgba(255, 255, 255, 0.76);
 }
 
 .mini-card {
-  position: absolute;
-  max-width: 280px;
+  position: static;
+  max-width: none;
+  min-height: 100%;
   padding: 20px;
 }
 
@@ -616,15 +627,13 @@ select {
 }
 
 .mini-left {
-  left: 12px;
-  bottom: 16px;
+  margin-top: 0;
 }
 
 .mini-right {
-  position: static;
-  margin-top: 18px;
-  margin-left: auto;
-  width: min(100%, 280px);
+  margin-top: 0;
+  margin-left: 0;
+  width: auto;
 }
 
 .marquee-band {
@@ -5016,6 +5025,10 @@ body.has-modal-open {
 
   .hero-copy h1 {
     max-width: 12ch;
+  }
+
+  .hero-visual {
+    grid-template-columns: 1fr;
   }
 
   .mini-card {
