@@ -482,7 +482,7 @@ function renderSellerDraftStatus(overrideMessage = "") {
     return;
   }
 
-  sellerDraftStatus.textContent = "Listing details can be saved on this device while you work.";
+  sellerDraftStatus.textContent = "Your listing details can be saved on this device while you work.";
 }
 
 function saveSellerDraft() {
@@ -775,7 +775,7 @@ function renderSellerLivePreview() {
   const theme = listingThemes[category] || listingThemes.control;
   const coverImage = listingState.draftImages[0] || "";
   const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
-  const statusLabel = sellerProfile?.readyForPayouts ? "Payout path ready" : "Publish now · payouts later";
+  const statusLabel = sellerProfile?.readyForPayouts ? "Seller setup ready" : "Listing ready · payout setup later";
 
   const specs = [
     color ? `<span>${ElevenZeroApp.escapeHtml(color)}</span>` : "",
@@ -930,7 +930,7 @@ function getListingActionState(item) {
         action: "checkout",
         buttonLabel: "View shipping + buy",
         statusLabel: "Secure checkout ready",
-        reason: "Open the full listing to enter the delivery address and see the delivered total before Stripe checkout.",
+        reason: "Open the full listing to enter the delivery address and see the delivered total before checkout.",
         tone: "ready",
       };
     }
@@ -947,9 +947,9 @@ function getListingActionState(item) {
   if (!ElevenZeroApp.config.stripeConfigured) {
     return {
       action: "disabled",
-      buttonLabel: "Checkout soon",
-      statusLabel: "Platform setup",
-      reason: item.checkout_reason || "Stripe keys still need to be connected in the live app.",
+      buttonLabel: "Checkout coming soon",
+      statusLabel: "Checkout update",
+      reason: item.checkout_reason || "This listing can be viewed now while online checkout is being finalized.",
       tone: "neutral",
     };
   }
@@ -957,20 +957,20 @@ function getListingActionState(item) {
   if (!item.seller_user_id) {
     return {
       action: "disabled",
-      buttonLabel: "Demo listing",
-      statusLabel: "Sample inventory",
-      reason: item.checkout_reason || "This listing is for marketplace preview right now.",
+      buttonLabel: "Preview listing",
+      statusLabel: "Featured listing",
+      reason: item.checkout_reason || "Open the listing page to see more details while more seller inventory comes online.",
       tone: "neutral",
     };
   }
 
   return {
     action: "disabled",
-    buttonLabel: "Seller setup pending",
-    statusLabel: item.seller_has_connected_account ? "Seller setup pending" : "Payouts not connected",
+    buttonLabel: "Checkout pending",
+      statusLabel: "Seller setup pending",
     reason:
       item.checkout_reason ||
-      "This seller needs to finish Stripe payout setup before checkout can go live.",
+      "This seller is finishing the final account steps before online checkout is enabled.",
     tone: "pending",
   };
 }
@@ -1157,8 +1157,8 @@ function renderListingEmptyState() {
       <h3>No listings match this search yet.</h3>
       <p>${
         filterSummary
-          ? `Nothing matched ${ElevenZeroApp.escapeHtml(filterSummary)}. Try widening the filters or publish a new listing.`
-          : "Try another filter or publish a new paddle listing after signing in."
+          ? `Nothing matched ${ElevenZeroApp.escapeHtml(filterSummary)}. Try widening the filters or checking a different brand, color, or price range.`
+          : "Try another filter or sign in to create a new paddle listing."
       }</p>
     </article>
   `;
@@ -1307,7 +1307,7 @@ function renderBrandPills() {
 
   if (!brands.length) {
     listingBrandPills.innerHTML =
-      '<span class="listing-quick-brands-label">Popular brands will appear here once listings load.</span>';
+      '<span class="listing-quick-brands-label">Popular brands will appear here as more paddles are added.</span>';
     return;
   }
 
@@ -1379,27 +1379,27 @@ function renderSellerReadiness() {
   sellerReadinessPill.textContent = `${completedSteps}/5 ready`;
 
   if (!signedIn) {
-    sellerReadinessTitle.textContent = "Sign in first, then publish";
+    sellerReadinessTitle.textContent = "Sign in to publish";
     sellerReadinessCopy.textContent =
-      "The listing form is ready, but the website needs your account before it can save your paddle into the live marketplace.";
+      "Create or sign in to your account so you can save your listing and publish it to the marketplace.";
   } else if (completedSteps < 5) {
-    sellerReadinessTitle.textContent = "You’re building a real listing";
+    sellerReadinessTitle.textContent = "You are building a strong listing";
     sellerReadinessCopy.textContent =
       payoutsReady
-        ? "Finish the remaining listing and shipping details below and this paddle can go live with a cleaner buyer-ready presentation."
-        : "Finish the remaining listing and shipping details below. You can publish now, and seller payouts can be finished later from the Account page.";
+        ? "Finish the remaining listing and shipping details below and this paddle will be ready to publish."
+        : "Finish the remaining listing and shipping details below. You can publish first and complete payout setup later from the Account page.";
   } else if (payoutsReady) {
-    sellerReadinessTitle.textContent = "Ready to publish and grow";
+    sellerReadinessTitle.textContent = "Ready to publish";
     sellerReadinessCopy.textContent =
-      "Your listing, shipping setup, and seller account all look buyer-ready, which is the best setup for future marketplace checkout.";
+      "Your listing, shipping setup, and seller account all look complete. Publish when you are ready.";
   } else {
-    sellerReadinessTitle.textContent = "Ready to publish the listing";
+    sellerReadinessTitle.textContent = "Almost ready to publish";
     sellerReadinessCopy.textContent =
-      "This paddle can go live now with shipping details included. The only later step is finishing seller payouts in Account before checkout turns on for buyers.";
+      "Your listing can be published now. Complete payout setup later in Account before online checkout is enabled.";
   }
 
   sellerReadinessGrid.innerHTML = [
-    sellerChecklistItem("Account", signedIn, signedIn ? "Signed in and ready to save." : "Sign in to publish."),
+    sellerChecklistItem("Account", signedIn, signedIn ? "Signed in and ready." : "Sign in to continue."),
     sellerChecklistItem("Basics", basicsReady, basicsReady ? "Brand, model, and price added." : "Add brand, model, and price."),
     sellerChecklistItem(
       "Buyer clarity",
@@ -1419,7 +1419,7 @@ function renderSellerReadiness() {
     sellerChecklistItem(
       "Payouts later",
       payoutsReady,
-      payoutsReady ? "Seller payouts already look ready." : "Finish payouts later in Account for checkout."
+      payoutsReady ? "Seller payments already look ready." : "Finish payout setup later in Account for checkout."
     ),
   ].join("");
 }
@@ -1436,7 +1436,7 @@ function bindListingActions() {
 
       if (action === "auth") {
         setMarketplaceStatus(
-          "Please sign in first so we can take you to the listing page, calculate shipping, and then open secure checkout.",
+          "Sign in to view delivery pricing and continue to checkout.",
           "warning"
         );
         window.setTimeout(() => {
@@ -1469,7 +1469,7 @@ function renderPhotoPreview() {
   if (!listingState.draftImages.length) {
     photoPreview.innerHTML = `
       <div class="seller-photo-placeholder">
-        Photo previews will show up here before the listing goes live. Add at least one photo to publish your paddle.
+        Photo previews will show up here. Add at least one photo so buyers can see the paddle clearly.
       </div>
     `;
     updatePhotoMeta();
@@ -1530,7 +1530,7 @@ function renderSearchSummary(visible) {
     listingState.query ? `search: “${listingState.query}”` : "",
   ].filter(Boolean);
 
-  const filtersLabel = activeFilters.length ? activeFilters.join(" · ") : "all live listings";
+  const filtersLabel = activeFilters.length ? activeFilters.join(" · ") : "all marketplace listings";
   const sortedLabel = describeSortMode(listingState.sortMode);
 
   listingSearchSummary.textContent = `Showing ${visible.length} of ${listingState.items.length} listings for ${filtersLabel}. Sorted by ${sortedLabel}.`;
@@ -1550,7 +1550,7 @@ function renderListings() {
   }
 
   if (listingHeading) {
-    listingHeading.textContent = `${visible.length} live listing${visible.length === 1 ? "" : "s"}`;
+    listingHeading.textContent = `${visible.length} listing${visible.length === 1 ? "" : "s"} found`;
   }
 
   renderSearchSummary(visible);
@@ -1586,12 +1586,12 @@ function renderListings() {
       listingNote.textContent = `Search results update live while you browse. Current filters: ${activeFilters}.`;
     } else {
       listingNote.textContent = !ElevenZeroApp.session?.authenticated
-        ? "Sign in to publish your own paddle into the live feed and unlock buyer checkout."
+        ? "Want to sell too? Sign in and publish your own paddle listing."
         : !sellerProfile?.connectConfigured
-          ? "You can publish listings now. Stripe seller payouts are built in, but this app still needs Stripe keys before checkout can go live."
+          ? "You can publish listings now. Online checkout is being finalized for sellers."
           : !sellerProfile?.readyForPayouts
-            ? "You can publish listings now. Finish seller payouts in Account before buyers can pay you through the marketplace."
-            : "You’re signed in and payout-ready on Stripe, so buyers can use secure checkout on your eligible listings.";
+            ? "You can publish listings now. Finish your payout setup in Account before online checkout is enabled on your listings."
+            : "You are signed in and ready to manage your marketplace listings.";
     }
   }
 
@@ -1638,7 +1638,7 @@ async function handleCheckoutReturn() {
 
   if (!ElevenZeroApp.session?.authenticated || !sessionId) {
     setMarketplaceStatus(
-      "Stripe sent you back successfully. Sign in again if you want us to confirm the order details here.",
+      "Your checkout step finished successfully. Sign in again if you want us to confirm the order details here.",
       "warning"
     );
     clearCheckoutParams();
@@ -1796,7 +1796,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
 async function handleListingSubmit(event) {
   event.preventDefault();
 
-  if (!ElevenZeroApp.requireAuth(listingStatus, "Please sign in first to publish a listing.")) {
+  if (!ElevenZeroApp.requireAuth(listingStatus, "Sign in to publish your listing.")) {
     return;
   }
 
@@ -1843,7 +1843,7 @@ async function handleListingSubmit(event) {
       listingStatus,
       sellerProfile?.readyForPayouts
         ? `${payload.brand} ${payload.model} is now live in the marketplace with its own detail page.`
-        : `${payload.brand} ${payload.model} is now live in the marketplace. Next step: finish seller payouts in Account before live checkout turns on.`,
+        : `${payload.brand} ${payload.model} is now live in the marketplace. Next step: finish payout setup in Account before online checkout is enabled.`,
       "success"
     );
     await loadListings();
