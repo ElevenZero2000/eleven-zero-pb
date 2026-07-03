@@ -1,0 +1,97 @@
+.site-header {
+  transition:
+    top 180ms ease,
+    gap 180ms ease,
+    padding 180ms ease,
+    border-radius 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.brand-logo-header {
+  transition: width 180ms ease;
+}
+
+.brand-tag {
+  transition:
+    min-height 180ms ease,
+    padding 180ms ease,
+    font-size 180ms ease,
+    letter-spacing 180ms ease,
+    opacity 180ms ease;
+}
+
+.site-nav {
+  transition:
+    gap 180ms ease,
+    font-size 180ms ease;
+}
+
+.nav-cta {
+  transition:
+    min-height 180ms ease,
+    padding 180ms ease,
+    font-size 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.auth-link,
+.auth-signout,
+.auth-user-pill {
+  transition:
+    min-height 180ms ease,
+    padding 180ms ease,
+    font-size 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease;
+}
+
+.site-header .brand-tag {
+  display: none;
+}
+
+.site-header.is-condensed {
+  top: 6px;
+  gap: 14px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 24px rgba(2, 30, 16, 0.1);
+}
+
+.site-header.is-condensed .brand-logo-header {
+  width: clamp(138px, 16vw, 214px);
+}
+
+.site-header.is-condensed .site-nav {
+  gap: 16px;
+  font-size: 0.84rem;
+}
+
+.site-header.is-condensed .nav-cta {
+  min-height: 34px;
+  padding: 0 15px;
+  font-size: 0.8rem;
+}
+
+.site-header.is-condensed .auth-link,
+.site-header.is-condensed .auth-signout,
+.site-header.is-condensed .auth-user-pill {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 720px) {
+  .site-header.is-condensed {
+    top: 6px;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .site-header.is-condensed .brand-logo-header {
+    width: 172px;
+  }
+}
