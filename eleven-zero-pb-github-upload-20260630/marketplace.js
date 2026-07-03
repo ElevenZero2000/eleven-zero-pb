@@ -472,7 +472,7 @@ function renderSellerDraftStatus(overrideMessage = "") {
   if (listingState.sellerDraftSavedAt && formHasContent) {
     sellerDraftStatus.textContent = `Draft saved on this device · updated ${formatSavedTimeLabel(
       listingState.sellerDraftSavedAt
-    )}. ${hasPhotos ? "Photos stay in this tab until you publish." : "Add photos whenever you’re ready."}`;
+    )}. ${hasPhotos ? "Photos stay in this tab until you submit for review." : "Add photos whenever you’re ready."}`;
     return;
   }
 
@@ -913,8 +913,29 @@ function getListingActionState(item) {
   const currentUserId = Number(ElevenZeroApp.session?.user?.id || 0);
   const sellerUserId = Number(item.seller_user_id || 0);
   const isOwner = currentUserId && sellerUserId && currentUserId === sellerUserId;
+  const approvalStatus = item.approval_status || "approved";
 
   if (isOwner) {
+    if (approvalStatus === "pending") {
+      return {
+        action: "disabled",
+        buttonLabel: "Under review",
+        statusLabel: "Pending review",
+        reason: "This listing is waiting for Eleven Zero PB approval before shoppers can see it.",
+        tone: "pending",
+      };
+    }
+
+    if (approvalStatus === "rejected") {
+      return {
+        action: "disabled",
+        buttonLabel: "Needs changes",
+        statusLabel: "Needs changes",
+        reason: "This listing is paused until the seller updates it and resubmits it for review.",
+        tone: "neutral",
+      };
+    }
+
     return {
       action: "disabled",
       buttonLabel: "Your listing",
@@ -1379,23 +1400,23 @@ function renderSellerReadiness() {
   sellerReadinessPill.textContent = `${completedSteps}/5 ready`;
 
   if (!signedIn) {
-    sellerReadinessTitle.textContent = "Sign in to publish";
+    sellerReadinessTitle.textContent = "Sign in to start selling";
     sellerReadinessCopy.textContent =
-      "Create or sign in to your account so you can save your listing and publish it to the marketplace.";
+      "Create or sign in to your account so you can save your listing and submit it for Eleven Zero PB review.";
   } else if (completedSteps < 5) {
     sellerReadinessTitle.textContent = "You are building a strong listing";
     sellerReadinessCopy.textContent =
       payoutsReady
-        ? "Finish the remaining listing and shipping details below and this paddle will be ready to publish."
-        : "Finish the remaining listing and shipping details below. You can publish first and complete payout setup later from the Account page.";
+        ? "Finish the remaining listing and shipping details below and this paddle will be ready to submit for review."
+        : "Finish the remaining listing and shipping details below. You can submit first and finish payout setup later from the Account page.";
   } else if (payoutsReady) {
-    sellerReadinessTitle.textContent = "Ready to publish";
+    sellerReadinessTitle.textContent = "Ready to submit";
     sellerReadinessCopy.textContent =
-      "Your listing, shipping setup, and seller account all look complete. Publish when you are ready.";
+      "Your listing, shipping setup, and seller account all look complete. Submit it when you are ready and we’ll review it before it goes live.";
   } else {
-    sellerReadinessTitle.textContent = "Almost ready to publish";
+    sellerReadinessTitle.textContent = "Ready for review";
     sellerReadinessCopy.textContent =
-      "Your listing can be published now. Complete payout setup later in Account before online checkout is enabled.";
+      "Your listing can be submitted now. Finish payout setup later in Account before online checkout is enabled.";
   }
 
   sellerReadinessGrid.innerHTML = [
@@ -1586,11 +1607,11 @@ function renderListings() {
       listingNote.textContent = `Search results update live while you browse. Current filters: ${activeFilters}.`;
     } else {
       listingNote.textContent = !ElevenZeroApp.session?.authenticated
-        ? "Want to sell too? Sign in and publish your own paddle listing."
+        ? "Want to sell too? Sign in and submit your own paddle listing for review."
         : !sellerProfile?.connectConfigured
-          ? "You can publish listings now. Online checkout is being finalized for sellers."
+          ? "You can submit listings for review now. Online checkout is being finalized for sellers."
           : !sellerProfile?.readyForPayouts
-            ? "You can publish listings now. Finish your payout setup in Account before online checkout is enabled on your listings."
+            ? "You can submit listings for review now. Finish your payout setup in Account before online checkout is enabled on your listings."
             : "You are signed in and ready to manage your marketplace listings.";
     }
   }
@@ -1768,7 +1789,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
     const messageBits = [
       `${listingState.draftImages.length} photo${
         listingState.draftImages.length === 1 ? "" : "s"
-      } ready for publishing.`,
+      } ready for review.`,
       "The first photo will be used as the cover image.",
       prepared.skippedCount
         ? `${prepared.skippedCount} extra photo${prepared.skippedCount === 1 ? " was" : "s were"} skipped because the limit is 4.`
@@ -1796,7 +1817,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
 async function handleListingSubmit(event) {
   event.preventDefault();
 
-  if (!ElevenZeroApp.requireAuth(listingStatus, "Sign in to publish your listing.")) {
+  if (!ElevenZeroApp.requireAuth(listingStatus, "Sign in to submit your listing for review.")) {
     return;
   }
 
@@ -1812,7 +1833,7 @@ async function handleListingSubmit(event) {
   if (!listingState.draftImages.length) {
     ElevenZeroApp.setStatus(
       listingStatus,
-      "Please add at least one paddle photo before publishing.",
+      "Please add at least one paddle photo before submitting the listing for review.",
       "warning"
     );
     photoInput?.focus();
@@ -1842,8 +1863,8 @@ async function handleListingSubmit(event) {
     ElevenZeroApp.setStatus(
       listingStatus,
       sellerProfile?.readyForPayouts
-        ? `${payload.brand} ${payload.model} is now live in the marketplace with its own detail page.`
-        : `${payload.brand} ${payload.model} is now live in the marketplace. Next step: finish payout setup in Account before online checkout is enabled.`,
+        ? `${payload.brand} ${payload.model} was submitted for review. Once approved, it will go live with its own detail page.`
+        : `${payload.brand} ${payload.model} was submitted for review. Next step: finish payout setup in Account before online checkout is enabled after approval.`,
       "success"
     );
     await loadListings();
@@ -1906,7 +1927,7 @@ function removeDraftPhoto(index) {
   ElevenZeroApp.setStatus(
     listingStatus,
     listingState.draftImages.length
-      ? `${listingState.draftImages.length} photo${listingState.draftImages.length === 1 ? "" : "s"} ready for publishing.`
+      ? `${listingState.draftImages.length} photo${listingState.draftImages.length === 1 ? "" : "s"} ready for review.`
       : "Photo previews cleared. Add images to continue.",
     listingState.draftImages.length ? "success" : "warning"
   );
@@ -1936,8 +1957,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderPhotoPreview();
   renderSellerReadiness();
   renderSellerLivePreview();
-  await loadListings();
-  await handleCheckoutReturn();
+  try {
+    await loadListings();
+  } catch (error) {
+    const previewMessage =
+      window.location.protocol === "file:"
+        ? "Listings load when this page is opened through the local preview server or live site."
+        : error.message;
+
+    setMarketplaceStatus(previewMessage, "warning");
+  }
+
+  try {
+    await handleCheckoutReturn();
+  } catch (error) {
+    setMarketplaceStatus(error.message, "warning");
+  }
 
   filterButtons.forEach((button) => {
     button.addEventListener("click", () => {

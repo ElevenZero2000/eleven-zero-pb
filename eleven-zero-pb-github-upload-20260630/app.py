@@ -715,6 +715,19 @@ DIRECTORY_SURFACE_LABELS = {
     "outdoor": "Outdoor",
 }
 
+LISTING_APPROVAL_LABELS = {
+    "pending": "Pending review",
+    "approved": "Live",
+    "rejected": "Needs changes",
+}
+
+
+def normalize_listing_approval_status(value: str, default: str = "pending") -> str:
+    normalized = compact_whitespace(value).lower()
+    if normalized in LISTING_APPROVAL_LABELS:
+        return normalized
+    return default
+
 
 def court_condition_label(average: float) -> str:
     if average >= 4.5:
@@ -1131,6 +1144,8 @@ def init_database() -> None:
               shipping_height_in REAL,
               shipping_note TEXT NOT NULL DEFAULT '',
               image_data_json TEXT NOT NULL DEFAULT '[]',
+              approval_status TEXT NOT NULL DEFAULT 'approved',
+              reviewed_at TEXT,
               created_at TEXT NOT NULL
             );
 
@@ -1242,6 +1257,8 @@ def init_database() -> None:
         add_column_if_missing(connection, "listings", "shipping_height_in", "REAL")
         add_column_if_missing(connection, "listings", "shipping_note", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "listings", "image_data_json", "TEXT NOT NULL DEFAULT '[]'")
+        add_column_if_missing(connection, "listings", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
+        add_column_if_missing(connection, "listings", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -1752,8 +1769,15 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
     seller_user_id = row_value(row, "user_id")
     seller_profile = stripe_profile_from_row(row)
     price_usd = int(row_value(row, "price_usd", 0) or 0)
+    approval_status = normalize_listing_approval_status(
+        row_value(row, "approval_status", "approved"), default="approved"
+    )
 
-    if not stripe_is_configured():
+    if approval_status == "pending":
+        reason = "This listing is waiting for Eleven Zero PB review before it can go live."
+    elif approval_status == "rejected":
+        reason = "This listing is paused and needs seller updates before it can go live."
+    elif not stripe_is_configured():
         reason = "Platform checkout will turn on after Stripe keys are connected."
     elif not seller_user_id:
         reason = "This sample listing is not attached to a live seller account yet."
@@ -1768,7 +1792,12 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
         "sellerUserId": seller_user_id or None,
         "sellerProfile": seller_profile,
         "priceCents": max(price_usd, 0) * 100,
-        "available": bool(seller_user_id and seller_profile["readyForPayouts"] and stripe_is_configured()),
+        "available": bool(
+            approval_status == "approved"
+            and seller_user_id
+            and seller_profile["readyForPayouts"]
+            and stripe_is_configured()
+        ),
         "reason": reason,
     }
 
@@ -1784,6 +1813,9 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
     if not images:
         images = demo_listing_images_for_row(row)
     shipping_policy = shipping_policy_from_row(row)
+    approval_status = normalize_listing_approval_status(
+        row_value(row, "approval_status", "approved"), default="approved"
+    )
 
     return {
         "id": row["id"],
@@ -1799,6 +1831,9 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         "images": images,
         "primary_image": images[0] if images else "",
         "created_at": row["created_at"],
+        "approval_status": approval_status,
+        "approval_label": LISTING_APPROVAL_LABELS.get(approval_status, "Pending review"),
+        "reviewed_at": row_value(row, "reviewed_at"),
         "seller_name": row["seller_name"],
         "shipping": shipping_policy,
         "shipping_policy_label": shipping_policy["label"],
@@ -1999,10 +2034,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         return f"{self.current_origin()}/account.html#seller-payouts"
 
     def checkout_success_url(self) -> str:
-        return f"{self.current_origin()}/index.html?checkout=success&session_id={{CHECKOUT_SESSION_ID}}#shop"
+        return f"{self.current_origin()}/shop.html?checkout=success&session_id={{CHECKOUT_SESSION_ID}}#listings"
 
     def checkout_cancel_url(self) -> str:
-        return f"{self.current_origin()}/index.html?checkout=cancel#shop"
+        return f"{self.current_origin()}/shop.html?checkout=cancel#listings"
 
     def handle_api_get(self, parsed):
         if parsed.path == "/api/health":
@@ -2024,7 +2059,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
                 return
 
-            item = self.fetch_listing_by_id(int(listing_id))
+            item = self.fetch_listing_by_id(int(listing_id), self.current_user())
             if not item:
                 self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
                 return
@@ -2147,6 +2182,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_admin_listing_update(body)
             return
 
+        if parsed.path == "/api/admin/listings/review":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_listing_review(body)
+            return
+
         if parsed.path == "/api/admin/listings/delete":
             user = self.require_user()
             if not self.require_admin(user):
@@ -2259,6 +2301,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_height_in,
                   listings.shipping_note,
                   listings.image_data_json,
+                  listings.approval_status,
+                  listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,
@@ -2270,13 +2314,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.stripe_account_status_updated_at
                 FROM listings
                 LEFT JOIN users ON users.id = listings.user_id
+                WHERE listings.approval_status = 'approved'
                 ORDER BY listings.created_at DESC
                 """
             ).fetchall()
 
         return [serialize_listing_row(row) for row in rows]
 
-    def fetch_listing_by_id(self, listing_id: int) -> dict | None:
+    def fetch_listing_by_id(self, listing_id: int, viewer: dict | None = None) -> dict | None:
         with closing(connect_db()) as connection:
             row = connection.execute(
                 """
@@ -2302,6 +2347,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_height_in,
                   listings.shipping_note,
                   listings.image_data_json,
+                  listings.approval_status,
+                  listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,
@@ -2317,6 +2364,19 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """,
                 (listing_id,),
             ).fetchone()
+
+        if not row:
+            return None
+
+        approval_status = normalize_listing_approval_status(
+            row_value(row, "approval_status", "approved"), default="approved"
+        )
+        viewer_id = int(viewer.get("id") or 0) if viewer else 0
+        viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
+        listing_owner_id = int(row["user_id"] or 0)
+
+        if approval_status != "approved" and not viewer_is_admin and viewer_id != listing_owner_id:
+            return None
 
         return serialize_listing_row(row)
 
@@ -2489,6 +2549,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_height_in,
                   listings.shipping_note,
                   listings.image_data_json,
+                  listings.approval_status,
+                  listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,
@@ -2685,6 +2747,23 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         seller_user_id = checkout_state["sellerUserId"]
         seller_profile = checkout_state["sellerProfile"]
         total_cents = checkout_state["priceCents"]
+        approval_status = normalize_listing_approval_status(
+            row_value(listing_row, "approval_status", "approved"), default="approved"
+        )
+
+        if approval_status == "pending":
+            self.send_json(
+                {"error": "This listing is still waiting for Eleven Zero PB review before checkout can begin."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
+        if approval_status == "rejected":
+            self.send_json(
+                {"error": "This listing needs seller updates before checkout can begin."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
 
         if not stripe_is_configured():
             self.send_json(
@@ -3028,7 +3107,17 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchone()[0]
             recent_listings = connection.execute(
                 """
-                SELECT brand, model, category, condition, price_usd, location, created_at
+                SELECT
+                  id,
+                  brand,
+                  model,
+                  category,
+                  condition,
+                  price_usd,
+                  location,
+                  approval_status,
+                  reviewed_at,
+                  created_at
                 FROM listings
                 WHERE user_id = ?
                 ORDER BY created_at DESC
@@ -3063,6 +3152,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         with closing(connect_db()) as connection:
             user_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
             listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+            listing_pending_count = connection.execute(
+                "SELECT COUNT(*) FROM listings WHERE approval_status = 'pending'"
+            ).fetchone()[0]
+            listing_approved_count = connection.execute(
+                "SELECT COUNT(*) FROM listings WHERE approval_status = 'approved'"
+            ).fetchone()[0]
+            listing_rejected_count = connection.execute(
+                "SELECT COUNT(*) FROM listings WHERE approval_status = 'rejected'"
+            ).fetchone()[0]
             court_count = connection.execute("SELECT COUNT(*) FROM courts_directory").fetchone()[0]
             trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
             trainer_review_count = connection.execute("SELECT COUNT(*) FROM trainer_reviews").fetchone()[0]
@@ -3092,6 +3190,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_height_in,
                   listings.shipping_note,
                   listings.image_data_json,
+                  listings.approval_status,
+                  listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
                   users.email AS seller_email,
@@ -3203,6 +3303,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "stats": {
                 "users": user_count,
                 "listings": listing_count,
+                "listingPending": listing_pending_count,
+                "listingApproved": listing_approved_count,
+                "listingNeedsChanges": listing_rejected_count,
                 "courts": court_count,
                 "trainers": trainer_count,
                 "trainerReviews": trainer_review_count,
@@ -3270,6 +3373,49 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_json({"ok": True, "message": f"{brand} {model} was updated."})
+
+    def handle_admin_listing_review(self, body: dict):
+        listing_id = int(body.get("id") or 0)
+        requested_status = compact_whitespace(body.get("status", "")).lower()
+
+        if listing_id <= 0:
+            self.send_json({"error": "Choose a valid listing to review."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if requested_status not in LISTING_APPROVAL_LABELS:
+            self.send_json(
+                {"error": "Choose pending review, live, or needs changes for this listing."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        reviewed_at = utc_now() if requested_status in {"approved", "rejected"} else None
+
+        with closing(connect_db()) as connection:
+            listing_row = connection.execute(
+                "SELECT brand, model FROM listings WHERE id = ?",
+                (listing_id,),
+            ).fetchone()
+
+            if not listing_row:
+                self.send_json({"error": "Listing not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            connection.execute(
+                """
+                UPDATE listings
+                SET approval_status = ?, reviewed_at = ?
+                WHERE id = ?
+                """,
+                (requested_status, reviewed_at, listing_id),
+            )
+            connection.commit()
+
+        title = " ".join(
+            part for part in [listing_row["brand"], listing_row["model"]] if compact_whitespace(part)
+        ).strip() or "Listing"
+        status_label = LISTING_APPROVAL_LABELS.get(requested_status, "Pending review")
+        self.send_json({"ok": True, "message": f"{title} is now marked as {status_label.lower()}."})
 
     def handle_admin_listing_delete(self, body: dict):
         listing_id = int(body.get("id") or 0)
@@ -3663,7 +3809,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not all([brand, model, color, category, condition, location, notes]) or price_usd <= 0:
             self.send_json(
-                {"error": "Please complete every listing field before publishing."},
+                {"error": "Please complete every listing field before submitting it for review."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -3738,7 +3884,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not images:
             self.send_json(
-                {"error": "Add at least one paddle photo before publishing the listing."},
+                {"error": "Add at least one paddle photo before submitting the listing for review."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -3750,8 +3896,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   user_id, brand, model, color, thickness_mm, category, condition, price_usd, location, notes,
                   shipping_mode, shipping_flat_usd, shipping_origin_zip, shipping_origin_street1, shipping_weight_oz,
                   shipping_length_in, shipping_width_in, shipping_height_in, shipping_note,
-                  image_data_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  image_data_json, approval_status, reviewed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
@@ -3774,6 +3920,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     shipping_height_in,
                     shipping_note,
                     json.dumps(images),
+                    "pending",
+                    None,
                     utc_now(),
                 ),
             )
@@ -3803,6 +3951,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_height_in,
                   listings.shipping_note,
                   listings.image_data_json,
+                  listings.approval_status,
+                  listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
                   users.stripe_account_id,

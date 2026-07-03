@@ -128,10 +128,12 @@ const ElevenZeroApp = {
     links.forEach((link) => {
       const label = (link.textContent || "").trim().toLowerCase();
       const isActive =
+        (current === "home" && label === "home") ||
         (current === "shop" && label === "shop") ||
         (current === "courts" && label === "courts") ||
         (current === "trainers" && label === "trainers") ||
-        (current === "account" && label === "account");
+        (current === "account" && label === "account") ||
+        (current === "sell" && label === "sell");
 
       link.classList.toggle("is-current", isActive);
     });

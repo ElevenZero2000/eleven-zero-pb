@@ -44,7 +44,22 @@ function renderDashboardList(target, items, renderItem, emptyTitle, emptyCopy) {
   target.innerHTML = items.map(renderItem).join("");
 }
 
+function getListingStatusTone(status) {
+  if (status === "approved") return "ready";
+  if (status === "rejected") return "neutral";
+  return "pending";
+}
+
+function getListingStatusLabel(item) {
+  if (item.approval_label) return item.approval_label;
+  if (item.approval_status === "approved") return "Live";
+  if (item.approval_status === "rejected") return "Needs changes";
+  return "Pending review";
+}
+
 function renderListingItem(item) {
+  const statusTone = getListingStatusTone(item.approval_status);
+  const statusLabel = getListingStatusLabel(item);
   return `
     <article class="list-item">
       <strong>
@@ -55,6 +70,9 @@ function renderListingItem(item) {
       <span>${ElevenZeroApp.escapeHtml(item.category)} · ${ElevenZeroApp.formatMoney(
         item.price_usd
       )} · ${ElevenZeroApp.escapeHtml(item.location)}</span>
+      <span class="list-item-status list-item-status-${ElevenZeroApp.escapeHtml(statusTone)}">
+        ${ElevenZeroApp.escapeHtml(statusLabel)}
+      </span>
     </article>
   `;
 }
@@ -288,18 +306,23 @@ function renderAdminEmpty(target, title, copy) {
 function renderAdminListings(items) {
   if (!adminListings) return;
   if (!items.length) {
-    renderAdminEmpty(adminListings, "No listings yet", "The marketplace will appear here once people start posting.");
+    renderAdminEmpty(adminListings, "No listings yet", "Submitted paddle listings will appear here for review.");
     return;
   }
 
   adminListings.innerHTML = items
     .map(
-      (item) => `
+      (item) => {
+        const statusTone = getListingStatusTone(item.approval_status);
+        const statusLabel = getListingStatusLabel(item);
+
+        return `
         <details class="admin-record">
           <summary>
             <div>
               <strong>${escapeAttr(item.brand)} ${escapeAttr(item.model)}</strong>
               <span>${ElevenZeroApp.formatMoney(item.price_usd)} · ${escapeAttr(item.location)}</span>
+              <span class="admin-record-badge admin-record-badge-${escapeAttr(statusTone)}">${escapeAttr(statusLabel)}</span>
             </div>
             <span class="admin-record-meta">${escapeAttr(item.seller_email || "No seller email")}</span>
           </summary>
@@ -325,6 +348,18 @@ function renderAdminListings(items) {
               <textarea name="notes" rows="4">${escapeAttr(item.notes)}</textarea>
             </label>
 
+            <div class="admin-review-actions">
+              <button class="button button-dark" type="button" data-admin-review="approved" data-record-id="${escapeAttr(item.id)}">
+                Approve + publish
+              </button>
+              <button class="button button-secondary" type="button" data-admin-review="pending" data-record-id="${escapeAttr(item.id)}">
+                Move back to review
+              </button>
+              <button class="button button-secondary" type="button" data-admin-review="rejected" data-record-id="${escapeAttr(item.id)}">
+                Mark needs changes
+              </button>
+            </div>
+
             <div class="admin-actions">
               <a class="button button-secondary" href="./listing.html?id=${escapeAttr(item.id)}" target="_blank" rel="noreferrer">Open listing</a>
               <button class="button button-dark" type="submit">Save listing</button>
@@ -332,7 +367,8 @@ function renderAdminListings(items) {
             </div>
           </form>
         </details>
-      `
+      `;
+      }
     )
     .join("");
 }
@@ -508,13 +544,16 @@ async function loadAdminDashboard() {
     if (adminPill) adminPill.textContent = "Moderator active";
     if (adminSummary) {
       adminSummary.textContent =
-        "You are signed in with the owner account, so you can edit or remove live website content here.";
+        "You are signed in with the owner account, so you can review seller submissions before they go live, plus edit or remove website content here.";
     }
 
     if (adminStats) {
       adminStats.innerHTML = [
         adminStatCard("Users", stats.users || 0, "neutral"),
-        adminStatCard("Listings", stats.listings || 0, "ready"),
+        adminStatCard("Listings total", stats.listings || 0, "neutral"),
+        adminStatCard("Pending review", stats.listingPending || 0, "pending"),
+        adminStatCard("Live listings", stats.listingApproved || 0, "ready"),
+        adminStatCard("Needs changes", stats.listingNeedsChanges || 0, "neutral"),
         adminStatCard("Courts", stats.courts || 0, "ready"),
         adminStatCard("Trainers", stats.trainers || 0, "ready"),
         adminStatCard("Trainer reviews", stats.trainerReviews || 0, "pending"),
@@ -571,6 +610,27 @@ async function saveAdminRecord(form) {
   }
 }
 
+async function reviewAdminListing(recordId, status) {
+  const statusLabel =
+    status === "approved"
+      ? "approve and publish"
+      : status === "rejected"
+        ? "mark for changes"
+        : "move back to review";
+
+  try {
+    setAdminStatus(`Updating listing review status…`, "warning");
+    await ElevenZeroApp.request("/api/admin/listings/review", {
+      method: "POST",
+      body: { id: Number(recordId || 0), status },
+    });
+    await loadAdminDashboard();
+    setAdminStatus(`Listing updated: ${statusLabel}.`, "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+  }
+}
+
 async function deleteAdminRecord(type, recordId) {
   const routeByType = {
     listing: "/api/admin/listings/delete",
@@ -616,6 +676,12 @@ function bindAdminPanel() {
   });
 
   adminPanel?.addEventListener("click", async (event) => {
+    const reviewButton = event.target.closest("[data-admin-review]");
+    if (reviewButton) {
+      await reviewAdminListing(reviewButton.dataset.recordId, reviewButton.dataset.adminReview);
+      return;
+    }
+
     const button = event.target.closest("[data-admin-delete]");
     if (!button) return;
     await deleteAdminRecord(button.dataset.adminDelete, button.dataset.recordId);
@@ -651,7 +717,7 @@ async function loadDashboard() {
       response.recentListings || [],
       renderListingItem,
       "No listings yet",
-      "Publish your first paddle from the marketplace page."
+      "Submit your first paddle from the Sell page."
     );
     renderDashboardList(
       accountTrainers,

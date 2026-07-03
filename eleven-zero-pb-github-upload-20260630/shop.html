@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eleven Zero PB | Shop Pickleball Paddles</title>
+    <meta
+      name="description"
+      content="Shop pickleball paddles with smarter filters, listing detail pages, and clearer seller information on Eleven Zero PB."
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260703g" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260703a" />
+    <link rel="stylesheet" href="./split-preview.css?v=20260703b" />
+  </head>
+  <body data-nav="shop">
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
+          <img
+            class="brand-logo brand-logo-header"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="./index.html">Home</a>
+          <a href="./shop.html">Shop</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./account.html">Account</a>
+          <a href="./sell.html">Sell</a>
+        </nav>
+
+        <div class="nav-auth-slot" data-auth-slot></div>
+      </header>
+
+      <main id="top">
+        <section class="shop-split-hero">
+          <div class="shop-split-copy reveal">
+            <p class="eyebrow">Marketplace</p>
+            <h1>Shop reviewed pickleball paddle listings.</h1>
+            <p>
+              Browse live paddle listings with the filters buyers actually use —
+              brand, color, thickness, condition, price, location, photos, and
+              shipping details.
+            </p>
+
+            <div class="hero-actions">
+              <a class="button button-primary" href="#listings">Browse listings</a>
+              <a class="button button-secondary" href="./sell.html">Sell your paddle</a>
+            </div>
+
+            <div class="shop-split-points">
+              <div>
+                <strong>Search faster</strong>
+                <span>Brand, color, thickness, price, location, and condition stay front and center.</span>
+              </div>
+              <div>
+                <strong>Open full listings</strong>
+                <span>Each paddle can open into its own detail page with more photos and shipping information.</span>
+              </div>
+              <div>
+                <strong>Cleaner marketplace</strong>
+                <span>Every public listing has been reviewed before it appears in the shop.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="shop-split-visual reveal">
+            <div class="feature-topline">
+              <span class="pill">Live marketplace</span>
+              <span class="price" data-listing-count>0 listings</span>
+            </div>
+
+            <article class="shop-split-visual-card">
+              <img
+                src="https://images.pexels.com/photos/17299531/pexels-photo-17299531/free-photo-of-pickleball-paddle-on-blue-background.jpeg?auto=compress&cs=tinysrgb&w=1600"
+                alt="Pickleball paddle close-up"
+              />
+              <div class="shop-split-visual-copy">
+                <strong>See photos, specs, condition notes, and shipping details before you commit</strong>
+                <p>Open the full listing page to get the details serious buyers actually want.</p>
+              </div>
+            </article>
+
+            <div class="split-stat-grid">
+              <article class="split-stat-card">
+                <strong>Reviewed listings</strong>
+                <span>Public paddles are checked before going live so the marketplace stays cleaner.</span>
+              </article>
+              <article class="split-stat-card">
+                <strong>Shipping clarity</strong>
+                <span>Detail pages make it easier to understand shipping, seller notes, and what you are buying.</span>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="shop-helper-band reveal" aria-label="Marketplace advantages">
+          <article>
+            <strong>Reviewed before going live</strong>
+            <p>Public listings are checked first so the marketplace stays cleaner.</p>
+          </article>
+          <article>
+            <strong>Filter by real specs</strong>
+            <p>Brand, thickness, condition, price, and color help you narrow down faster.</p>
+          </article>
+          <article>
+            <strong>See the delivered flow</strong>
+            <p>Open full listings to view photos, notes, and shipping before checkout.</p>
+          </article>
+        </section>
+
+        <section class="listings-section section-block" id="listings">
+          <div class="section-heading reveal">
+            <div>
+              <p class="eyebrow">Marketplace</p>
+              <h2>Shop pickleball paddles</h2>
+            </div>
+
+            <p class="section-text">
+              Every listing in the public shop has been reviewed before going
+              live, so you can browse a cleaner marketplace with better details.
+            </p>
+          </div>
+
+          <div class="filter-row reveal" role="tablist" aria-label="Listing filters">
+            <button class="filter-chip is-active" type="button" data-filter="all">
+              All
+            </button>
+            <button class="filter-chip" type="button" data-filter="control">
+              Control
+            </button>
+            <button class="filter-chip" type="button" data-filter="power">
+              Power
+            </button>
+            <button class="filter-chip" type="button" data-filter="hybrid">
+              Hybrid
+            </button>
+          </div>
+
+          <form class="listing-search-panel reveal" data-listing-search-form>
+            <label class="listing-search-field listing-search-field-wide">
+              Search listings
+              <input
+                type="search"
+                name="query"
+                placeholder="Brand, model, seller, location, or notes"
+                autocomplete="off"
+              />
+            </label>
+
+            <label class="listing-search-field">
+              Location
+              <input
+                type="search"
+                name="location"
+                placeholder="Miami, Austin, zip, or state"
+                autocomplete="off"
+              />
+            </label>
+
+            <label class="listing-search-field">
+              Brand
+              <select name="brand">
+                <option value="">All brands</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Color
+              <select name="color">
+                <option value="">All colors</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Thickness
+              <select name="thickness">
+                <option value="">Any thickness</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Condition
+              <select name="condition">
+                <option value="">Any condition</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Min price
+              <input type="number" name="minPrice" min="0" step="1" placeholder="60" />
+            </label>
+
+            <label class="listing-search-field">
+              Max price
+              <input type="number" name="maxPrice" min="0" step="1" placeholder="250" />
+            </label>
+
+            <label class="listing-search-field">
+              Photos
+              <select name="photos">
+                <option value="">Any photo count</option>
+                <option value="1">Has photos</option>
+                <option value="2">2+ photos</option>
+                <option value="3">3+ photos</option>
+              </select>
+            </label>
+
+            <label class="listing-search-field">
+              Sort by
+              <select name="sort">
+                <option value="relevance">Best match</option>
+                <option value="newest">Newest first</option>
+                <option value="price-asc">Price: low to high</option>
+                <option value="price-desc">Price: high to low</option>
+                <option value="photos">Most photos</option>
+              </select>
+            </label>
+
+            <div class="listing-search-actions">
+              <button class="button button-secondary listing-reset-button" type="button" data-listing-reset>
+                Reset filters
+              </button>
+            </div>
+          </form>
+
+          <div class="listing-quick-brands reveal" data-listing-brand-pills>
+            <span class="listing-quick-brands-label">Popular brands will appear here as more paddles go live.</span>
+          </div>
+
+          <div class="listing-active-filters reveal" data-listing-active-filters></div>
+
+          <p class="listing-search-summary reveal" data-listing-search-summary>
+            Use the filters to narrow down by brand, color, thickness, condition, price, and more.
+          </p>
+
+          <div class="results-meta reveal">
+            <div>
+              <p class="eyebrow">Current view</p>
+              <h3 class="results-title" data-listings-heading>Marketplace listings</h3>
+            </div>
+
+            <p class="results-note" data-listings-note>
+              Want to sell yours too? Create an account and submit your listing for review.
+            </p>
+          </div>
+
+          <p class="marketplace-status reveal" data-marketplace-status aria-live="polite">
+            Reviewed listings load here as new paddles are approved.
+          </p>
+
+          <div class="product-grid" data-listings-grid></div>
+        </section>
+
+        <section class="split-shop-cta reveal" id="seller-direction">
+          <div>
+            <p class="eyebrow">Want to sell too?</p>
+            <h2>Turn your paddle into somebody else’s next favorite.</h2>
+            <p>
+              Create your account, add photos, set the shipping details, and
+              submit a listing buyers can actually trust.
+            </p>
+          </div>
+
+          <div class="split-shop-cta-actions">
+            <a class="button button-primary" href="./sell.html">Sell your paddle</a>
+            <a class="button button-secondary" href="./index.html">Back home</a>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="footer-brand-block">
+          <img
+            class="brand-logo brand-logo-footer"
+            src="./assets/logo-primary.png"
+            alt="Eleven Zero"
+          />
+          <p class="footer-copy">
+            Eleven Zero PB is a pickleball marketplace built to help players buy
+            and sell paddles, find courts, and connect with trainers.
+          </p>
+        </div>
+
+        <div class="footer-links">
+          <a href="./index.html">Home</a>
+          <a href="./shop.html">Shop</a>
+          <a href="./sell.html">Sell</a>
+          <a href="./courts.html">Courts</a>
+          <a href="./trainers.html">Trainers</a>
+          <a href="./account.html">Account</a>
+          <a href="./privacy.html">Privacy</a>
+          <a href="./terms.html">Terms</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="./app.js?v=20260703e"></script>
+    <script src="./marketplace.js?v=20260703e"></script>
+    <script src="./header-tweaks.js?v=20260703a"></script>
+  </body>
+</html>

@@ -326,8 +326,29 @@ function getListingActionState(item) {
   const currentUserId = Number(ElevenZeroApp.session?.user?.id || 0);
   const sellerUserId = Number(item.seller_user_id || 0);
   const isOwner = currentUserId && sellerUserId && currentUserId === sellerUserId;
+  const approvalStatus = item.approval_status || "approved";
 
   if (isOwner) {
+    if (approvalStatus === "pending") {
+      return {
+        action: "disabled",
+        buttonLabel: "Under review",
+        statusLabel: "Pending review",
+        reason: "This listing is waiting for Eleven Zero PB approval before it appears in the public shop.",
+        tone: "pending",
+      };
+    }
+
+    if (approvalStatus === "rejected") {
+      return {
+        action: "disabled",
+        buttonLabel: "Needs changes",
+        statusLabel: "Needs changes",
+        reason: "This listing is paused until the seller updates it and resubmits it for review.",
+        tone: "neutral",
+      };
+    }
+
     return {
       action: "disabled",
       buttonLabel: "Your listing",
@@ -653,7 +674,7 @@ function renderContent(item) {
       </article>
     </div>
     <div class="listing-detail-actions-bar">
-      <a class="button button-secondary" href="./index.html#listings">Back to shop</a>
+      <a class="button button-secondary" href="./shop.html">Back to shop</a>
       <button class="button button-secondary" type="button" data-copy-listing-link>
         Copy listing link
       </button>
@@ -1008,7 +1029,7 @@ function renderNotFound() {
       <p class="listing-detail-copy">
         This listing may have been removed, or the link is incomplete.
       </p>
-      <a class="button button-dark" href="./index.html#listings">Return to marketplace</a>
+      <a class="button button-dark" href="./shop.html">Return to marketplace</a>
     `;
   }
 

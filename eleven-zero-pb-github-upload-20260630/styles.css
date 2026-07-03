@@ -1606,6 +1606,109 @@ select {
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+.seller-guide-panel {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.seller-guide-panel-compact {
+  gap: 14px;
+}
+
+.seller-guide-head {
+  display: grid;
+  gap: 8px;
+}
+
+.seller-guide-head .eyebrow {
+  margin-bottom: 0;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.seller-guide-head strong {
+  font-size: 1rem;
+}
+
+.seller-guide-list {
+  display: grid;
+  gap: 12px;
+}
+
+.seller-guide-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.seller-guide-step:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.seller-guide-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(8, 233, 90, 0.14);
+  color: #dfffd1;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.seller-guide-step strong,
+.seller-guide-step span {
+  display: block;
+}
+
+.seller-guide-step strong {
+  font-size: 0.92rem;
+}
+
+.seller-guide-step span {
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.55;
+}
+
+.seller-standards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.seller-standard-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.seller-standard-card strong,
+.seller-standard-card span {
+  display: block;
+}
+
+.seller-standard-card strong {
+  font-size: 0.9rem;
+}
+
+.seller-standard-card span {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.5;
+}
+
 .seller-form {
   display: grid;
   gap: 14px;
@@ -2764,6 +2867,34 @@ select {
   line-height: 1.5;
 }
 
+.list-item-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.list-item-status-ready {
+  background: rgba(8, 233, 90, 0.14);
+  color: var(--forest);
+}
+
+.list-item-status-pending {
+  background: rgba(247, 241, 80, 0.18);
+  color: #695d00;
+}
+
+.list-item-status-neutral {
+  background: rgba(18, 18, 18, 0.08);
+  color: rgba(18, 18, 18, 0.72);
+}
+
 .list-item-empty {
   background: rgba(255, 255, 255, 0.7);
 }
@@ -3047,6 +3178,35 @@ select {
   color: rgba(18, 18, 18, 0.68);
 }
 
+.admin-record-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-record-badge-ready {
+  background: rgba(8, 233, 90, 0.14);
+  color: var(--forest);
+}
+
+.admin-record-badge-pending {
+  background: rgba(247, 241, 80, 0.18);
+  color: #695d00;
+}
+
+.admin-record-badge-neutral {
+  background: rgba(18, 18, 18, 0.08);
+  color: rgba(18, 18, 18, 0.72);
+}
+
 .admin-record-meta {
   font-size: 0.82rem;
   text-align: right;
@@ -3101,6 +3261,12 @@ select {
 }
 
 .admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-review-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -5140,6 +5306,10 @@ body.has-modal-open {
     grid-template-columns: 1fr 1fr;
   }
 
+  .seller-standards-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .seller-preview-head {
     flex-direction: column;
     align-items: start;
@@ -5310,6 +5480,10 @@ body.has-modal-open {
   }
 
   .seller-launch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .seller-standards-grid {
     grid-template-columns: 1fr;
   }
 
