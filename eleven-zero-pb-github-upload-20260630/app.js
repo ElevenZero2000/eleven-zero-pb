@@ -66,14 +66,31 @@ const ElevenZeroApp = {
     return payload;
   },
 
-  redirectToAuth(next = `${window.location.pathname}${window.location.hash}`) {
-    const encoded = encodeURIComponent(next || "./account.html");
+  normalizePostAuthDestination(next) {
+    const destination = String(next || "").trim();
+
+    if (!destination) return "./account.html";
+
+    if (
+      destination === "./auth.html" ||
+      destination === "/auth.html" ||
+      destination.startsWith("./auth.html?") ||
+      destination.startsWith("/auth.html?")
+    ) {
+      return "./account.html";
+    }
+
+    return destination;
+  },
+
+  redirectToAuth(next = `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+    const encoded = encodeURIComponent(this.normalizePostAuthDestination(next));
     window.location.href = `./auth.html?next=${encoded}`;
   },
 
   getPostAuthDestination() {
     const params = new URLSearchParams(window.location.search);
-    return params.get("next") || "./account.html";
+    return this.normalizePostAuthDestination(params.get("next") || "./account.html");
   },
 
   requireAuth(statusNode, message = "Please sign in first to use this feature.") {

@@ -195,6 +195,14 @@ select {
   transform: translateY(-2px);
 }
 
+.button:disabled,
+.auth-signout:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+  box-shadow: none;
+}
+
 .hero-section {
   display: grid;
   grid-template-columns: minmax(0, 1.02fr) minmax(320px, 0.98fr);
@@ -1734,6 +1742,12 @@ select {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.96);
   color: var(--ink);
+}
+
+.seller-form[aria-busy="true"] input,
+.seller-form[aria-busy="true"] select,
+.seller-form[aria-busy="true"] textarea {
+  opacity: 0.82;
 }
 
 .seller-form textarea {
