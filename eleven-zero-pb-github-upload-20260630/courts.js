@@ -243,6 +243,13 @@ const DEFAULT_MAP_CENTER = {
   zoom: 4,
 };
 
+const DEFAULT_QUICK_SEARCHES = [
+  "Miami, FL",
+  "Austin, TX",
+  "Scottsdale, AZ",
+  "Charlotte, NC",
+];
+
 const GOOGLE_MARKER_COLORS = {
   free: "#08e95a",
   paid: "#ff620f",
@@ -1061,11 +1068,32 @@ function renderEmptyState(totalCount) {
         ? "No official courts have been added yet. Search a city above or add the first venue below."
         : "No pickleball courts came back for this search yet. Try a nearby city or a bigger radius.";
 
+  const quickSearchMarkup =
+    totalCount === 0 && state.source === "directory"
+      ? `
+        <div class="empty-state-quick">
+          <strong>Popular starting searches</strong>
+          <div class="empty-state-quick-row">
+            ${DEFAULT_QUICK_SEARCHES.map(
+              (label) => `
+                <button class="city-pin city-pin-dark" type="button" data-empty-quick-search="${escapeHtml(
+                  label
+                )}">
+                  ${escapeHtml(label)}
+                </button>
+              `
+            ).join("")}
+          </div>
+        </div>
+      `
+      : "";
+
   resultsGrid.innerHTML = `
     <article class="empty-state reveal is-visible">
       <p class="eyebrow">No results</p>
       <h3>Nothing to show just yet.</h3>
       <p>${escapeHtml(copy)}</p>
+      ${quickSearchMarkup}
     </article>
   `;
 }
@@ -1143,6 +1171,26 @@ function buildMapSelection(court) {
   if (!mapSelection) return;
 
   if (!court) {
+    const quickSearchMarkup =
+      !state.courts.length && state.source === "directory"
+        ? `
+          <div class="court-map-selection-quick">
+            <strong>Start with a live city search</strong>
+            <div class="empty-state-quick-row">
+              ${DEFAULT_QUICK_SEARCHES.map(
+                (label) => `
+                  <button class="city-pin city-pin-dark" type="button" data-map-quick-search="${escapeHtml(
+                    label
+                  )}">
+                    ${escapeHtml(label)}
+                  </button>
+                `
+              ).join("")}
+            </div>
+          </div>
+        `
+        : "";
+
     mapSelection.innerHTML = `
       <p class="eyebrow">Selected court</p>
       <h3>Pick a marker or use a “Show on map” button.</h3>
@@ -1150,6 +1198,7 @@ function buildMapSelection(court) {
         The map will center the selected court here so players can compare
         the cards with the map view more easily.
       </p>
+      ${quickSearchMarkup}
     `;
     return;
   }
@@ -1433,6 +1482,15 @@ function setMapView(lat, lon, zoom) {
   renderMapSurface();
 }
 
+function triggerQuickSearch(query) {
+  const nextQuery = String(query || "").trim();
+  if (!nextQuery || !searchInput || !finderForm) return;
+
+  searchInput.value = nextQuery;
+  document.querySelector("#finder")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  finderForm.requestSubmit();
+}
+
 function fitMapToCourts(courts) {
   if (!courts.length) {
     setMapView(DEFAULT_MAP_CENTER.lat, DEFAULT_MAP_CENTER.lon, DEFAULT_MAP_CENTER.zoom);
@@ -1518,7 +1576,9 @@ function syncMapWithCourts(courts, { fitBounds = false } = {}) {
     renderCourtCommunity(null);
     setMapView(DEFAULT_MAP_CENTER.lat, DEFAULT_MAP_CENTER.lon, DEFAULT_MAP_CENTER.zoom);
     setMapStatus(
-      "No mappable court coordinates are available in this view yet. Try All, another city, or a wider radius.",
+      !courts.length && state.source === "directory"
+        ? "Run a live city search to load real court markers, or add the first venue below."
+        : "No mappable court coordinates are available in this view yet. Try All, another city, or a wider radius.",
       "warning"
     );
     return;
@@ -2280,11 +2340,7 @@ function initializeFilters() {
 function initializeQuickSearch() {
   quickSearchButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      const quickQuery = button.dataset.quickSearch || "";
-      if (!quickQuery || !searchInput) return;
-
-      searchInput.value = quickQuery;
-      finderForm?.requestSubmit();
+      triggerQuickSearch(button.dataset.quickSearch || "");
     });
   });
 }
@@ -2369,6 +2425,14 @@ function initializeReveal() {
 }
 
 function handleResultInteraction(event) {
+  const quickSearchButton = event.target.closest("[data-empty-quick-search], [data-map-quick-search]");
+  if (quickSearchButton) {
+    triggerQuickSearch(
+      quickSearchButton.dataset.emptyQuickSearch || quickSearchButton.dataset.mapQuickSearch || ""
+    );
+    return;
+  }
+
   const viewButton = event.target.closest("[data-view-court]");
   if (viewButton) {
     const courtId = viewButton.dataset.viewCourt || "";
