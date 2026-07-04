@@ -698,9 +698,9 @@ function shippingModeHelp(config = getDraftShippingConfig()) {
   }
 
   if (ElevenZeroApp.config?.shippoConfigured) {
-    return config.originZip && config.originStreet1 && config.weight && config.length && config.width && config.height
-      ? "Buyer address will be used to pull live carrier rates when possible."
-      : "Add the origin ZIP, private street address, and packed box details to unlock live carrier rates.";
+    return config.originZip
+      ? "Buyer address will be used to estimate shipping at checkout. Exact carrier details can be refined later."
+      : "Add the shipping ZIP code so buyers can see a better delivery estimate.";
   }
 
   return config.originZip
@@ -1377,16 +1377,7 @@ function renderSellerReadiness() {
   );
   const shippingConfig = getDraftShippingConfig();
   const flatShippingAmount = Number((shippingConfig.flat || "").replace(/[^\d]/g, ""));
-  const calculatedShippingReady = ElevenZeroApp.config?.shippoConfigured
-    ? Boolean(
-        shippingConfig.originZip &&
-          shippingConfig.originStreet1 &&
-          shippingConfig.weight &&
-          shippingConfig.length &&
-          shippingConfig.width &&
-          shippingConfig.height
-      )
-    : Boolean(shippingConfig.originZip);
+  const calculatedShippingReady = Boolean(shippingConfig.originZip);
   const shippingReady =
     shippingConfig.mode === "free" ||
     (shippingConfig.mode === "flat" && flatShippingAmount > 0) ||
@@ -1490,7 +1481,7 @@ function renderPhotoPreview() {
   if (!listingState.draftImages.length) {
     photoPreview.innerHTML = `
       <div class="seller-photo-placeholder">
-        Photo previews will show up here. Add at least one photo so buyers can see the paddle clearly.
+        Photo thumbnails will appear here after you upload them.
       </div>
     `;
     updatePhotoMeta();
