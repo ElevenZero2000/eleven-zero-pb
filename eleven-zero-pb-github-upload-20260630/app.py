@@ -3323,8 +3323,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         brand = str(body.get("brand", "")).strip()
         model = str(body.get("model", "")).strip()
         color = str(body.get("color", "")).strip()
-        thickness_mm = parse_thickness_mm(body.get("thickness"))
-        category = str(body.get("category", "")).strip().lower()
+        thickness_raw = str(body.get("thickness", "")).strip()
+        thickness_mm = parse_thickness_mm(thickness_raw) if thickness_raw else None
+        category = str(body.get("category", "")).strip().lower() or "control"
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip()
@@ -3336,7 +3337,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Choose a valid listing to update."}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        if not all([brand, model, color, category, condition, location, notes]) or price_usd <= 0:
+        if not all([brand, model, category, condition, location, notes]) or price_usd <= 0:
             self.send_json({"error": "Please complete every listing field before saving."}, status=HTTPStatus.BAD_REQUEST)
             return
 
@@ -3344,7 +3345,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Listing category must be control, power, or hybrid."}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        if thickness_mm is None:
+        if thickness_raw and thickness_mm is None:
             self.send_json({"error": "Add a valid paddle thickness in millimeters."}, status=HTTPStatus.BAD_REQUEST)
             return
 
@@ -3777,8 +3778,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         brand = str(body.get("brand", "")).strip()
         model = str(body.get("model", "")).strip()
         color = str(body.get("color", "")).strip()
-        thickness_mm = parse_thickness_mm(body.get("thickness"))
-        category = str(body.get("category", "")).strip().lower()
+        thickness_raw = str(body.get("thickness", "")).strip()
+        thickness_mm = parse_thickness_mm(thickness_raw) if thickness_raw else None
+        category = str(body.get("category", "")).strip().lower() or "control"
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip()
@@ -3807,16 +3809,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
         shipping_note = str(body.get("shippingNote", "")).strip()
 
-        if not all([brand, model, color, category, condition, location, notes]) or price_usd <= 0:
+        if not all([brand, model, category, condition, location, notes]) or price_usd <= 0:
             self.send_json(
                 {"error": "Please complete every listing field before submitting it for review."},
-                status=HTTPStatus.BAD_REQUEST,
-            )
-            return
-
-        if thickness_mm is None:
-            self.send_json(
-                {"error": "Add the paddle thickness in millimeters so buyers can filter properly."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -3824,6 +3819,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if category not in {"control", "power", "hybrid"}:
             self.send_json(
                 {"error": "Listing category must be control, power, or hybrid."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if thickness_raw and thickness_mm is None:
+            self.send_json(
+                {"error": "Add a valid paddle thickness in millimeters if you include it."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
