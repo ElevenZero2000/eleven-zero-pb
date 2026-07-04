@@ -193,12 +193,14 @@ const COURT_PLAYER_LEVEL_LABELS = {
   mixed: "Mixed levels",
 };
 
+const DEFAULT_DIRECTORY_LABEL = "Featured map + community directory";
+
 const state = {
   directoryCourts: [],
   courts: [],
   activeFilter: "all",
   source: "directory",
-  locationLabel: "Official courts directory",
+  locationLabel: DEFAULT_DIRECTORY_LABEL,
   lastQuery: "",
   searchGeo: null,
   radiusMiles: Number(radiusSelect?.value || 25),
@@ -972,6 +974,10 @@ function buildTagMarkup(court) {
     tags.push('<span class="court-tag court-tag-surface">Directory</span>');
   }
 
+  if (court.source === "sample") {
+    tags.push('<span class="court-tag court-tag-surface">Featured</span>');
+  }
+
   return tags.join("");
 }
 
@@ -983,9 +989,34 @@ function buildDetailMarkup(details) {
     .join("");
 }
 
+function buildAffiliateLabel(court) {
+  if (court.affiliateLabel) return court.affiliateLabel;
+  return court.accessKind === "paid"
+    ? "Book through Eleven Zero PB"
+    : "Visit partner through Eleven Zero PB";
+}
+
+function buildAffiliateLinkMarkup(court, extraClass = "") {
+  if (!court.affiliateUrl) return "";
+
+  const classes = ["text-link", "text-link-affiliate", extraClass]
+    .filter(Boolean)
+    .join(" ");
+
+  return `<a class="${classes}" href="${escapeHtml(
+    court.affiliateUrl
+  )}" target="_blank" rel="noreferrer sponsored">${escapeHtml(
+    buildAffiliateLabel(court)
+  )}</a>`;
+}
+
 function buildLinkMarkup(court) {
   const links = [];
   const googleMapsUrl = buildGoogleMapsUrl(court);
+
+  if (court.affiliateUrl) {
+    links.push(buildAffiliateLinkMarkup(court));
+  }
 
   links.push(
     `<button class="text-link text-link-button" type="button" data-view-court="${escapeHtml(
@@ -1229,6 +1260,10 @@ function buildMapSelection(court) {
     : "";
 
   const reportMarkup = buildCourtReportQuickMarkup(court);
+  const affiliateMarkup = buildAffiliateLinkMarkup(court, "text-link-popup");
+  const affiliateNoteMarkup = court.affiliateUrl
+    ? `<p class="court-affiliate-note">Use the partner link to support Eleven Zero PB while checking access, booking play, or opening the venue.</p>`
+    : "";
 
   mapSelection.innerHTML = `
     <p class="eyebrow">Selected court</p>
@@ -1244,8 +1279,10 @@ function buildMapSelection(court) {
     }
     <ul>${detailMarkup}</ul>
     <p class="court-map-selection-copy">${escapeHtml(court.description)}</p>
+    ${affiliateNoteMarkup}
     ${reportMarkup}
     <div class="court-map-popup-links">
+      ${affiliateMarkup}
       <button class="text-link text-link-button text-link-popup" type="button" data-view-court="${escapeHtml(
         court.id
       )}">View details</button>
@@ -1577,7 +1614,7 @@ function syncMapWithCourts(courts, { fitBounds = false } = {}) {
     setMapView(DEFAULT_MAP_CENTER.lat, DEFAULT_MAP_CENTER.lon, DEFAULT_MAP_CENTER.zoom);
     setMapStatus(
       !courts.length && state.source === "directory"
-        ? "Run a live city search to load real court markers, or add the first venue below."
+        ? "Clear the filters, search a city, or add a more specific address so the map has pins to place."
         : "No mappable court coordinates are available in this view yet. Try All, another city, or a wider radius.",
       "warning"
     );
@@ -1779,7 +1816,10 @@ async function initializeCourtMap() {
     }
   }
 
-  initializeFallbackCourtMap();
+  initializeFallbackCourtMap({
+    message: "Google Maps is not configured yet, so the backup map is live for now.",
+    tone: "warning",
+  });
 }
 
 function updateFilterUi() {
@@ -1813,7 +1853,7 @@ function updateResultsMeta(visibleCourts, allCourts) {
     const suffix =
       state.source === "live"
         ? `${state.locationLabel} · ${state.radiusMiles} mi radius`
-        : "Official courts directory";
+        : DEFAULT_DIRECTORY_LABEL;
     resultsHeading.textContent = suffix;
   }
 
@@ -1822,12 +1862,11 @@ function updateResultsMeta(visibleCourts, allCourts) {
   if (state.source === "directory") {
     if (!allCourts.length) {
       resultsNote.textContent =
-        "No official courts have been added yet. Use live city search or submit the first venue below.";
+        "No saved courts are live yet, so the page is ready for your first featured or community-added location.";
       return;
     }
 
-    resultsNote.textContent =
-      `Showing ${visibleCourts.length} of ${allCourts.length} courts from the Eleven Zero PB directory.`;
+    resultsNote.textContent = `Showing ${visibleCourts.length} of ${allCourts.length} courts, including ${state.directoryCourts.length} community-added locations and the featured pins that make the map usable right away.`;
     return;
   }
 
@@ -2140,6 +2179,18 @@ function mergeCourtCollections(primaryCourts, secondaryCourts = []) {
   return sortCourts(dedupeCourts([...secondaryCourts, ...primaryCourts]));
 }
 
+function buildDirectoryHomeCourts(items = state.directoryCourts) {
+  return mergeCourtCollections(items, defaultCourts);
+}
+
+function restoreDirectoryHomeState() {
+  const homeCourts = buildDirectoryHomeCourts();
+  state.courts = [...homeCourts];
+  state.visibleCourts = [...homeCourts];
+  state.activeCourtId = homeCourts[0]?.id || "";
+  state.locationLabel = DEFAULT_DIRECTORY_LABEL;
+}
+
 async function loadDirectoryCourts() {
   try {
     const response = await ElevenZeroApp.request("/api/courts-directory");
@@ -2147,18 +2198,40 @@ async function loadDirectoryCourts() {
     state.directoryCourts = items;
 
     if (state.source === "directory") {
-      state.courts = [...items];
-      state.visibleCourts = [...items];
-      state.activeCourtId = items[0]?.id || "";
+      restoreDirectoryHomeState();
     }
   } catch {
     state.directoryCourts = [];
     if (state.source === "directory") {
-      state.courts = [];
-      state.visibleCourts = [];
-      state.activeCourtId = "";
+      restoreDirectoryHomeState();
     }
   }
+}
+
+async function geocodeCourtSubmission(payload) {
+  const candidates = [
+    [payload.name, payload.address || payload.location].filter(Boolean).join(", "),
+    payload.address,
+    payload.location,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  const seen = new Set();
+
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    try {
+      return await geocodeQuery(candidate);
+    } catch {
+      // Try the next candidate until one resolves.
+    }
+  }
+
+  return null;
 }
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 25000) {
@@ -2294,9 +2367,8 @@ async function runLiveSearch(query, radiusMiles) {
     renderResults({ fitMap: true });
     saveSearchPreference();
   } catch (error) {
-    state.courts = [...state.directoryCourts];
+    restoreDirectoryHomeState();
     state.source = "directory";
-    state.locationLabel = "Official courts directory";
     state.searchGeo = null;
     await loadCourtSummaries(state.courts);
 
@@ -2523,15 +2595,25 @@ async function handleCourtDirectorySubmit(event) {
 
   const formData = new FormData(courtDirectoryForm);
   const payload = Object.fromEntries(formData.entries());
-  const geocodeTarget = [payload.name, payload.location].filter(Boolean).join(", ");
+  payload.name = String(payload.name || "").trim();
+  payload.location = String(payload.location || "").trim();
+  payload.address = String(payload.address || "").trim();
+  payload.affiliateUrl = String(payload.affiliateUrl || "").trim();
+  payload.affiliateLabel = String(payload.affiliateLabel || "").trim();
 
   try {
-    setCourtDirectoryStatus("Finding this venue on the map and saving it to the directory...", "warning");
+    setCourtDirectoryStatus("Saving the court and trying to place the pin automatically...", "warning");
 
-    const geo = await geocodeQuery(geocodeTarget);
-    payload.lat = geo.lat;
-    payload.lon = geo.lon;
-    payload.address = geo.addressLine || payload.location;
+    const geo = await geocodeCourtSubmission(payload);
+    if (geo) {
+      payload.lat = geo.lat;
+      payload.lon = geo.lon;
+      payload.address = payload.address || geo.addressLine || payload.location;
+    } else {
+      delete payload.lat;
+      delete payload.lon;
+      payload.address = payload.address || payload.location;
+    }
 
     const response = await ElevenZeroApp.request("/api/courts-directory", {
       method: "POST",
@@ -2540,15 +2622,18 @@ async function handleCourtDirectorySubmit(event) {
 
     courtDirectoryForm.reset();
     await loadDirectoryCourts();
-    await loadCourtSummaries(state.directoryCourts);
+    await loadCourtSummaries(buildDirectoryHomeCourts());
 
     if (state.source === "directory") {
-      state.courts = [...state.directoryCourts];
+      restoreDirectoryHomeState();
       renderResults({ fitMap: true });
     }
 
     setCourtDirectoryStatus(
-      response.message || `${payload.name} is now live in the courts directory.`,
+      geo
+        ? response.message || `${payload.name} is now live in the courts directory.`
+        : response.message ||
+            `${payload.name} is now live in the courts directory. The pin may still need a more exact address.`,
       "success"
     );
   } catch (error) {
