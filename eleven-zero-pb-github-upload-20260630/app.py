@@ -838,9 +838,11 @@ def serialize_directory_court_row(row: sqlite3.Row | dict | None) -> dict | None
     access_kind = row["access_kind"]
     surface_kind = row["surface_kind"]
     court_count = int(row["court_count"] or 0)
-    website = (row["website"] or "").strip()
-    access_note = (row["access_note"] or "").strip()
-    amenities = (row["amenities"] or "").strip()
+    website = (row_value(row, "website", "") or "").strip()
+    affiliate_url = (row_value(row, "affiliate_url", "") or "").strip()
+    affiliate_label = (row_value(row, "affiliate_label", "") or "").strip()
+    access_note = (row_value(row, "access_note", "") or "").strip()
+    amenities = (row_value(row, "amenities", "") or "").strip()
 
     details = [f"{court_count} court{'s' if court_count != 1 else ''}"]
     if access_note:
@@ -862,6 +864,8 @@ def serialize_directory_court_row(row: sqlite3.Row | dict | None) -> dict | None
         "tags": [access_kind, surface_kind],
         "source": "directory",
         "website": website,
+        "affiliateUrl": affiliate_url,
+        "affiliateLabel": affiliate_label,
         "osmUrl": "",
         "lat": row["lat"],
         "lon": row["lon"],
@@ -1223,6 +1227,8 @@ def init_database() -> None:
               amenities TEXT NOT NULL DEFAULT '',
               description TEXT NOT NULL,
               website TEXT NOT NULL DEFAULT '',
+              affiliate_url TEXT NOT NULL DEFAULT '',
+              affiliate_label TEXT NOT NULL DEFAULT '',
               lat REAL,
               lon REAL,
               created_at TEXT NOT NULL
@@ -1263,6 +1269,8 @@ def init_database() -> None:
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
 
         listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
         trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
@@ -2423,6 +2431,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   amenities,
                   description,
                   website,
+                  affiliate_url,
+                  affiliate_label,
                   lat,
                   lon,
                   created_at
@@ -4051,6 +4061,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         amenities = str(body.get("amenities", "")).strip()
         description = str(body.get("description", "")).strip()
         website = str(body.get("website", "")).strip()
+        affiliate_url = str(body.get("affiliateUrl", "")).strip()
+        affiliate_label = str(body.get("affiliateLabel", "")).strip()
         court_count_raw = str(body.get("courtCount", "")).strip()
 
         try:
@@ -4099,6 +4111,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if website and not urlparse(website).scheme:
             website = f"https://{website}"
 
+        if affiliate_url and not urlparse(affiliate_url).scheme:
+            affiliate_url = f"https://{affiliate_url}"
+
         with closing(connect_db()) as connection:
             cursor = connection.execute(
                 """
@@ -4114,10 +4129,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   amenities,
                   description,
                   website,
+                  affiliate_url,
+                  affiliate_label,
                   lat,
                   lon,
                   created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
@@ -4131,6 +4148,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     amenities,
                     description,
                     website,
+                    affiliate_url,
+                    affiliate_label,
                     lat,
                     lon,
                     utc_now(),
@@ -4152,6 +4171,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   amenities,
                   description,
                   website,
+                  affiliate_url,
+                  affiliate_label,
                   lat,
                   lon,
                   created_at
