@@ -708,6 +708,7 @@ COURT_PLAYER_LEVEL_LABELS = {
 DIRECTORY_ACCESS_LABELS = {
     "free": "Free",
     "paid": "Paid",
+    "check": "Check access",
 }
 
 DIRECTORY_SURFACE_LABELS = {
@@ -721,10 +722,23 @@ LISTING_APPROVAL_LABELS = {
     "rejected": "Needs changes",
 }
 
+COURT_APPROVAL_LABELS = {
+    "pending": "Pending review",
+    "approved": "Live",
+    "rejected": "Needs changes",
+}
+
 
 def normalize_listing_approval_status(value: str, default: str = "pending") -> str:
     normalized = compact_whitespace(value).lower()
     if normalized in LISTING_APPROVAL_LABELS:
+        return normalized
+    return default
+
+
+def normalize_court_approval_status(value: str, default: str = "pending") -> str:
+    normalized = compact_whitespace(value).lower()
+    if normalized in COURT_APPROVAL_LABELS:
         return normalized
     return default
 
@@ -890,6 +904,9 @@ def serialize_admin_court_row(row: sqlite3.Row | dict | None) -> dict | None:
     if not row:
         return None
 
+    approval_status = normalize_court_approval_status(
+        row_value(row, "approval_status", "approved"), default="approved"
+    )
     payload = serialize_directory_court_row(row) or {}
     payload.update(
         {
@@ -901,6 +918,11 @@ def serialize_admin_court_row(row: sqlite3.Row | dict | None) -> dict | None:
             "access_note": row["access_note"],
             "amenities": row["amenities"],
             "website": row["website"],
+            "affiliateUrl": row_value(row, "affiliate_url", ""),
+            "affiliateLabel": row_value(row, "affiliate_label", ""),
+            "approval_status": approval_status,
+            "approval_label": COURT_APPROVAL_LABELS.get(approval_status, "Pending review"),
+            "reviewed_at": row_value(row, "reviewed_at"),
         }
     )
     return payload
@@ -1229,6 +1251,8 @@ def init_database() -> None:
               website TEXT NOT NULL DEFAULT '',
               affiliate_url TEXT NOT NULL DEFAULT '',
               affiliate_label TEXT NOT NULL DEFAULT '',
+              approval_status TEXT NOT NULL DEFAULT 'approved',
+              reviewed_at TEXT,
               lat REAL,
               lon REAL,
               created_at TEXT NOT NULL
@@ -1271,6 +1295,8 @@ def init_database() -> None:
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "courts_directory", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
+        add_column_if_missing(connection, "courts_directory", "reviewed_at", "TEXT")
 
         listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
         trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
@@ -2211,6 +2237,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_admin_court_update(body)
             return
 
+        if parsed.path == "/api/admin/courts/review":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_court_review(body)
+            return
+
         if parsed.path == "/api/admin/courts/delete":
             user = self.require_user()
             if not self.require_admin(user):
@@ -2437,6 +2470,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   lon,
                   created_at
                 FROM courts_directory
+                WHERE approval_status = 'approved'
                 ORDER BY created_at DESC, id DESC
                 """
             ).fetchall()
@@ -3172,6 +3206,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "SELECT COUNT(*) FROM listings WHERE approval_status = 'rejected'"
             ).fetchone()[0]
             court_count = connection.execute("SELECT COUNT(*) FROM courts_directory").fetchone()[0]
+            court_pending_count = connection.execute(
+                "SELECT COUNT(*) FROM courts_directory WHERE approval_status = 'pending'"
+            ).fetchone()[0]
+            court_approved_count = connection.execute(
+                "SELECT COUNT(*) FROM courts_directory WHERE approval_status = 'approved'"
+            ).fetchone()[0]
+            court_rejected_count = connection.execute(
+                "SELECT COUNT(*) FROM courts_directory WHERE approval_status = 'rejected'"
+            ).fetchone()[0]
             trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
             trainer_review_count = connection.execute("SELECT COUNT(*) FROM trainer_reviews").fetchone()[0]
             court_report_count = connection.execute("SELECT COUNT(*) FROM court_reports").fetchone()[0]
@@ -3234,6 +3277,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   courts_directory.amenities,
                   courts_directory.description,
                   courts_directory.website,
+                  courts_directory.affiliate_url,
+                  courts_directory.affiliate_label,
+                  courts_directory.approval_status,
+                  courts_directory.reviewed_at,
                   courts_directory.lat,
                   courts_directory.lon,
                   courts_directory.created_at,
@@ -3241,7 +3288,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.email AS owner_email
                 FROM courts_directory
                 LEFT JOIN users ON users.id = courts_directory.user_id
-                ORDER BY courts_directory.created_at DESC, courts_directory.id DESC
+                ORDER BY
+                  CASE courts_directory.approval_status
+                    WHEN 'pending' THEN 0
+                    WHEN 'rejected' THEN 1
+                    ELSE 2
+                  END,
+                  courts_directory.created_at DESC,
+                  courts_directory.id DESC
                 LIMIT 16
                 """
             ).fetchall()
@@ -3317,6 +3371,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "listingApproved": listing_approved_count,
                 "listingNeedsChanges": listing_rejected_count,
                 "courts": court_count,
+                "courtPending": court_pending_count,
+                "courtApproved": court_approved_count,
+                "courtNeedsChanges": court_rejected_count,
                 "trainers": trainer_count,
                 "trainerReviews": trainer_review_count,
                 "courtReports": court_report_count,
@@ -3455,6 +3512,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         amenities = str(body.get("amenities", "")).strip()
         description = str(body.get("description", "")).strip()
         website = str(body.get("website", "")).strip()
+        affiliate_url = str(body.get("affiliateUrl", "")).strip()
+        affiliate_label = str(body.get("affiliateLabel", "")).strip()
 
         try:
             court_count = int(str(body.get("courtCount", "")).strip() or "0")
@@ -3480,6 +3539,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if website and not urlparse(website).scheme:
             website = f"https://{website}"
 
+        if affiliate_url and not urlparse(affiliate_url).scheme:
+            affiliate_url = f"https://{affiliate_url}"
+
         with closing(connect_db()) as connection:
             cursor = connection.execute(
                 """
@@ -3494,7 +3556,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   access_note = ?,
                   amenities = ?,
                   description = ?,
-                  website = ?
+                  website = ?,
+                  affiliate_url = ?,
+                  affiliate_label = ?
                 WHERE id = ?
                 """,
                 (
@@ -3508,6 +3572,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     amenities,
                     description,
                     website,
+                    affiliate_url,
+                    affiliate_label,
                     court_id,
                 ),
             )
@@ -3518,6 +3584,47 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_json({"ok": True, "message": f"{name} was updated in the courts directory."})
+
+    def handle_admin_court_review(self, body: dict):
+        court_id = int(body.get("id") or 0)
+        requested_status = compact_whitespace(body.get("status", "")).lower()
+
+        if court_id <= 0:
+            self.send_json({"error": "Choose a valid court to review."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if requested_status not in COURT_APPROVAL_LABELS:
+            self.send_json(
+                {"error": "Choose pending review, live, or needs changes for this court."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        reviewed_at = utc_now() if requested_status in {"approved", "rejected"} else None
+
+        with closing(connect_db()) as connection:
+            court_row = connection.execute(
+                "SELECT name FROM courts_directory WHERE id = ?",
+                (court_id,),
+            ).fetchone()
+
+            if not court_row:
+                self.send_json({"error": "Court not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            connection.execute(
+                """
+                UPDATE courts_directory
+                SET approval_status = ?, reviewed_at = ?
+                WHERE id = ?
+                """,
+                (requested_status, reviewed_at, court_id),
+            )
+            connection.commit()
+
+        court_name = compact_whitespace(court_row["name"]) or "Court"
+        status_label = COURT_APPROVAL_LABELS.get(requested_status, "Pending review")
+        self.send_json({"ok": True, "message": f"{court_name} is now marked as {status_label.lower()}."})
 
     def handle_admin_court_delete(self, body: dict):
         court_id = int(body.get("id") or 0)
@@ -4061,8 +4168,6 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         amenities = str(body.get("amenities", "")).strip()
         description = str(body.get("description", "")).strip()
         website = str(body.get("website", "")).strip()
-        affiliate_url = str(body.get("affiliateUrl", "")).strip()
-        affiliate_label = str(body.get("affiliateLabel", "")).strip()
         court_count_raw = str(body.get("courtCount", "")).strip()
 
         try:
@@ -4082,7 +4187,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not all([name, location, access_kind, surface_kind, description]) or court_count <= 0:
             self.send_json(
-                {"error": "Please complete every court field before publishing it."},
+                {"error": "Please complete every required field before submitting the court for review."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -4111,9 +4216,6 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if website and not urlparse(website).scheme:
             website = f"https://{website}"
 
-        if affiliate_url and not urlparse(affiliate_url).scheme:
-            affiliate_url = f"https://{affiliate_url}"
-
         with closing(connect_db()) as connection:
             cursor = connection.execute(
                 """
@@ -4131,10 +4233,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   website,
                   affiliate_url,
                   affiliate_label,
+                  approval_status,
+                  reviewed_at,
                   lat,
                   lon,
                   created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
@@ -4148,8 +4252,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     amenities,
                     description,
                     website,
-                    affiliate_url,
-                    affiliate_label,
+                    "",
+                    "",
+                    "pending",
+                    None,
                     lat,
                     lon,
                     utc_now(),
@@ -4173,6 +4279,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   website,
                   affiliate_url,
                   affiliate_label,
+                  approval_status,
+                  reviewed_at,
                   lat,
                   lon,
                   created_at
@@ -4186,7 +4294,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             {
                 "ok": True,
                 "item": serialize_directory_court_row(row),
-                "message": f"{name} is now live in the courts directory.",
+                "message": f"Thanks — {name} is now in review and will go live after approval.",
             },
             status=HTTPStatus.CREATED,
         )
