@@ -381,13 +381,17 @@ function renderAdminCourts(items) {
   }
 
   adminCourts.innerHTML = items
-    .map(
-      (item) => `
+    .map((item) => {
+      const statusTone = getListingStatusTone(item.approval_status);
+      const statusLabel = getListingStatusLabel(item);
+
+      return `
         <details class="admin-record">
           <summary>
             <div>
               <strong>${escapeAttr(item.name)}</strong>
-              <span>${escapeAttr(item.location)} · ${escapeAttr(item.accessKind)}</span>
+              <span>${escapeAttr(item.location)} · ${escapeAttr(item.accessLabel || item.accessKind)}</span>
+              <span class="admin-record-badge admin-record-badge-${escapeAttr(statusTone)}">${escapeAttr(statusLabel)}</span>
             </div>
             <span class="admin-record-meta">${escapeAttr(item.owner_email || "Directory")}</span>
           </summary>
@@ -406,6 +410,8 @@ function renderAdminCourts(items) {
               </label>
               <label>Access note <input name="accessNote" value="${escapeAttr(item.access_note || "")}" /></label>
               <label>Website <input name="website" value="${escapeAttr(item.website || "")}" /></label>
+              <label>Affiliate link <input name="affiliateUrl" value="${escapeAttr(item.affiliateUrl || "")}" /></label>
+              <label>Affiliate label <input name="affiliateLabel" value="${escapeAttr(item.affiliateLabel || "")}" /></label>
             </div>
 
             <label class="admin-field-block">
@@ -418,14 +424,26 @@ function renderAdminCourts(items) {
               <textarea name="description" rows="4">${escapeAttr(item.description)}</textarea>
             </label>
 
+            <div class="admin-review-actions">
+              <button class="button button-dark" type="button" data-admin-review="approved" data-admin-review-type="court" data-record-id="${escapeAttr(item.record_id)}">
+                Approve + publish
+              </button>
+              <button class="button button-secondary" type="button" data-admin-review="pending" data-admin-review-type="court" data-record-id="${escapeAttr(item.record_id)}">
+                Move back to review
+              </button>
+              <button class="button button-secondary" type="button" data-admin-review="rejected" data-admin-review-type="court" data-record-id="${escapeAttr(item.record_id)}">
+                Mark needs changes
+              </button>
+            </div>
+
             <div class="admin-actions">
               <button class="button button-dark" type="submit">Save court</button>
               <button class="button button-secondary admin-delete-button" type="button" data-admin-delete="court" data-record-id="${escapeAttr(item.record_id)}">Remove court</button>
             </div>
           </form>
         </details>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
@@ -554,7 +572,10 @@ async function loadAdminDashboard() {
         adminStatCard("Pending review", stats.listingPending || 0, "pending"),
         adminStatCard("Live listings", stats.listingApproved || 0, "ready"),
         adminStatCard("Needs changes", stats.listingNeedsChanges || 0, "neutral"),
-        adminStatCard("Courts", stats.courts || 0, "ready"),
+        adminStatCard("Courts total", stats.courts || 0, "neutral"),
+        adminStatCard("Court review", stats.courtPending || 0, "pending"),
+        adminStatCard("Live courts", stats.courtApproved || 0, "ready"),
+        adminStatCard("Court fixes", stats.courtNeedsChanges || 0, "neutral"),
         adminStatCard("Trainers", stats.trainers || 0, "ready"),
         adminStatCard("Trainer reviews", stats.trainerReviews || 0, "pending"),
         adminStatCard("Court reports", stats.courtReports || 0, "pending"),
@@ -610,22 +631,33 @@ async function saveAdminRecord(form) {
   }
 }
 
-async function reviewAdminListing(recordId, status) {
+async function reviewAdminRecord(type, recordId, status) {
   const statusLabel =
     status === "approved"
       ? "approve and publish"
       : status === "rejected"
         ? "mark for changes"
         : "move back to review";
+  const routeByType = {
+    listing: "/api/admin/listings/review",
+    court: "/api/admin/courts/review",
+  };
+  const labelByType = {
+    listing: "listing",
+    court: "court",
+  };
+
+  const route = routeByType[type];
+  if (!route) return;
 
   try {
-    setAdminStatus(`Updating listing review status…`, "warning");
-    await ElevenZeroApp.request("/api/admin/listings/review", {
+    setAdminStatus(`Updating ${labelByType[type]} review status…`, "warning");
+    await ElevenZeroApp.request(route, {
       method: "POST",
       body: { id: Number(recordId || 0), status },
     });
     await loadAdminDashboard();
-    setAdminStatus(`Listing updated: ${statusLabel}.`, "success");
+    setAdminStatus(`${labelByType[type][0].toUpperCase()}${labelByType[type].slice(1)} updated: ${statusLabel}.`, "success");
   } catch (error) {
     setAdminStatus(error.message, "error");
   }
@@ -678,7 +710,11 @@ function bindAdminPanel() {
   adminPanel?.addEventListener("click", async (event) => {
     const reviewButton = event.target.closest("[data-admin-review]");
     if (reviewButton) {
-      await reviewAdminListing(reviewButton.dataset.recordId, reviewButton.dataset.adminReview);
+      await reviewAdminRecord(
+        reviewButton.dataset.adminReviewType || "listing",
+        reviewButton.dataset.recordId,
+        reviewButton.dataset.adminReview
+      );
       return;
     }
 
