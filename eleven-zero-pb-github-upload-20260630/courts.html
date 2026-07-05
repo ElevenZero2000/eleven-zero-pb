@@ -8,7 +8,7 @@
       name="description"
       content="Eleven Zero PB live pickleball finder for free public courts and pay-to-play facilities."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260704b" />
+    <link rel="stylesheet" href="./styles.css?v=20260704courtreview" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260703a" />
   </head>
   <body class="courts-page" data-nav="courts">
@@ -39,22 +39,22 @@
         <section class="courts-hero">
           <div class="courts-hero-copy reveal">
             <p class="eyebrow">Play near you</p>
-            <h1>Open the map, click a pin, and find pickleball fast.</h1>
+            <h1>Live court search for free public play and paid facilities.</h1>
             <p class="hero-text">
-              Start with featured pins right away, then run a live city search
-              to compare free public courts and pay-to-play facilities without
-              digging through scattered listings.
+              Eleven Zero PB now has a live court finder experience. Search by
+              city, state, or zip code, then separate public courts from
+              pay-to-play facilities without digging through messy listings.
             </p>
 
             <div class="hero-actions">
-              <a class="button button-primary" href="#finder">Open the Map</a>
+              <a class="button button-primary" href="#finder">Search Live Courts</a>
               <a class="button button-secondary" href="#guide">How It Works</a>
             </div>
 
             <div class="courts-stats">
               <article>
                 <strong class="stat-value" data-summary-total>0</strong>
-                <span>Courts in the current map view.</span>
+                <span>Courts in the current view.</span>
               </article>
               <article>
                 <strong class="stat-value" data-summary-free>0</strong>
@@ -111,8 +111,9 @@
                 </form>
 
                 <div class="finder-help">
-                  Use the featured pins below right away, or search a city, state,
-                  or zip code to refresh the map live.
+                  User-triggered live search only. Fees and public-access tags can
+                  be incomplete, so players should still confirm details with the
+                  venue.
                 </div>
 
                 <div class="city-pins finder-quick-search" aria-label="Quick search cities">
@@ -131,47 +132,9 @@
                 </div>
 
                 <div class="finder-status" aria-live="polite" data-finder-status>
-                  Featured courts are loaded below. Search a US city, state, or zip
-                  code any time to refresh the map live.
+                  Search a US city, state, or zip code to pull live pickleball
+                  courts.
                 </div>
-
-                <section class="court-map-shell court-map-shell-hero" aria-label="Interactive courts map">
-                  <div class="court-map-head">
-                    <div>
-                      <p class="eyebrow">Interactive map</p>
-                      <h3>Click a pin and jump straight into the court.</h3>
-                    </div>
-
-                    <div class="court-map-legend" aria-label="Map legend">
-                      <span class="court-map-legend-item">
-                        <span class="court-map-dot court-map-dot-free"></span>
-                        Free
-                      </span>
-                      <span class="court-map-legend-item">
-                        <span class="court-map-dot court-map-dot-paid"></span>
-                        Paid
-                      </span>
-                      <span class="court-map-legend-item">
-                        <span class="court-map-dot court-map-dot-check"></span>
-                        Check access
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="court-map" data-court-map></div>
-                  <article class="court-map-selection" data-map-selection>
-                    <p class="eyebrow">Selected court</p>
-                    <h3>Pick a marker or use a “Show on map” button.</h3>
-                    <p>
-                      The map will center the selected court here so players can compare
-                      the cards with the map view more easily, then jump into directions,
-                      venue details, or partner links.
-                    </p>
-                  </article>
-                  <p class="court-map-status" data-map-status>
-                    Featured markers are ready now, and live searches will replace them with local results.
-                  </p>
-                </section>
               </div>
             </article>
 
@@ -180,8 +143,8 @@
               <div>
                 <span class="mini-kicker">Live community data</span>
                 <strong>
-                  Click a pin first, then refine the results below with ratings,
-                  crowd level, player level, and live city search.
+                  This version uses live OpenStreetMap-based search, then sorts
+                  results into free, paid, and needs-confirmation buckets.
                 </strong>
               </div>
             </article>
@@ -192,13 +155,13 @@
           <div class="section-heading reveal">
             <div>
               <p class="eyebrow">Courts directory</p>
-              <h2>Refine the map, compare courts, and add more real locations.</h2>
+              <h2>Search once, then filter by how you want to play.</h2>
             </div>
 
             <p class="section-text">
-              The goal is simple: give players a clean map-first view, then let
-              them search, compare, review, and submit more courts without the
-              page getting in their way.
+              The goal is simple: show public courts and paid facilities in one
+              place, while being honest about listings that do not clearly tag
+              fee or access rules yet.
             </p>
           </div>
 
@@ -319,6 +282,43 @@
             </div>
           </section>
 
+          <section class="court-map-shell reveal" aria-label="Interactive courts map">
+            <div class="court-map-head">
+              <div>
+                <p class="eyebrow">Map view</p>
+              <h3>See the courts on a real map.</h3>
+            </div>
+
+              <div class="court-map-legend" aria-label="Map legend">
+                <span class="court-map-legend-item">
+                  <span class="court-map-dot court-map-dot-free"></span>
+                  Free
+                </span>
+                <span class="court-map-legend-item">
+                  <span class="court-map-dot court-map-dot-paid"></span>
+                  Paid
+                </span>
+                <span class="court-map-legend-item">
+                  <span class="court-map-dot court-map-dot-check"></span>
+                  Check access
+                </span>
+              </div>
+            </div>
+
+            <div class="court-map" data-court-map></div>
+            <article class="court-map-selection" data-map-selection>
+              <p class="eyebrow">Selected court</p>
+              <h3>Pick a marker or use a “Show on map” button.</h3>
+              <p>
+                The map will center the selected court here so players can compare
+                the cards with the map view more easily, then jump into Google Maps for directions if they want.
+              </p>
+            </article>
+            <p class="court-map-status" data-map-status>
+              Map markers will follow your search results and filter choices.
+            </p>
+          </section>
+
           <div class="courts-grid" data-court-results></div>
 
           <section class="court-community-shell reveal" id="court-community">
@@ -409,9 +409,8 @@
                 <h2>Help build the real Eleven Zero PB courts directory.</h2>
                 <p>
                   Signed-in users can add real courts and pay-to-play facilities
-                  to the public directory. We’ll try to place each one on the
-                  map automatically, but the form will still save even if the
-                  first pin match needs cleanup.
+                  to the public directory. Every submission goes into review
+                  first, then we publish it once the details look right.
                 </p>
 
                 <div class="seller-note">
@@ -425,12 +424,12 @@
 
               <form class="seller-form" data-court-directory-form>
                 <label>
-                  Court or facility name
-                  <input type="text" name="name" placeholder="Ex: East Bay Pickleball Club" />
+                  Court or facility name <span class="seller-required">Required</span>
+                  <input type="text" name="name" placeholder="Ex: East Bay Pickleball Club" required />
                 </label>
                 <label>
-                  City, state or address
-                  <input type="text" name="location" placeholder="Ex: Austin, TX" />
+                  City, state or address <span class="seller-required">Required</span>
+                  <input type="text" name="location" placeholder="Ex: Austin, TX" required />
                 </label>
                 <label>
                   Exact street address (optional but better for the pin)
@@ -441,22 +440,24 @@
                   />
                 </label>
                 <label>
-                  Access type
-                  <select name="accessKind">
+                  Access type <span class="seller-required">Required</span>
+                  <select name="accessKind" required>
+                    <option value="">Choose access type</option>
                     <option value="free">Free to play</option>
                     <option value="paid">Pay to play</option>
                   </select>
                 </label>
                 <label>
-                  Surface
-                  <select name="surfaceKind">
+                  Surface <span class="seller-required">Required</span>
+                  <select name="surfaceKind" required>
+                    <option value="">Choose surface</option>
                     <option value="outdoor">Outdoor</option>
                     <option value="indoor">Indoor</option>
                   </select>
                 </label>
                 <label>
-                  Court count
-                  <input type="number" name="courtCount" min="1" step="1" placeholder="8" />
+                  Court count <span class="seller-required">Required</span>
+                  <input type="number" name="courtCount" min="1" step="1" placeholder="8" required />
                 </label>
                 <label>
                   Access note
@@ -482,35 +483,34 @@
                     placeholder="clubname.com or https://clubname.com"
                   />
                 </label>
-                <label>
-                  Affiliate or booking link (optional)
-                  <input
-                    type="text"
-                    name="affiliateUrl"
-                    placeholder="Paste the partner link you want players to use"
-                  />
-                </label>
-                <label>
-                  Affiliate button label (optional)
-                  <input
-                    type="text"
-                    name="affiliateLabel"
-                    placeholder="Ex: Book through Eleven Zero PB"
-                  />
-                </label>
-                <label>
-                  Short description
+                <label class="seller-field-wide">
+                  Short description <span class="seller-required">Required</span>
                   <textarea
                     name="description"
                     rows="4"
                     placeholder="Describe the vibe, setup, and what players should know before they go."
+                    required
                   ></textarea>
                 </label>
-                <button class="button button-dark" type="submit">
-                  Add Court to Directory
-                </button>
-                <div class="seller-status" aria-live="polite" data-court-directory-status>
-                  Sign in first if you want to add a court to the public directory.
+                <div class="seller-submit-strip">
+                  <button class="button button-dark seller-submit-button" type="submit">
+                    Submit court for review
+                  </button>
+                  <div class="seller-submit-meta">
+                    <div class="seller-form-help">
+                      Required fields are marked above. Affiliate and booking links are added by Eleven Zero PB after review.
+                    </div>
+                    <div class="seller-status" aria-live="polite" data-court-directory-status>
+                      Sign in to submit a court for review.
+                    </div>
+                    <a
+                      class="button button-secondary seller-auth-link"
+                      data-court-directory-auth
+                      href="./auth.html?next=%2Fcourts.html%23add-court"
+                    >
+                      Sign in to add a court
+                    </a>
+                  </div>
                 </div>
               </form>
             </div>
@@ -610,8 +610,8 @@
       </div>
     </div>
 
-    <script src="./app.js?v=20260704b"></script>
-    <script src="./courts.js?v=20260704b"></script>
+    <script src="./app.js?v=20260703f"></script>
+    <script src="./courts.js?v=20260704courtreview"></script>
     <script src="./header-tweaks.js?v=20260703a"></script>
   </body>
 </html>
