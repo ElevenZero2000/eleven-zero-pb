@@ -2159,6 +2159,22 @@ body[data-nav="sell"] .seller-photo-guidance-card {
   color: rgba(255, 255, 255, 0.86);
 }
 
+.seller-required {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 22px;
+  margin-left: 6px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(8, 233, 90, 0.16);
+  color: #dfffd1;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .seller-form input,
 .seller-form select,
 .seller-form textarea {
@@ -2720,6 +2736,10 @@ body[data-nav="sell"] .seller-file-dropzone {
 .seller-submit-meta {
   display: grid;
   gap: 8px;
+}
+
+.seller-auth-link {
+  width: fit-content;
 }
 
 @media (min-width: 1024px) {
@@ -4384,29 +4404,6 @@ body[data-nav="sell"] .seller-file-dropzone {
   color: #ffd8c5;
 }
 
-.court-map-shell-hero {
-  margin: 22px 0 0;
-  padding: 18px;
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: none;
-}
-
-.court-map-shell-hero .court-map-head h3 {
-  color: white;
-  font-size: clamp(1.35rem, 2.6vw, 2.1rem);
-}
-
-.court-map-shell-hero .court-map-legend-item {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.88);
-}
-
-.court-map-shell-hero .court-map-selection,
-.court-map-shell-hero .court-map-status {
-  background: rgba(255, 255, 255, 0.92);
-}
-
 .court-map-shell {
   margin-bottom: 24px;
   padding: 24px;
@@ -4661,11 +4658,6 @@ body[data-nav="sell"] .seller-file-dropzone {
 .court-map-selection-copy {
   line-height: 1.65;
   color: rgba(18, 18, 18, 0.76);
-}
-
-.court-affiliate-note {
-  line-height: 1.55;
-  color: rgba(18, 18, 18, 0.72);
 }
 
 .court-map-selection ul {
@@ -5313,18 +5305,6 @@ body.has-modal-open {
   transform: translateY(-1px);
   background: rgba(8, 233, 90, 0.12);
   border-color: rgba(8, 233, 90, 0.22);
-}
-
-.text-link-affiliate {
-  background: rgba(8, 233, 90, 0.14);
-  border-color: rgba(8, 233, 90, 0.26);
-  color: #0b5b2c;
-  font-weight: 700;
-}
-
-.text-link-affiliate:hover {
-  background: rgba(8, 233, 90, 0.2);
-  border-color: rgba(8, 233, 90, 0.32);
 }
 
 .court-detail-modal[hidden] {
