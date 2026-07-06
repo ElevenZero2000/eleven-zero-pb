@@ -199,6 +199,7 @@ const state = {
   courts: [],
   activeFilter: "all",
   source: "directory",
+  searchProvider: "directory",
   locationLabel: "Official courts directory",
   lastQuery: "",
   searchGeo: null,
@@ -549,6 +550,10 @@ function formatCourtDate(value) {
 }
 
 function buildGoogleMapsUrl(court) {
+  if (court.googleMapsUrl) {
+    return court.googleMapsUrl;
+  }
+
   const query = [court.name, court.address || court.location].filter(Boolean).join(", ");
   if (query) {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
@@ -561,6 +566,91 @@ function buildGoogleMapsUrl(court) {
   }
 
   return "";
+}
+
+function googlePlacesSearchConfigured() {
+  return Boolean(ElevenZeroApp.config.googlePlacesSearchEnabled);
+}
+
+function googlePlaceTextValue(value) {
+  if (typeof value === "string") return value;
+  if (value && typeof value.text === "string") return value.text;
+  return "";
+}
+
+function classifyGooglePlaceAccess(place) {
+  const types = new Set([place.primaryType, ...(place.types || [])].filter(Boolean));
+
+  if (types.has("park")) {
+    return { kind: "free", label: "Free" };
+  }
+
+  return { kind: "check", label: "Check access" };
+}
+
+function classifyGooglePlaceSurface(place) {
+  const types = new Set([place.primaryType, ...(place.types || [])].filter(Boolean));
+
+  if (types.has("park") || types.has("athletic_field")) {
+    return { kind: "outdoor", label: "Outdoor" };
+  }
+
+  if (types.has("gym") || types.has("recreation_center")) {
+    return { kind: "indoor", label: "Indoor" };
+  }
+
+  return { kind: "unknown", label: "Surface not tagged" };
+}
+
+function normalizeGooglePlace(place, fallbackLabel, query) {
+  const lat = Number(place?.location?.latitude);
+  const lon = Number(place?.location?.longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+  const access = classifyGooglePlaceAccess(place);
+  const surface = classifyGooglePlaceSurface(place);
+  const primaryTypeLabel =
+    googlePlaceTextValue(place?.primaryTypeDisplayName) ||
+    String(place?.primaryType || "")
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const shortAddress = String(place?.shortFormattedAddress || "").trim();
+  const formattedAddress = String(place?.formattedAddress || shortAddress || fallbackLabel).trim();
+  const location = shortAddress || formattedAddress || fallbackLabel;
+  const details = ["Google Maps result"];
+
+  if (primaryTypeLabel) {
+    details.push(primaryTypeLabel);
+  }
+
+  return {
+    id: `google-${place.id || `${lat}-${lon}`}`,
+    name: googlePlaceTextValue(place?.displayName) || "Pickleball courts",
+    location,
+    lat,
+    lon,
+    accessKind: access.kind,
+    accessLabel: access.label,
+    surfaceKind: surface.kind,
+    surfaceLabel: surface.label,
+    address: formattedAddress,
+    details: details.slice(0, 3),
+    description: `Google Maps found this pickleball venue near ${fallbackLabel}. Open it in Google Maps to confirm fees, hours, and court setup.`,
+    tags: [access.kind, ...(surface.kind !== "unknown" ? [surface.kind] : [])],
+    source: "live",
+    provider: "google",
+    website: "",
+    osmUrl: "",
+    googleMapsUrl: String(place?.googleMapsUri || "").trim(),
+    query,
+  };
+}
+
+function liveProviderLabel() {
+  if (state.searchProvider === "google") return "Google Maps live data";
+  if (state.searchProvider === "osm") return "Community live map data";
+  return "Live map data";
 }
 
 function googleMapsConfig() {
@@ -757,7 +847,12 @@ function buildCourtInsightsMarkup(court) {
 
   metrics.push({
     label: "Source",
-    value: court.source === "directory" ? "Saved directory" : "Live map data",
+    value:
+      court.source === "directory"
+        ? "Saved directory"
+        : court.provider === "google"
+          ? "Google Maps live"
+          : "Community live map",
   });
 
   return `
@@ -993,7 +1088,11 @@ function buildTagMarkup(court) {
   }
 
   if (court.source === "live") {
-    tags.push('<span class="court-tag court-tag-live">Live data</span>');
+    tags.push(
+      `<span class="court-tag court-tag-live">${
+        court.provider === "google" ? "Google Maps" : "Live data"
+      }</span>`
+    );
   }
 
   if (court.source === "directory") {
@@ -1840,7 +1939,9 @@ function updateResultsMeta(visibleCourts, allCourts) {
   if (resultsHeading) {
     const suffix =
       state.source === "live"
-        ? `${state.locationLabel} · ${state.radiusMiles} mi radius`
+        ? state.searchProvider === "google"
+          ? `${state.locationLabel} · Google Maps search`
+          : `${state.locationLabel} · ${state.radiusMiles} mi radius`
         : "Official courts directory";
     resultsHeading.textContent = suffix;
   }
@@ -1865,7 +1966,7 @@ function updateResultsMeta(visibleCourts, allCourts) {
     return;
   }
 
-  resultsNote.textContent = `Showing ${visibleCourts.length} of ${allCourts.length} courts from live map data plus the Eleven Zero PB directory.`;
+  resultsNote.textContent = `Showing ${visibleCourts.length} of ${allCourts.length} courts from ${liveProviderLabel()} plus the Eleven Zero PB directory.`;
 }
 
 function renderResults({ fitMap = false } = {}) {
@@ -2178,6 +2279,7 @@ async function loadDirectoryCourts() {
       state.courts = [...items];
       state.visibleCourts = [...items];
       state.activeCourtId = items[0]?.id || "";
+      state.searchProvider = "directory";
     }
   } catch {
     state.directoryCourts = [];
@@ -2185,6 +2287,7 @@ async function loadDirectoryCourts() {
       state.courts = [];
       state.visibleCourts = [];
       state.activeCourtId = "";
+      state.searchProvider = "directory";
     }
   }
 }
@@ -2246,6 +2349,34 @@ async function geocodeQuery(query) {
   return normalized;
 }
 
+async function fetchGoogleLiveCourts(query, geo, radiusMiles) {
+  const cacheKey = `${query.trim().toLowerCase()}-${radiusMiles}`;
+  const cached = readCache("googleCourts", cacheKey);
+
+  if (cached) {
+    return cached.map((court) => attachDistanceMiles(court, geo));
+  }
+
+  const url = new URL("/api/google-courts-search", window.location.origin);
+  url.search = new URLSearchParams({
+    query,
+    pageSize: "20",
+  }).toString();
+
+  const payload = await fetchJsonWithTimeout(url.toString());
+  const places = Array.isArray(payload?.items) ? payload.items : [];
+  const normalizedCourts = sortCourts(
+    dedupeCourts(
+      places
+        .map((place) => normalizeGooglePlace(place, geo.label, query))
+        .filter(Boolean)
+    )
+  );
+
+  writeCache("googleCourts", cacheKey, normalizedCourts);
+  return normalizedCourts.map((court) => attachDistanceMiles(court, geo));
+}
+
 async function fetchLiveCourts(geo, radiusMiles) {
   const cacheKey = `${geo.label.toLowerCase()}-${radiusMiles}`;
   const cached = readCache("courts", cacheKey);
@@ -2288,18 +2419,34 @@ out center tags;
   return normalizedCourts;
 }
 
+async function fetchPreferredLiveCourts(query, geo, radiusMiles) {
+  if (googlePlacesSearchConfigured()) {
+    try {
+      const items = await fetchGoogleLiveCourts(query, geo, radiusMiles);
+      return { items, provider: "google" };
+    } catch (error) {
+      console.warn("Google court search fallback:", error);
+    }
+  }
+
+  const items = await fetchLiveCourts(geo, radiusMiles);
+  return { items, provider: "osm" };
+}
+
 async function runLiveSearch(query, radiusMiles) {
   setSearching(true);
   setFinderStatus(`Searching ${query}...`, "warning");
 
   try {
     const geo = await geocodeQuery(query);
-    const liveCourts = await fetchLiveCourts(geo, radiusMiles);
+    const liveSearch = await fetchPreferredLiveCourts(query, geo, radiusMiles);
+    const liveCourts = liveSearch.items || [];
     const nearbyDirectoryCourts = getDirectoryCourtsWithinRadius(geo, radiusMiles);
     const combinedCourts = mergeCourtCollections(liveCourts, nearbyDirectoryCourts);
 
     state.courts = combinedCourts;
     state.source = "live";
+    state.searchProvider = liveSearch.provider || "osm";
     state.locationLabel = geo.label;
     state.lastQuery = query;
     state.searchGeo = geo;
@@ -2309,12 +2456,16 @@ async function runLiveSearch(query, radiusMiles) {
 
     if (combinedCourts.length) {
       setFinderStatus(
-        `Found ${combinedCourts.length} courts near ${geo.label}.`,
+        `Found ${combinedCourts.length} courts near ${geo.label}${
+          state.searchProvider === "google" ? " using Google Maps data" : ""
+        }.`,
         "success"
       );
     } else {
       setFinderStatus(
-        `No courts were found within ${radiusMiles} miles of ${geo.label}.`,
+        state.searchProvider === "google"
+          ? `Google Maps did not return any courts for ${geo.label} yet. Try a nearby city or zip code.`
+          : `No courts were found within ${radiusMiles} miles of ${geo.label}.`,
         "warning"
       );
     }
@@ -2324,6 +2475,7 @@ async function runLiveSearch(query, radiusMiles) {
   } catch (error) {
     state.courts = [...state.directoryCourts];
     state.source = "directory";
+    state.searchProvider = "directory";
     state.locationLabel = "Official courts directory";
     state.searchGeo = null;
     await loadCourtSummaries(state.courts);
@@ -2631,6 +2783,13 @@ async function initializeFinder() {
   courtDetailBody?.addEventListener("click", handleResultInteraction);
   courtReportForm?.addEventListener("submit", handleCourtReportSubmit);
   courtDirectoryForm?.addEventListener("submit", handleCourtDirectorySubmit);
+
+  const initialQuery = searchInput?.value?.trim() || "";
+  if (initialQuery) {
+    await runLiveSearch(initialQuery, Number(radiusSelect?.value || state.radiusMiles || 25));
+    return;
+  }
+
   renderResults({ fitMap: true });
 }
 
