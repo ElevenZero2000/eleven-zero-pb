@@ -102,6 +102,7 @@
                       <option value="25" selected>25 miles</option>
                       <option value="50">50 miles</option>
                       <option value="75">75 miles</option>
+                      <option value="100">100 miles</option>
                     </select>
                   </label>
 
@@ -112,10 +113,14 @@
 
                 <div class="finder-help">
                   Use the featured pins below right away, or search a city, state,
-                  or zip code to refresh the map live.
+                  or zip code to refresh the map live. Statewide searches like
+                  Virginia now scan a wider set of regions automatically.
                 </div>
 
                 <div class="city-pins finder-quick-search" aria-label="Quick search cities">
+                  <button class="city-pin" type="button" data-quick-search="Virginia">
+                    Virginia
+                  </button>
                   <button class="city-pin" type="button" data-quick-search="Miami, FL">
                     Miami
                   </button>
@@ -608,7 +613,7 @@
     </div>
 
     <script src="./app.js?v=20260705g"></script>
-    <script src="./courts.js?v=20260705h"></script>
+    <script src="./courts.js?v=20260705i"></script>
     <script src="./header-tweaks.js?v=20260705f"></script>
   </body>
 </html>
