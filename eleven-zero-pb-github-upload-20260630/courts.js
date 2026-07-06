@@ -578,6 +578,32 @@ function googlePlaceTextValue(value) {
   return "";
 }
 
+function googlePlaceNumberValue(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function googlePlaceCoordinateValue(location, axis) {
+  if (!location) return null;
+
+  const directValue = axis === "lat" ? location.lat : location.lng;
+  const legacyValue = axis === "lat" ? location.latitude : location.longitude;
+  const methodValue =
+    axis === "lat"
+      ? typeof location.lat === "function"
+        ? location.lat()
+        : null
+      : typeof location.lng === "function"
+        ? location.lng()
+        : null;
+
+  return (
+    googlePlaceNumberValue(directValue) ??
+    googlePlaceNumberValue(legacyValue) ??
+    googlePlaceNumberValue(methodValue)
+  );
+}
+
 function classifyGooglePlaceAccess(place) {
   const types = new Set([place.primaryType, ...(place.types || [])].filter(Boolean));
 
@@ -603,8 +629,8 @@ function classifyGooglePlaceSurface(place) {
 }
 
 function normalizeGooglePlace(place, fallbackLabel, query) {
-  const lat = Number(place?.location?.latitude);
-  const lon = Number(place?.location?.longitude);
+  const lat = googlePlaceCoordinateValue(place?.location, "lat");
+  const lon = googlePlaceCoordinateValue(place?.location, "lng");
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
@@ -2355,6 +2381,45 @@ async function fetchGoogleLiveCourts(query, geo, radiusMiles) {
 
   if (cached) {
     return cached.map((court) => attachDistanceMiles(court, geo));
+  }
+
+  const maps = await loadGoogleMapsApi();
+  const { Place } = await maps.importLibrary("places");
+  const radiusMeters = Math.max(1609, Math.round(radiusMiles * 1609.34));
+  const textQuery = /pickleball/i.test(query) ? query : `pickleball courts in ${query}`;
+  const biasCenter =
+    mapState.googleMap?.getCenter?.() || new maps.LatLng(Number(geo.lat), Number(geo.lon));
+
+  const browserRequest = {
+    textQuery,
+    fields: ["displayName", "location", "formattedAddress", "businessStatus", "types"],
+    locationBias: {
+      center: biasCenter,
+      radius: radiusMeters,
+    },
+    language: "en-US",
+    maxResultCount: 20,
+    region: "us",
+  };
+
+  try {
+    const browserPayload = await Place.searchByText(browserRequest);
+    const browserPlaces = Array.isArray(browserPayload?.places) ? browserPayload.places : [];
+
+    const browserCourts = sortCourts(
+      dedupeCourts(
+        browserPlaces
+          .map((place) => normalizeGooglePlace(place, geo.label, query))
+          .filter(Boolean)
+      )
+    );
+
+    if (browserCourts.length) {
+      writeCache("googleCourts", cacheKey, browserCourts);
+      return browserCourts.map((court) => attachDistanceMiles(court, geo));
+    }
+  } catch (error) {
+    console.warn("Browser Google court search fallback:", error);
   }
 
   const url = new URL("/api/google-courts-search", window.location.origin);
