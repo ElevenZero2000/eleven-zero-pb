@@ -2,8 +2,8 @@
   const header = document.querySelector(".site-header");
   if (!header) return;
 
-  const enterThreshold = 84;
-  const exitThreshold = 36;
+  const enterThreshold = 68;
+  const exitThreshold = 24;
   let ticking = false;
   let isCondensed = false;
 
