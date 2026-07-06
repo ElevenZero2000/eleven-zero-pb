@@ -8,6 +8,7 @@ const ElevenZeroApp = {
     googleMapsEnabled: false,
     googleMapsApiKey: "",
     googleMapsMapId: "",
+    googlePlacesSearchEnabled: false,
   },
   analyticsLoaded: false,
 
