@@ -44,6 +44,7 @@ ADMIN_EMAILS_RAW = os.getenv("ADMIN_EMAILS", "").strip()
 GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "").strip()
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 GOOGLE_MAPS_MAP_ID = os.getenv("GOOGLE_MAPS_MAP_ID", "").strip()
+GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", GOOGLE_MAPS_API_KEY).strip()
 SHIPPO_API_KEY = os.getenv("SHIPPO_API_KEY", "").strip()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
@@ -1126,6 +1127,94 @@ def shippo_request(path: str, payload: dict) -> dict:
         raise ValueError("Shippo could not be reached right now.") from exc
 
 
+def google_places_is_configured() -> bool:
+    return bool(GOOGLE_PLACES_API_KEY)
+
+
+def google_places_request(path: str, payload: dict, *, field_mask: str) -> dict:
+    if not google_places_is_configured():
+        raise RuntimeError("Google Places is not configured yet.")
+
+    request = Request(
+        f"https://places.googleapis.com/v1{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Content-Type", "application/json")
+    request.add_header("X-Goog-Api-Key", GOOGLE_PLACES_API_KEY)
+    request.add_header("X-Goog-FieldMask", field_mask)
+
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8") or "{}")
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        detail = parsed.get("error", {}).get("message") or parsed.get("message") or raw
+        raise ValueError(str(detail or "Google Places request failed.")) from exc
+    except URLError as exc:
+        raise ValueError("Google Places could not be reached right now.") from exc
+
+
+def google_places_search_courts(query: str, page_size: int = 20) -> list[dict]:
+    clean_query = str(query or "").strip()
+    if not clean_query:
+        raise ValueError("Add a city, state, or zip code first.")
+
+    search_query = (
+        clean_query
+        if "pickleball" in clean_query.lower()
+        else f"pickleball courts in {clean_query}"
+    )
+    safe_page_size = min(max(int(page_size or 20), 1), 20)
+    field_mask = (
+        "places.id,"
+        "places.displayName,"
+        "places.formattedAddress,"
+        "places.shortFormattedAddress,"
+        "places.location,"
+        "places.googleMapsUri,"
+        "places.primaryType,"
+        "places.primaryTypeDisplayName,"
+        "places.types,"
+        "nextPageToken"
+    )
+
+    collected: list[dict] = []
+    seen_ids: set[str] = set()
+    next_page_token: str | None = None
+
+    for _ in range(3):
+        payload: dict[str, object] = {
+            "textQuery": search_query,
+            "pageSize": safe_page_size,
+        }
+        if next_page_token:
+            payload["pageToken"] = next_page_token
+
+        response = google_places_request(
+            "/places:searchText",
+            payload,
+            field_mask=field_mask,
+        )
+
+        for place in response.get("places", []) or []:
+            place_id = str(place.get("id") or "").strip()
+            if not place_id or place_id in seen_ids:
+                continue
+            seen_ids.add(place_id)
+            collected.append(place)
+
+        next_page_token = str(response.get("nextPageToken") or "").strip() or None
+        if not next_page_token:
+            break
+
+    return collected
+
+
 def init_database() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1888,6 +1977,7 @@ def site_config_payload() -> dict:
         "googleMapsEnabled": bool(GOOGLE_MAPS_API_KEY),
         "googleMapsApiKey": GOOGLE_MAPS_API_KEY,
         "googleMapsMapId": GOOGLE_MAPS_MAP_ID,
+        "googlePlacesSearchEnabled": google_places_is_configured(),
         "shippoConfigured": bool(SHIPPO_API_KEY),
         "stripeConfigured": stripe_is_configured(),
         "stripeMode": stripe_mode(),
@@ -2111,6 +2201,27 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/courts-directory":
             self.send_json({"items": self.fetch_directory_courts()})
+            return
+
+        if parsed.path == "/api/google-courts-search":
+            query = parse_qs(parsed.query or "")
+            search_query = str(query.get("query", [""])[0]).strip()
+            page_size_raw = str(query.get("pageSize", ["20"])[0]).strip()
+            try:
+                page_size = int(page_size_raw or "20")
+            except ValueError:
+                page_size = 20
+
+            try:
+                items = google_places_search_courts(search_query, page_size=page_size)
+            except RuntimeError as error:
+                self.send_json({"error": str(error)}, status=HTTPStatus.NOT_IMPLEMENTED)
+                return
+            except ValueError as error:
+                self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            self.send_json({"items": items, "provider": "google"})
             return
 
         if parsed.path == "/api/trainer-reviews":
