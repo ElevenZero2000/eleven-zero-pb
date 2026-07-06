@@ -1356,7 +1356,7 @@ function buildGoogleSearchPlan(geo, radiusMiles) {
   const regionalRadiusMiles = clamp(
     Math.ceil(span.maxMiles / 3),
     Math.max(radiusMiles, 35),
-    95
+    31
   );
 
   const candidates = [
@@ -1366,6 +1366,31 @@ function buildGoogleSearchPlan(geo, radiusMiles) {
     { lat: midLat, lon: wrapLongitude(box.east - insetLon), key: "east" },
     { lat: midLat, lon: wrapLongitude(box.west + insetLon), key: "west" },
   ];
+
+  if (span.maxMiles >= 180) {
+    candidates.push(
+      {
+        lat: clampLatitude(box.north - insetLat),
+        lon: wrapLongitude(box.west + insetLon),
+        key: "northwest",
+      },
+      {
+        lat: clampLatitude(box.north - insetLat),
+        lon: wrapLongitude(box.east - insetLon),
+        key: "northeast",
+      },
+      {
+        lat: clampLatitude(box.south + insetLat),
+        lon: wrapLongitude(box.west + insetLon),
+        key: "southwest",
+      },
+      {
+        lat: clampLatitude(box.south + insetLat),
+        lon: wrapLongitude(box.east - insetLon),
+        key: "southeast",
+      }
+    );
+  }
 
   const seen = new Set();
   const centers = candidates.filter((point) => {
@@ -1378,7 +1403,7 @@ function buildGoogleSearchPlan(geo, radiusMiles) {
 
   return {
     regional: true,
-    biasRadiusMeters: Math.round(regionalRadiusMiles * 1609.34),
+    biasRadiusMeters: Math.min(50000, Math.round(regionalRadiusMiles * 1609.34)),
     centers,
   };
 }
