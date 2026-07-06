@@ -1287,6 +1287,102 @@ function distanceMilesBetween(latA, lonA, latB, lonB) {
   return 2 * earthRadiusMiles * Math.asin(Math.sqrt(a));
 }
 
+function parseGeoBoundingBox(rawBoundingBox) {
+  if (!Array.isArray(rawBoundingBox) || rawBoundingBox.length < 4) return null;
+
+  const south = Number(rawBoundingBox[0]);
+  const north = Number(rawBoundingBox[1]);
+  const west = Number(rawBoundingBox[2]);
+  const east = Number(rawBoundingBox[3]);
+
+  if (![south, north, west, east].every(Number.isFinite)) return null;
+
+  return {
+    south: clampLatitude(Math.min(south, north)),
+    north: clampLatitude(Math.max(south, north)),
+    west: wrapLongitude(Math.min(west, east)),
+    east: wrapLongitude(Math.max(west, east)),
+  };
+}
+
+function getGeoBoundingBox(geo) {
+  return parseGeoBoundingBox(geo?.raw?.boundingbox);
+}
+
+function getBoundingBoxSpanMiles(box) {
+  if (!box) {
+    return { widthMiles: 0, heightMiles: 0, maxMiles: 0 };
+  }
+
+  const midLat = (box.south + box.north) / 2;
+  const midLon = (box.west + box.east) / 2;
+  const widthMiles = distanceMilesBetween(midLat, box.west, midLat, box.east);
+  const heightMiles = distanceMilesBetween(box.south, midLon, box.north, midLon);
+
+  return {
+    widthMiles,
+    heightMiles,
+    maxMiles: Math.max(widthMiles, heightMiles),
+  };
+}
+
+function isRegionalSearchGeo(geo) {
+  const span = getBoundingBoxSpanMiles(getGeoBoundingBox(geo));
+  return span.maxMiles >= 70;
+}
+
+function regionalSearchPreposition(geo) {
+  return isRegionalSearchGeo(geo) ? "across" : "near";
+}
+
+function buildGoogleSearchPlan(geo, radiusMiles) {
+  const defaultRadiusMeters = Math.max(1609, Math.round(radiusMiles * 1609.34));
+  const fallbackPlan = {
+    regional: false,
+    biasRadiusMeters: defaultRadiusMeters,
+    centers: [{ lat: Number(geo.lat), lon: Number(geo.lon), key: "center" }],
+  };
+
+  const box = getGeoBoundingBox(geo);
+  if (!box) return fallbackPlan;
+
+  const span = getBoundingBoxSpanMiles(box);
+  if (span.maxMiles < 70) return fallbackPlan;
+
+  const insetLat = Math.max((box.north - box.south) * 0.18, 0.08);
+  const insetLon = Math.max((box.east - box.west) * 0.18, 0.08);
+  const midLat = (box.south + box.north) / 2;
+  const midLon = (box.west + box.east) / 2;
+  const regionalRadiusMiles = clamp(
+    Math.ceil(span.maxMiles / 3),
+    Math.max(radiusMiles, 35),
+    95
+  );
+
+  const candidates = [
+    { lat: Number(geo.lat), lon: Number(geo.lon), key: "center" },
+    { lat: clampLatitude(box.north - insetLat), lon: midLon, key: "north" },
+    { lat: clampLatitude(box.south + insetLat), lon: midLon, key: "south" },
+    { lat: midLat, lon: wrapLongitude(box.east - insetLon), key: "east" },
+    { lat: midLat, lon: wrapLongitude(box.west + insetLon), key: "west" },
+  ];
+
+  const seen = new Set();
+  const centers = candidates.filter((point) => {
+    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return false;
+    const key = `${point.lat.toFixed(3)}:${point.lon.toFixed(3)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    regional: true,
+    biasRadiusMeters: Math.round(regionalRadiusMiles * 1609.34),
+    centers,
+  };
+}
+
 function attachDistanceMiles(court, geo) {
   if (!geo || !Number.isFinite(court?.lat) || !Number.isFinite(court?.lon)) {
     return { ...court, distanceMiles: null };
@@ -1966,7 +2062,11 @@ function updateResultsMeta(visibleCourts, allCourts) {
     const suffix =
       state.source === "live"
         ? state.searchProvider === "google"
-          ? `${state.locationLabel} · Google Maps search`
+          ? `${state.locationLabel} · ${
+              isRegionalSearchGeo(state.searchGeo)
+                ? "Regional Google Maps"
+                : "Google Maps"
+            } search`
           : `${state.locationLabel} · ${state.radiusMiles} mi radius`
         : "Official courts directory";
     resultsHeading.textContent = suffix;
@@ -2385,26 +2485,32 @@ async function fetchGoogleLiveCourts(query, geo, radiusMiles) {
 
   const maps = await loadGoogleMapsApi();
   const { Place } = await maps.importLibrary("places");
-  const radiusMeters = Math.max(1609, Math.round(radiusMiles * 1609.34));
+  const searchPlan = buildGoogleSearchPlan(geo, radiusMiles);
   const textQuery = /pickleball/i.test(query) ? query : `pickleball courts in ${query}`;
-  const biasCenter =
-    mapState.googleMap?.getCenter?.() || new maps.LatLng(Number(geo.lat), Number(geo.lon));
-
-  const browserRequest = {
+  const browserRequestBase = {
     textQuery,
     fields: ["displayName", "location", "formattedAddress", "businessStatus", "types"],
-    locationBias: {
-      center: biasCenter,
-      radius: radiusMeters,
-    },
     language: "en-US",
-    maxResultCount: 20,
+    maxResultCount: searchPlan.regional ? 18 : 20,
     region: "us",
   };
 
   try {
-    const browserPayload = await Place.searchByText(browserRequest);
-    const browserPlaces = Array.isArray(browserPayload?.places) ? browserPayload.places : [];
+    const browserPlaces = [];
+
+    for (const center of searchPlan.centers) {
+      const browserPayload = await Place.searchByText({
+        ...browserRequestBase,
+        locationBias: {
+          center: new maps.LatLng(center.lat, center.lon),
+          radius: searchPlan.biasRadiusMeters,
+        },
+      });
+
+      if (Array.isArray(browserPayload?.places) && browserPayload.places.length) {
+        browserPlaces.push(...browserPayload.places);
+      }
+    }
 
     const browserCourts = sortCourts(
       dedupeCourts(
@@ -2521,7 +2627,7 @@ async function runLiveSearch(query, radiusMiles) {
 
     if (combinedCourts.length) {
       setFinderStatus(
-        `Found ${combinedCourts.length} courts near ${geo.label}${
+        `Found ${combinedCourts.length} courts ${regionalSearchPreposition(geo)} ${geo.label}${
           state.searchProvider === "google" ? " using Google Maps data" : ""
         }.`,
         "success"
@@ -2529,7 +2635,7 @@ async function runLiveSearch(query, radiusMiles) {
     } else {
       setFinderStatus(
         state.searchProvider === "google"
-          ? `Google Maps did not return any courts for ${geo.label} yet. Try a nearby city or zip code.`
+          ? `Google Maps did not return any courts ${regionalSearchPreposition(geo)} ${geo.label} yet. Try a nearby city or zip code.`
           : `No courts were found within ${radiusMiles} miles of ${geo.label}.`,
         "warning"
       );
