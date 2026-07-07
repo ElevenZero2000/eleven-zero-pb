@@ -2099,7 +2099,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   sortSelect?.addEventListener("change", syncSearchState);
   resetSearchButton?.addEventListener("click", resetSearchState);
   searchForm?.addEventListener("submit", (event) => event.preventDefault());
-  photoInput?.addEventListener("change", handlePhotoSelection);
+  photoInput?.addEventListener("change", (event) => {
+    handlePhotoSelection(event.target?.files || photoInput?.files);
+  });
   listingForm?.addEventListener("submit", handleListingSubmit);
   listingForm?.addEventListener("input", () => {
     updateSellerNotesCounter();
