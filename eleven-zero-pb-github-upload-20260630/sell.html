@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260703q" />
+    <link rel="stylesheet" href="./styles.css?v=20260707b" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
   </head>
   <body data-nav="sell">
@@ -241,14 +241,30 @@
 
               <article class="seller-form-block seller-form-block-tight seller-form-block-compact">
                 <div class="seller-photo-upload seller-photo-upload-compact">
-                  <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0">
+                  <input
+                    class="seller-file-input"
+                    id="listing-photos-input"
+                    type="file"
+                    name="photos"
+                    accept="image/*"
+                    multiple
+                  />
+                  <label
+                    class="seller-file-dropzone seller-file-dropzone-compact"
+                    data-photo-dropzone
+                    tabindex="0"
+                    for="listing-photos-input"
+                  >
                     <span class="seller-file-kicker">Listing photos</span>
                     <strong>Upload photos</strong>
                     <span>Up to 4 images</span>
-                    <input type="file" name="photos" accept="image/*" multiple />
+                    <span class="seller-file-action">Tap here to choose your photos</span>
                   </label>
                   <div class="seller-photo-toolbar seller-photo-toolbar-compact">
                     <span class="seller-photo-meta" data-photo-meta>0 of 4 photos selected.</span>
+                    <button class="seller-file-trigger" type="button" data-photo-trigger>
+                      Choose photos
+                    </button>
                   </div>
                 </div>
 
