@@ -86,14 +86,14 @@ const SELLER_DRAFT_DEFAULTS = {
   shippingMode: "calculated",
 };
 const MAX_LISTING_PHOTOS = 4;
-const MAX_LISTING_IMAGE_DATA_URL_LENGTH = 1_850_000;
+const MAX_LISTING_IMAGE_DATA_URL_LENGTH = 950_000;
+const SUPPORTED_LISTING_PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
 const LISTING_IMAGE_OPTIMIZATION_STEPS = [
-  { maxSide: 1400, quality: 0.84 },
-  { maxSide: 1320, quality: 0.8 },
-  { maxSide: 1200, quality: 0.76 },
-  { maxSide: 1080, quality: 0.72 },
-  { maxSide: 960, quality: 0.68 },
-  { maxSide: 840, quality: 0.62 },
+  { maxSide: 1120, quality: 0.78 },
+  { maxSide: 960, quality: 0.72 },
+  { maxSide: 840, quality: 0.66 },
+  { maxSide: 720, quality: 0.6 },
+  { maxSide: 640, quality: 0.56 },
 ];
 
 function safeParseJson(value) {
@@ -447,7 +447,7 @@ function updateSellerNotesCounter() {
 
   if (!count) {
     sellerNotesCounter.textContent =
-      "0 characters · buyers respond best to clear wear, grip, and edge-guard details.";
+      "Optional · add wear, grip, or edge-guard details if helpful.";
     return;
   }
 
@@ -1383,8 +1383,7 @@ function renderSellerReadiness() {
       listingForm?.querySelector('input[name="price"]')?.value?.trim()
   );
   const buyerClarityReady = Boolean(
-    listingForm?.querySelector('input[name="location"]')?.value?.trim() &&
-      listingForm?.querySelector('textarea[name="notes"]')?.value?.trim()
+    listingForm?.querySelector('input[name="location"]')?.value?.trim()
   );
   const shippingConfig = getDraftShippingConfig();
   const flatShippingAmount = Number((shippingConfig.flat || "").replace(/[^\d]/g, ""));
@@ -1427,7 +1426,7 @@ function renderSellerReadiness() {
     sellerChecklistItem(
       "Buyer clarity",
       buyerClarityReady,
-      buyerClarityReady ? "Location and notes help buyers trust the listing." : "Add shipping location and condition notes."
+      buyerClarityReady ? "Shipping location is ready." : "Add the city/state this paddle ships from."
     ),
     sellerChecklistItem(
       "Shipping",
@@ -1763,9 +1762,30 @@ function optimizeImage(dataUrl, fileType = "") {
   });
 }
 
+function listingPhotoFileExtension(file) {
+  const name = String(file?.name || "");
+  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  return extension || "";
+}
+
+function isSupportedListingPhotoFile(file) {
+  const type = String(file?.type || "").toLowerCase();
+  const extension = listingPhotoFileExtension(file);
+
+  if (type && !type.startsWith("image/")) {
+    return false;
+  }
+
+  if (type === "image/jpeg" || type === "image/jpg" || type === "image/png" || type === "image/webp") {
+    return true;
+  }
+
+  return SUPPORTED_LISTING_PHOTO_EXTENSIONS.has(extension);
+}
+
 async function prepareListingPhotos(fileList, remainingSlots = MAX_LISTING_PHOTOS) {
   const incomingFiles = Array.from(fileList || []);
-  const imageFiles = incomingFiles.filter((file) => file.type.startsWith("image/"));
+  const imageFiles = incomingFiles.filter(isSupportedListingPhotoFile);
   const files = imageFiles.slice(0, Math.max(0, remainingSlots));
 
   const images = [];
@@ -1842,7 +1862,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
         ? `${prepared.skippedCount} extra photo${prepared.skippedCount === 1 ? " was" : "s were"} skipped because the limit is ${MAX_LISTING_PHOTOS}.`
         : "",
       prepared.ignoredCount
-        ? `${prepared.ignoredCount} file${prepared.ignoredCount === 1 ? " was" : "s were"} ignored because only image uploads are supported.`
+        ? `${prepared.ignoredCount} file${prepared.ignoredCount === 1 ? " was" : "s were"} ignored. Use JPG, PNG, or WebP for now.`
         : "",
       prepared.oversizedCount
         ? `${prepared.oversizedCount} photo${prepared.oversizedCount === 1 ? " was" : "s were"} too large after compression.`
@@ -1866,6 +1886,9 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
     listingState.imageProcessing = false;
     if (photoInput) photoInput.value = "";
     renderPhotoPreview();
+    renderSellerReadiness();
+    renderSellerLivePreview();
+    renderSellerDraftStatus();
   }
 }
 
@@ -1897,7 +1920,34 @@ async function handleListingSubmit(event) {
 
   const formData = new FormData(listingForm);
   const payload = Object.fromEntries(formData.entries());
+  delete payload.photos;
+  payload.category = String(payload.category || "control").trim() || "control";
+  payload.notes = String(payload.notes || "").trim() || "No extra condition notes added yet.";
   payload.images = listingState.draftImages;
+
+  const missingBasics = [];
+  if (!String(payload.brand || "").trim()) missingBasics.push("brand");
+  if (!String(payload.model || "").trim()) missingBasics.push("model");
+  if (!String(payload.price || "").trim()) missingBasics.push("price");
+  if (!String(payload.location || "").trim()) missingBasics.push("ships from");
+
+  if (missingBasics.length) {
+    ElevenZeroApp.setStatus(
+      listingStatus,
+      `Add ${missingBasics.join(", ")} before submitting your paddle for review.`,
+      "warning"
+    );
+    return;
+  }
+
+  if (payload.shippingMode === "calculated" && !String(payload.shippingOriginZip || "").trim()) {
+    ElevenZeroApp.setStatus(
+      listingStatus,
+      "Add the ZIP code your paddle ships from, or choose free shipping / flat shipping.",
+      "warning"
+    );
+    return;
+  }
 
   try {
     await ElevenZeroApp.request("/api/listings", {
