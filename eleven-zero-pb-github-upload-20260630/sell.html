@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260707d" />
+    <link rel="stylesheet" href="./styles.css?v=20260707e" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
   </head>
   <body data-nav="sell">
@@ -85,7 +85,7 @@
                     <input type="text" name="location" placeholder="Ex: Miami, FL" />
                   </label>
                   <label class="seller-field-wide">
-                    Notes for buyers
+                    Notes for buyers <span class="seller-optional-label">optional</span>
                     <textarea
                       class="seller-notes-compact"
                       name="notes"
@@ -93,7 +93,7 @@
                       placeholder="Example: Light edge wear, fresh grip, no cracks."
                     ></textarea>
                     <span class="seller-field-meta" data-seller-notes-counter>
-                      0 characters. Mention wear, grip, and anything buyers should know.
+                      Optional. Mention wear, grip, and anything buyers should know.
                     </span>
                   </label>
                 </div>
@@ -116,7 +116,7 @@
                     id="listing-photos-input"
                     type="file"
                     name="photos"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                     multiple
                     aria-label="Choose up to 4 listing photos"
                   />
@@ -194,7 +194,7 @@
     </div>
 
     <script src="./app.js?v=20260703f"></script>
-    <script src="./marketplace.js?v=20260707b"></script>
+    <script src="./marketplace.js?v=20260707c"></script>
     <script src="./header-tweaks.js?v=20260705f"></script>
   </body>
 </html>
