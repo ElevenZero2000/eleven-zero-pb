@@ -3509,7 +3509,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         category = str(body.get("category", "")).strip().lower() or "control"
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
-        notes = str(body.get("notes", "")).strip()
+        notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
         price_raw = str(body.get("price", "")).strip()
         digits = "".join(ch for ch in price_raw if ch.isdigit())
         price_usd = int(digits) if digits else 0
@@ -4014,7 +4014,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         category = str(body.get("category", "")).strip().lower() or "control"
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
-        notes = str(body.get("notes", "")).strip()
+        notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
         images = normalize_listing_image_payload(body.get("images", []))
         price_usd = parse_whole_dollar_amount(body.get("price"))
         shipping_mode = str(body.get("shippingMode", "")).strip().lower() or "calculated"
@@ -4040,9 +4040,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
         shipping_note = str(body.get("shippingNote", "")).strip()
 
-        if not all([brand, model, category, condition, location, notes]) or price_usd <= 0:
+        if not all([brand, model, category, condition, location]) or price_usd <= 0:
             self.send_json(
-                {"error": "Please complete every listing field before submitting it for review."},
+                {"error": "Add the brand, model, condition, price, and ships-from city before submitting it for review."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
