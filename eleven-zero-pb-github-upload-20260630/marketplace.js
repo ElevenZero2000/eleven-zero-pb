@@ -84,6 +84,16 @@ const SELLER_DRAFT_DEFAULTS = {
   condition: "Excellent",
   shippingMode: "calculated",
 };
+const MAX_LISTING_PHOTOS = 4;
+const MAX_LISTING_IMAGE_DATA_URL_LENGTH = 1_850_000;
+const LISTING_IMAGE_OPTIMIZATION_STEPS = [
+  { maxSide: 1400, quality: 0.84 },
+  { maxSide: 1320, quality: 0.8 },
+  { maxSide: 1200, quality: 0.76 },
+  { maxSide: 1080, quality: 0.72 },
+  { maxSide: 960, quality: 0.68 },
+  { maxSide: 840, quality: 0.62 },
+];
 
 function safeParseJson(value) {
   if (!value) return null;
@@ -1701,49 +1711,87 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function optimizeImage(dataUrl) {
+function renderOptimizedListingImage(image, maxSide, quality) {
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Could not prepare the image for upload.");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+function optimizeImage(dataUrl, fileType = "") {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
-      const maxSide = 1400;
-      const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
-      const width = Math.max(1, Math.round(image.width * scale));
-      const height = Math.max(1, Math.round(image.height * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext("2d");
+      for (const step of LISTING_IMAGE_OPTIMIZATION_STEPS) {
+        const candidate = renderOptimizedListingImage(image, step.maxSide, step.quality);
+        if (candidate.length <= MAX_LISTING_IMAGE_DATA_URL_LENGTH) {
+          resolve(candidate);
+          return;
+        }
+      }
 
-      if (!context) {
-        reject(new Error("Could not prepare the image for upload."));
+      if (dataUrl.length <= MAX_LISTING_IMAGE_DATA_URL_LENGTH) {
+        resolve(dataUrl);
         return;
       }
 
-      context.drawImage(image, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", 0.84));
+      reject(
+        new Error(
+          `The photo${fileType ? ` (${fileType})` : ""} is still too large after compression. Try cropping it or using a smaller JPG/PNG image.`
+        )
+      );
     };
-    image.onerror = () => reject(new Error("One of the selected photos could not be processed."));
+    image.onerror = () => {
+      if (dataUrl.length <= MAX_LISTING_IMAGE_DATA_URL_LENGTH) {
+        resolve(dataUrl);
+        return;
+      }
+      reject(new Error("One of the selected photos could not be processed. Try a JPG or PNG image."));
+    };
     image.src = dataUrl;
   });
 }
 
-async function prepareListingPhotos(fileList, remainingSlots = 4) {
+async function prepareListingPhotos(fileList, remainingSlots = MAX_LISTING_PHOTOS) {
   const incomingFiles = Array.from(fileList || []);
   const imageFiles = incomingFiles.filter((file) => file.type.startsWith("image/"));
   const files = imageFiles.slice(0, Math.max(0, remainingSlots));
 
   const images = [];
+  let failedCount = 0;
+  let oversizedCount = 0;
 
   for (const file of files) {
-    const rawDataUrl = await readFileAsDataUrl(file);
-    const optimized = await optimizeImage(rawDataUrl);
-    images.push(optimized);
+    try {
+      const rawDataUrl = await readFileAsDataUrl(file);
+      const optimized = await optimizeImage(rawDataUrl, file.type);
+      images.push(optimized);
+    } catch (error) {
+      const message = String(error?.message || "").toLowerCase();
+      if (message.includes("too large")) {
+        oversizedCount += 1;
+      } else {
+        failedCount += 1;
+      }
+    }
   }
 
   return {
     images,
     skippedCount: Math.max(0, imageFiles.length - files.length),
     ignoredCount: Math.max(0, incomingFiles.length - imageFiles.length),
+    failedCount,
+    oversizedCount,
   };
 }
 
@@ -1753,11 +1801,11 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
     return;
   }
 
-  const remainingSlots = Math.max(0, 4 - listingState.draftImages.length);
+  const remainingSlots = Math.max(0, MAX_LISTING_PHOTOS - listingState.draftImages.length);
   if (!remainingSlots) {
     ElevenZeroApp.setStatus(
       listingStatus,
-      "You already have 4 photos selected. Remove one first if you want to replace it.",
+      `You already have ${MAX_LISTING_PHOTOS} photos selected. Remove one first if you want to replace it.`,
       "warning"
     );
     if (photoInput) photoInput.value = "";
@@ -1774,6 +1822,13 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
 
   try {
     const prepared = await prepareListingPhotos(fileList, remainingSlots);
+    if (!prepared.images.length) {
+      throw new Error(
+        prepared.oversizedCount
+          ? "Those photos are too large to use right now. Try smaller JPG/PNG images or crop them before uploading."
+          : "We could not prepare those photos. Try JPG or PNG images from your device."
+      );
+    }
     listingState.draftImages = [...listingState.draftImages, ...prepared.images];
     renderPhotoPreview();
 
@@ -1783,17 +1838,25 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
       } ready for review.`,
       "The first photo will be used as the cover image.",
       prepared.skippedCount
-        ? `${prepared.skippedCount} extra photo${prepared.skippedCount === 1 ? " was" : "s were"} skipped because the limit is 4.`
+        ? `${prepared.skippedCount} extra photo${prepared.skippedCount === 1 ? " was" : "s were"} skipped because the limit is ${MAX_LISTING_PHOTOS}.`
         : "",
       prepared.ignoredCount
         ? `${prepared.ignoredCount} file${prepared.ignoredCount === 1 ? " was" : "s were"} ignored because only image uploads are supported.`
+        : "",
+      prepared.oversizedCount
+        ? `${prepared.oversizedCount} photo${prepared.oversizedCount === 1 ? " was" : "s were"} too large after compression.`
+        : "",
+      prepared.failedCount
+        ? `${prepared.failedCount} photo${prepared.failedCount === 1 ? " could not" : "s could not"} be processed.`
         : "",
     ].filter(Boolean);
 
     ElevenZeroApp.setStatus(
       listingStatus,
       messageBits.join(" "),
-      "success"
+      prepared.skippedCount || prepared.ignoredCount || prepared.oversizedCount || prepared.failedCount
+        ? "warning"
+        : "success"
     );
   } catch (error) {
     renderPhotoPreview();
@@ -2004,6 +2067,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   photoDropzone?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
+    photoInput?.click();
+  });
+  photoDropzone?.addEventListener("click", (event) => {
+    if (event.target === photoInput) return;
     photoInput?.click();
   });
   ["dragenter", "dragover"].forEach((eventName) => {
