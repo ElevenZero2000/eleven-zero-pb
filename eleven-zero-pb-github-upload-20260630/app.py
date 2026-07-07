@@ -1792,6 +1792,9 @@ def row_to_dict(row: sqlite3.Row) -> dict:
     return {key: row[key] for key in row.keys()}
 
 
+MAX_LISTING_IMAGE_DATA_URL_LENGTH = 2_000_000
+
+
 def normalize_listing_image_payload(raw_images) -> list[str]:
     if isinstance(raw_images, str):
         raw_images = raw_images.strip()
@@ -1817,7 +1820,7 @@ def normalize_listing_image_payload(raw_images) -> list[str]:
         image = candidate.strip()
         if not image.startswith("data:image/"):
             continue
-        if len(image) > 1_600_000:
+        if len(image) > MAX_LISTING_IMAGE_DATA_URL_LENGTH:
             continue
         if image in images:
             continue
@@ -4113,8 +4116,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             shipping_flat_usd = 0
 
         if not images:
+            attempted_images = bool(body.get("images"))
             self.send_json(
-                {"error": "Add at least one paddle photo before submitting the listing for review."},
+                {
+                    "error": (
+                        "We could not save those photos. Try smaller JPG or PNG images and upload them again."
+                        if attempted_images
+                        else "Add at least one paddle photo before submitting the listing for review."
+                    )
+                },
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
