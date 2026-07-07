@@ -241,30 +241,33 @@
 
               <article class="seller-form-block seller-form-block-tight seller-form-block-compact">
                 <div class="seller-photo-upload seller-photo-upload-compact">
-                  <input
-                    class="seller-file-input"
-                    id="listing-photos-input"
-                    type="file"
-                    name="photos"
-                    accept="image/*"
-                    multiple
-                  />
-                  <label
-                    class="seller-file-dropzone seller-file-dropzone-compact"
-                    data-photo-dropzone
-                    tabindex="0"
-                    for="listing-photos-input"
-                  >
+                  <div class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0">
                     <span class="seller-file-kicker">Listing photos</span>
                     <strong>Upload photos</strong>
-                    <span>Up to 4 images</span>
-                    <span class="seller-file-action">Tap here to choose your photos</span>
-                  </label>
+                    <span>Up to 4 images. Add the front, edge guard, handle, and any wear.</span>
+                    <input
+                      id="listing-photos-input"
+                      type="file"
+                      name="photos"
+                      accept="image/*"
+                      multiple
+                      aria-label="Choose up to 4 listing photos"
+                      style="
+                        display: block;
+                        width: 100%;
+                        margin-top: 12px;
+                        padding: 12px 14px;
+                        border-radius: 14px;
+                        border: 1px solid rgba(255, 255, 255, 0.18);
+                        background: rgba(255, 255, 255, 0.12);
+                        color: rgba(255, 255, 255, 0.94);
+                        font: inherit;
+                      "
+                    />
+                  </div>
                   <div class="seller-photo-toolbar seller-photo-toolbar-compact">
                     <span class="seller-photo-meta" data-photo-meta>0 of 4 photos selected.</span>
-                    <button class="seller-file-trigger" type="button" data-photo-trigger>
-                      Choose photos
-                    </button>
+                    <span class="seller-photo-meta">JPG, PNG, or HEIC</span>
                   </div>
                 </div>
 
