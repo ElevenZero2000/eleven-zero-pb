@@ -1599,9 +1599,9 @@ body[data-nav="sell"] .seller-card {
   max-width: 8ch;
   margin: 0;
   color: white;
-  font-family: "Arial Narrow", Impact, sans-serif;
-  font-size: clamp(3rem, 5vw, 4.8rem);
-  line-height: 0.94;
+  font-family: var(--display);
+  font-size: clamp(3.4rem, 5.8vw, 5.7rem);
+  line-height: 0.9;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -1609,6 +1609,9 @@ body[data-nav="sell"] .seller-card {
 .seller-copy-focused p {
   max-width: 28rem;
   margin: 0;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 .seller-simple-strip {
@@ -1627,9 +1630,9 @@ body[data-nav="sell"] .seller-card {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.82);
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  font-family: var(--display);
+  font-size: 0.86rem;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
@@ -2096,6 +2099,7 @@ body[data-nav="sell"] .seller-launch-panel {
   gap: 12px;
   padding: 14px;
   border-radius: 22px;
+  font-family: var(--body);
 }
 
 .seller-form-compact {
@@ -2221,8 +2225,11 @@ body[data-nav="sell"] .seller-photo-guidance-card {
 .seller-form label {
   display: grid;
   gap: 8px;
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.86);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .seller-required {
@@ -2250,6 +2257,11 @@ body[data-nav="sell"] .seller-photo-guidance-card {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.96);
   color: var(--ink);
+  font-family: var(--body);
+  font-size: 0.96rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 body[data-nav="sell"] .seller-form input,
@@ -2296,6 +2308,15 @@ body[data-nav="sell"] .seller-form-block {
 .seller-form-block-head {
   display: grid;
   gap: 6px;
+}
+
+.seller-form-block-head .eyebrow {
+  margin-bottom: 2px;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.seller-form-block-head .seller-form-help {
+  margin: 0;
 }
 
 .seller-form-block-tight {
@@ -2422,7 +2443,10 @@ body[data-nav="sell"] .seller-file-dropzone {
 }
 
 .seller-file-dropzone strong {
+  font-family: var(--display);
   font-size: 1rem;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
 }
 
 .seller-file-dropzone-compact strong {
@@ -2513,8 +2537,10 @@ body[data-nav="sell"] .seller-file-dropzone {
   background: var(--ink);
   color: white;
   cursor: pointer;
-  font: inherit;
-  font-weight: 800;
+  font-family: var(--display);
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
 }
 
 .seller-photo-toolbar {
@@ -2550,9 +2576,10 @@ body[data-nav="sell"] .seller-file-dropzone {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.86);
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  font-family: var(--display);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .seller-field-meta {
@@ -2877,6 +2904,10 @@ body[data-nav="sell"] .seller-file-dropzone {
 
 .seller-submit-button {
   min-height: 52px;
+  font-family: var(--display);
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .seller-submit-meta {
