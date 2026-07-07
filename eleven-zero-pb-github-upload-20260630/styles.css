@@ -1577,6 +1577,62 @@ body[data-nav="sell"] .seller-card {
   padding: 20px;
 }
 
+.seller-section-focused {
+  margin: 28px 0 70px;
+}
+
+.seller-card-focused {
+  grid-template-columns: minmax(220px, 0.42fr) minmax(520px, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.seller-copy-focused {
+  position: static;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 8px 4px 8px 0;
+}
+
+.seller-copy-focused h1 {
+  max-width: 8ch;
+  margin: 0;
+  color: white;
+  font-family: "Arial Narrow", Impact, sans-serif;
+  font-size: clamp(3rem, 5vw, 4.8rem);
+  line-height: 0.94;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.seller-copy-focused p {
+  max-width: 28rem;
+  margin: 0;
+}
+
+.seller-simple-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.seller-simple-strip span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .seller-card-single {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
@@ -2036,6 +2092,12 @@ body[data-nav="sell"] .seller-launch-panel {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.seller-form-focused {
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+}
+
 .seller-form-compact {
   width: min(100%, 920px);
   margin: 0 auto;
@@ -2219,6 +2281,11 @@ body[data-nav="sell"] .seller-form textarea {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.seller-form-block-primary {
+  padding: 14px;
+  border-radius: 18px;
 }
 
 body[data-nav="sell"] .seller-form-block {
@@ -2419,6 +2486,35 @@ body[data-nav="sell"] .seller-file-dropzone {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(8, 233, 90, 0.3);
   transform: translateY(-1px);
+}
+
+.seller-native-file-input {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  opacity: 1;
+  position: static;
+}
+
+.seller-native-file-input::file-selector-button {
+  min-height: 34px;
+  margin-right: 12px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
 }
 
 .seller-photo-toolbar {
@@ -2766,6 +2862,11 @@ body[data-nav="sell"] .seller-file-dropzone {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.seller-submit-strip-focused {
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  align-items: center;
 }
 
 @media (max-width: 720px) {
@@ -6067,6 +6168,15 @@ body.has-modal-open {
     grid-template-columns: 1fr;
   }
 
+  .seller-copy-focused {
+    position: static;
+    padding: 0;
+  }
+
+  .seller-copy-focused h1 {
+    max-width: 12ch;
+  }
+
   .seller-quick-guide-grid {
     grid-template-columns: 1fr;
   }
@@ -6185,6 +6295,33 @@ body.has-modal-open {
   }
 
   .seller-inline-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .seller-section-focused {
+    margin: 18px 0 48px;
+  }
+
+  .seller-card-focused {
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .seller-copy-focused h1 {
+    max-width: none;
+    font-size: clamp(2.5rem, 12vw, 3.4rem);
+    line-height: 0.96;
+  }
+
+  .seller-copy-focused {
+    gap: 10px;
+  }
+
+  .seller-simple-strip {
+    display: none;
+  }
+
+  .seller-submit-strip-focused {
     grid-template-columns: 1fr;
   }
 
