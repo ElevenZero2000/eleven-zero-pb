@@ -2248,6 +2248,18 @@ body[data-nav="sell"] .seller-photo-guidance-card {
   text-transform: uppercase;
 }
 
+.seller-optional-label {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-left: 6px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .seller-form input,
 .seller-form select,
 .seller-form textarea {
