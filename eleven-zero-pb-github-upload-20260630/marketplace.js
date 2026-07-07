@@ -50,6 +50,7 @@ const photoInput = listingForm?.querySelector('input[name="photos"]');
 const photoPreview = document.querySelector("[data-photo-preview]");
 const photoDropzone = document.querySelector("[data-photo-dropzone]");
 const photoMeta = document.querySelector("[data-photo-meta]");
+const photoTrigger = document.querySelector("[data-photo-trigger]");
 const sellerReadinessTitle = document.querySelector("[data-seller-readiness-title]");
 const sellerReadinessPill = document.querySelector("[data-seller-readiness-pill]");
 const sellerReadinessCopy = document.querySelector("[data-seller-readiness-copy]");
@@ -2069,8 +2070,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.preventDefault();
     photoInput?.click();
   });
-  photoDropzone?.addEventListener("click", (event) => {
-    if (event.target === photoInput) return;
+  photoTrigger?.addEventListener("click", () => {
     photoInput?.click();
   });
   ["dragenter", "dragover"].forEach((eventName) => {
