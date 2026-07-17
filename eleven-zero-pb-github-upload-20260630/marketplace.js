@@ -17,7 +17,7 @@ const listingState = {
   minPrice: "",
   maxPrice: "",
   photoMode: "",
-  sortMode: "relevance",
+  sortMode: "newest",
   draftImages: [],
   imageProcessing: false,
   sellerDraftSavedAt: "",
@@ -43,6 +43,7 @@ const maxPriceInput = searchForm?.querySelector('input[name="maxPrice"]');
 const photoSelect = searchForm?.querySelector('select[name="photos"]');
 const sortSelect = searchForm?.querySelector('select[name="sort"]');
 const resetSearchButton = document.querySelector("[data-listing-reset]");
+const mobileFilterToggle = document.querySelector("[data-mobile-filter-toggle]");
 const listingSearchSummary = document.querySelector("[data-listing-search-summary]");
 const listingBrandPills = document.querySelector("[data-listing-brand-pills]");
 const listingActiveFilters = document.querySelector("[data-listing-active-filters]");
@@ -79,6 +80,7 @@ const MARKETPLACE_QUERY_KEYS = {
 };
 const MARKETPLACE_FILTERS = new Set(["all", ...Object.keys(listingThemes)]);
 const MARKETPLACE_SORT_MODES = new Set(["relevance", "newest", "price-asc", "price-desc", "photos"]);
+const DEFAULT_MARKETPLACE_SORT_MODE = "newest";
 const MARKETPLACE_PHOTO_MODES = new Set(["", "1", "2", "3"]);
 const SELLER_DRAFT_DEFAULTS = {
   category: "control",
@@ -135,7 +137,7 @@ function removeStorageItem(key) {
 function normalizeBrowseState(raw = {}) {
   const nextFilter = String(raw.filter || "all").trim().toLowerCase();
   const nextPhotoMode = String(raw.photoMode || "").trim();
-  const nextSortMode = String(raw.sortMode || "relevance").trim();
+  const nextSortMode = String(raw.sortMode || DEFAULT_MARKETPLACE_SORT_MODE).trim();
 
   return {
     filter: MARKETPLACE_FILTERS.has(nextFilter) ? nextFilter : "all",
@@ -148,7 +150,7 @@ function normalizeBrowseState(raw = {}) {
     minPrice: String(raw.minPrice || "").trim(),
     maxPrice: String(raw.maxPrice || "").trim(),
     photoMode: MARKETPLACE_PHOTO_MODES.has(nextPhotoMode) ? nextPhotoMode : "",
-    sortMode: MARKETPLACE_SORT_MODES.has(nextSortMode) ? nextSortMode : "relevance",
+    sortMode: MARKETPLACE_SORT_MODES.has(nextSortMode) ? nextSortMode : DEFAULT_MARKETPLACE_SORT_MODE,
   };
 }
 
@@ -180,7 +182,7 @@ function marketplaceBrowseStateHasValues(state = getMarketplaceBrowseState()) {
       state.minPrice ||
       state.maxPrice ||
       state.photoMode ||
-      state.sortMode !== "relevance"
+      state.sortMode !== DEFAULT_MARKETPLACE_SORT_MODE
   );
 }
 
@@ -254,7 +256,7 @@ function writeMarketplaceBrowseStateToUrl(state = getMarketplaceBrowseState()) {
   if (state.photoMode) {
     url.searchParams.set(MARKETPLACE_QUERY_KEYS.photoMode, state.photoMode);
   }
-  if (state.sortMode !== "relevance") {
+  if (state.sortMode !== DEFAULT_MARKETPLACE_SORT_MODE) {
     url.searchParams.set(MARKETPLACE_QUERY_KEYS.sortMode, state.sortMode);
   }
 
@@ -320,7 +322,7 @@ function getActiveMarketplaceFilters() {
       ? { key: "photoMode", label: "Photos", value: photoLabels[listingState.photoMode] || listingState.photoMode }
       : null,
     listingState.query ? { key: "query", label: "Search", value: listingState.query } : null,
-    listingState.sortMode !== "relevance"
+    listingState.sortMode !== DEFAULT_MARKETPLACE_SORT_MODE
       ? { key: "sortMode", label: "Sort", value: describeSortMode(listingState.sortMode) }
       : null,
   ].filter(Boolean);
@@ -340,7 +342,7 @@ function clearMarketplaceFilter(filterKey) {
     maxPrice: "",
     photoMode: "",
     query: "",
-    sortMode: "relevance",
+    sortMode: DEFAULT_MARKETPLACE_SORT_MODE,
   };
 
   if (!(filterKey in resetValues)) return;
@@ -1093,23 +1095,21 @@ function sortListings(items) {
 
 function renderListingCard(item) {
   const theme = listingThemes[item.category] || listingThemes.control;
-  const sellerName = item.seller_name || "Community seller";
-  const actionState = getListingActionState(item);
-  const isBusy = Number(listingState.buyingListingId) === Number(item.id);
-  const buttonLabel = isBusy ? "Opening checkout..." : actionState.buttonLabel;
-  const buttonClass =
-    actionState.action === "checkout" || actionState.action === "auth"
-      ? "button button-dark"
-      : "button button-secondary";
   const detailHref = `./listing.html?id=${encodeURIComponent(item.id)}`;
+  const title = `${item.brand || ""} ${item.model || ""}`.trim();
+  const conditionLine = item.condition || "Condition listed";
+  const specLine = [theme.label, formatThickness(item.thickness_mm)].filter(Boolean).join(" · ");
+  const shippingLine = item.shipping_policy_label || item.shipping?.label || "Shipping at checkout";
 
   return `
-    <article class="product-card reveal is-visible" data-category="${ElevenZeroApp.escapeHtml(
+    <article class="product-card shop-product-card reveal is-visible" data-category="${ElevenZeroApp.escapeHtml(
       item.category
     )}">
       <div class="card-art ${ElevenZeroApp.escapeHtml(theme.artClass)}">
         ${renderListingArt(item, theme, detailHref)}
-        <span class="condition-tag">${ElevenZeroApp.escapeHtml(item.condition)}</span>
+        <button class="shop-save-button" type="button" aria-label="Save listing">
+          ♥
+        </button>
         ${
           item.images?.length > 1
             ? `<span class="listing-photo-count">${ElevenZeroApp.escapeHtml(
@@ -1119,47 +1119,19 @@ function renderListingCard(item) {
         }
       </div>
       <div class="card-body">
-        <div class="card-headline">
-          <div>
-            <a class="listing-title-link" href="${detailHref}">
-              <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
-              <h3>${ElevenZeroApp.escapeHtml(item.model)}</h3>
-            </a>
-          </div>
+        <div class="shop-price-line">
           <span class="price">${ElevenZeroApp.formatMoney(item.price_usd)}</span>
+          <span>${ElevenZeroApp.escapeHtml(shippingLine)}</span>
         </div>
-        ${buildListingSpecs(item)}
-        <p class="product-copy">${ElevenZeroApp.escapeHtml(truncateCopy(item.notes))}</p>
-        <div class="card-footer">
-          <span>${ElevenZeroApp.escapeHtml(theme.label)}</span>
-          <span>${ElevenZeroApp.escapeHtml(item.location)}</span>
-          <span>${ElevenZeroApp.escapeHtml(item.shipping_policy_label || item.shipping?.label || "Shipping at checkout")}</span>
-          <span>${ElevenZeroApp.escapeHtml(sellerName)}</span>
-          <span>${ElevenZeroApp.escapeHtml(formatPostedLabel(item.created_at))}</span>
-          <span>${ElevenZeroApp.escapeHtml(listingPhotoLabel(item))}</span>
-        </div>
-        <div class="listing-purchase-row">
-          <div class="listing-purchase-copy">
-            <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(
-              actionState.tone
-            )}">${ElevenZeroApp.escapeHtml(actionState.statusLabel)}</span>
-            <p class="listing-status-copy">${ElevenZeroApp.escapeHtml(actionState.reason)}</p>
-          </div>
-          <div class="listing-cta-stack">
-            <a class="button button-secondary listing-detail-button" href="${detailHref}">
-              View details
-            </a>
-            <button
-              class="${buttonClass} listing-buy-button"
-              type="button"
-              data-buy-listing="${ElevenZeroApp.escapeHtml(item.id)}"
-              data-buy-action="${ElevenZeroApp.escapeHtml(actionState.action)}"
-              ${actionState.action === "disabled" || isBusy ? "disabled" : ""}
-            >
-              ${ElevenZeroApp.escapeHtml(buttonLabel)}
-            </button>
-          </div>
-        </div>
+        <a class="listing-title-link shop-title-link" href="${detailHref}">
+          <h3>${ElevenZeroApp.escapeHtml(title || "Pickleball paddle")}</h3>
+        </a>
+        <p class="shop-card-meta">${ElevenZeroApp.escapeHtml(conditionLine)}</p>
+        ${
+          specLine
+            ? `<p class="shop-card-submeta">${ElevenZeroApp.escapeHtml(specLine)}</p>`
+            : ""
+        }
       </div>
     </article>
   `;
@@ -1339,12 +1311,11 @@ function renderBrandPills() {
 
   if (!brands.length) {
     listingBrandPills.innerHTML =
-      '<span class="listing-quick-brands-label">Popular brands will appear here as more paddles are added.</span>';
+      '<span class="listing-quick-brands-label">Brands appear here as more paddles are added.</span>';
     return;
   }
 
   listingBrandPills.innerHTML = `
-    <span class="listing-quick-brands-label">Quick brand search</span>
     ${brands
       .map(
         ([brand, count]) => `
@@ -1555,7 +1526,7 @@ function renderSearchSummary(visible) {
   const filtersLabel = activeFilters.length ? activeFilters.join(" · ") : "all marketplace listings";
   const sortedLabel = describeSortMode(listingState.sortMode);
 
-  listingSearchSummary.textContent = `Showing ${visible.length} of ${listingState.items.length} listings for ${filtersLabel}. Sorted by ${sortedLabel}.`;
+  listingSearchSummary.textContent = `Showing ${visible.length} of ${listingState.items.length} listings · ${filtersLabel} · ${sortedLabel}.`;
 }
 
 function renderListings() {
@@ -1568,11 +1539,13 @@ function renderListings() {
   });
 
   if (listingCount) {
-    listingCount.textContent = `${listingState.items.length} listings`;
+    listingCount.textContent = `${visible.length} result${visible.length === 1 ? "" : "s"}`;
   }
 
   if (listingHeading) {
-    listingHeading.textContent = `${visible.length} listing${visible.length === 1 ? "" : "s"} found`;
+    listingHeading.textContent = marketplaceBrowseStateHasValues()
+      ? "Filtered paddles"
+      : "Paddles for sale";
   }
 
   renderSearchSummary(visible);
@@ -1605,15 +1578,9 @@ function renderListings() {
       ]
         .filter(Boolean)
         .join(" · ");
-      listingNote.textContent = `Search results update live while you browse. Current filters: ${activeFilters}.`;
+      listingNote.textContent = `Live results for ${activeFilters}. Open a card to see photos, shipping, and checkout.`;
     } else {
-      listingNote.textContent = !ElevenZeroApp.session?.authenticated
-        ? "Want to sell too? Sign in and submit your own paddle listing for review."
-        : !sellerProfile?.connectConfigured
-          ? "You can submit listings for review now. Online checkout is being finalized for sellers."
-          : !sellerProfile?.readyForPayouts
-            ? "You can submit listings for review now. Finish your payout setup in Account before online checkout is enabled on your listings."
-            : "You are signed in and ready to manage your marketplace listings.";
+      listingNote.textContent = "Click a paddle card to see the full listing, shipping estimate, and checkout.";
     }
   }
 
@@ -1990,9 +1957,17 @@ function syncSearchState() {
   listingState.minPrice = minPriceInput?.value?.trim() || "";
   listingState.maxPrice = maxPriceInput?.value?.trim() || "";
   listingState.photoMode = photoSelect?.value || "";
-  listingState.sortMode = sortSelect?.value || "relevance";
+  listingState.sortMode = sortSelect?.value || DEFAULT_MARKETPLACE_SORT_MODE;
   persistMarketplaceBrowseState();
   renderListings();
+}
+
+function setMobileFiltersOpen(isOpen) {
+  if (!searchForm || !mobileFilterToggle) return;
+
+  searchForm.classList.toggle("is-mobile-filters-open", isOpen);
+  mobileFilterToggle.setAttribute("aria-expanded", String(isOpen));
+  mobileFilterToggle.textContent = isOpen ? "Hide filters" : "Filters";
 }
 
 function resetSearchState() {
@@ -2006,7 +1981,7 @@ function resetSearchState() {
   listingState.minPrice = "";
   listingState.maxPrice = "";
   listingState.photoMode = "";
-  listingState.sortMode = "relevance";
+  listingState.sortMode = DEFAULT_MARKETPLACE_SORT_MODE;
 
   if (searchInput) searchInput.value = "";
   if (locationInput) locationInput.value = "";
@@ -2017,10 +1992,11 @@ function resetSearchState() {
   if (minPriceInput) minPriceInput.value = "";
   if (maxPriceInput) maxPriceInput.value = "";
   if (photoSelect) photoSelect.value = "";
-  if (sortSelect) sortSelect.value = "relevance";
+  if (sortSelect) sortSelect.value = DEFAULT_MARKETPLACE_SORT_MODE;
 
   persistMarketplaceBrowseState();
   renderListings();
+  setMobileFiltersOpen(false);
 }
 
 function removeDraftPhoto(index) {
@@ -2098,10 +2074,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   photoSelect?.addEventListener("change", syncSearchState);
   sortSelect?.addEventListener("change", syncSearchState);
   resetSearchButton?.addEventListener("click", resetSearchState);
-  searchForm?.addEventListener("submit", (event) => event.preventDefault());
-  photoInput?.addEventListener("change", (event) => {
-    handlePhotoSelection(event.target?.files || photoInput?.files);
+  mobileFilterToggle?.addEventListener("click", () => {
+    const isOpen = searchForm?.classList.contains("is-mobile-filters-open");
+    setMobileFiltersOpen(!isOpen);
   });
+  searchForm?.addEventListener("submit", (event) => event.preventDefault());
+  photoInput?.addEventListener("change", handlePhotoSelection);
   listingForm?.addEventListener("submit", handleListingSubmit);
   listingForm?.addEventListener("input", () => {
     updateSellerNotesCounter();
