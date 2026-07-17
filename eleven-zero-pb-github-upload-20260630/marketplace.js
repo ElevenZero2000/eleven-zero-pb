@@ -1526,7 +1526,7 @@ function renderSearchSummary(visible) {
   const filtersLabel = activeFilters.length ? activeFilters.join(" · ") : "all marketplace listings";
   const sortedLabel = describeSortMode(listingState.sortMode);
 
-  listingSearchSummary.textContent = `Showing ${visible.length} of ${listingState.items.length} listings · ${filtersLabel} · ${sortedLabel}.`;
+  listingSearchSummary.textContent = `Showing ${visible.length} of ${listingState.items.length} paddles · ${filtersLabel} · ${sortedLabel}.`;
 }
 
 function renderListings() {
@@ -1539,7 +1539,7 @@ function renderListings() {
   });
 
   if (listingCount) {
-    listingCount.textContent = `${visible.length} result${visible.length === 1 ? "" : "s"}`;
+    listingCount.textContent = `${visible.length} paddle${visible.length === 1 ? "" : "s"}`;
   }
 
   if (listingHeading) {
@@ -1578,9 +1578,9 @@ function renderListings() {
       ]
         .filter(Boolean)
         .join(" · ");
-      listingNote.textContent = `Live results for ${activeFilters}. Open a card to see photos, shipping, and checkout.`;
+      listingNote.textContent = `Live results for ${activeFilters}. Open any paddle to see photos, shipping, seller notes, and checkout.`;
     } else {
-      listingNote.textContent = "Click a paddle card to see the full listing, shipping estimate, and checkout.";
+      listingNote.textContent = "Open any paddle to see photos, shipping, seller notes, and checkout.";
     }
   }
 
