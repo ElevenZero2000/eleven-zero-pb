@@ -3,6 +3,7 @@ const contentNode = document.querySelector("[data-listing-content]");
 const storyNode = document.querySelector("[data-listing-story]");
 const relatedNode = document.querySelector("[data-related-shell]");
 const SHIPPING_DRAFT_STORAGE_KEY = "elevenZeroPbShippingAddressDraft";
+const CART_DRAFT_STORAGE_KEY = "elevenZeroPbCartDraft";
 
 function createDefaultShippingState() {
   return {
@@ -113,6 +114,18 @@ function persistShippingDraft() {
   }
 
   writeStorageJson(SHIPPING_DRAFT_STORAGE_KEY, snapshot);
+}
+
+function saveCartDraft(item) {
+  if (!item) return;
+
+  writeStorageJson(CART_DRAFT_STORAGE_KEY, {
+    listingId: item.id,
+    title: `${item.brand || ""} ${item.model || ""}`.trim(),
+    priceUsd: item.price_usd,
+    image: item.images?.[0] || "",
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 function formatThickness(value) {
@@ -399,6 +412,51 @@ function getListingActionState(item) {
   };
 }
 
+function getProductCartEntryState(item) {
+  const currentUserId = Number(ElevenZeroApp.session?.user?.id || 0);
+  const sellerUserId = Number(item.seller_user_id || 0);
+  const isOwner = currentUserId && sellerUserId && currentUserId === sellerUserId;
+  const approvalStatus = item.approval_status || "approved";
+
+  if (isOwner) {
+    return {
+      action: "disabled",
+      buttonLabel: "Your listing",
+      statusLabel: "Seller view",
+      reason: "You’re looking at your own listing.",
+      tone: "neutral",
+    };
+  }
+
+  if (approvalStatus === "pending") {
+    return {
+      action: "disabled",
+      buttonLabel: "Under review",
+      statusLabel: "Pending review",
+      reason: "This listing is waiting for Eleven Zero PB approval before it can be purchased.",
+      tone: "pending",
+    };
+  }
+
+  if (approvalStatus === "rejected") {
+    return {
+      action: "disabled",
+      buttonLabel: "Needs changes",
+      statusLabel: "Needs changes",
+      reason: "This listing is paused until the seller updates it and resubmits it for review.",
+      tone: "neutral",
+    };
+  }
+
+  return {
+    action: "cart",
+    buttonLabel: "Buy now",
+    statusLabel: "Ready to buy",
+    reason: "Add this paddle to your cart, then confirm shipping before secure checkout.",
+    tone: "ready",
+  };
+}
+
 function setDetailStatus(message, tone = "neutral") {
   listingDetailState.statusMessage = message;
   listingDetailState.statusTone = tone;
@@ -449,6 +507,56 @@ function getShippingPolicy(item) {
   };
 }
 
+function getCartActionState(item) {
+  const baseActionState = getListingActionState(item);
+  const shippingPolicy = getShippingPolicy(item);
+  const shippingQuote = listingDetailState.shipping.quote;
+  const shippingEstimatedTotal = shippingQuote ? getEstimatedTotalCents(item) : 0;
+
+  if ((baseActionState.action === "checkout" || baseActionState.action === "auth") && !shippingQuote) {
+    return {
+      ...baseActionState,
+      action: "estimate-needed",
+      buttonLabel:
+        shippingPolicy.mode === "calculated" ? "Estimate shipping first" : "Confirm shipping first",
+      statusLabel: "Cart ready",
+      reason:
+        shippingPolicy.mode === "calculated"
+          ? "Add your delivery address so we can estimate shipping before checkout."
+          : "Add your delivery address so we can confirm the delivered total before checkout.",
+      tone: "pending",
+    };
+  }
+
+  if (baseActionState.action === "checkout" && shippingQuote) {
+    return {
+      ...baseActionState,
+      buttonLabel: "Checkout securely",
+      statusLabel: shippingQuote.isEstimate ? "Estimated total ready" : "Delivered total ready",
+      reason: `${formatMoneyFromCents(shippingQuote.amountCents)} ${
+        shippingQuote.isEstimate ? "estimated shipping" : "shipping"
+      } to ${shippingQuote.destinationSummary}. ${
+        shippingQuote.isEstimate ? "Estimated" : "Delivered"
+      } total ${formatMoneyFromCents(shippingEstimatedTotal)}.`,
+      tone: "ready",
+    };
+  }
+
+  if (baseActionState.action === "auth" && shippingQuote) {
+    return {
+      ...baseActionState,
+      buttonLabel: "Sign in to checkout",
+      reason: `${formatMoneyFromCents(
+        shippingQuote.amountCents
+      )} ${shippingQuote.isEstimate ? "estimated shipping" : "shipping"} to ${
+        shippingQuote.destinationSummary
+      }. Sign in to continue to secure checkout.`,
+    };
+  }
+
+  return baseActionState;
+}
+
 function getShippingAddressPayload() {
   const shipping = listingDetailState.shipping || createDefaultShippingState();
   return {
@@ -470,8 +578,13 @@ function getEstimatedTotalCents(item) {
   return baseCents + Number(listingDetailState.shipping?.quote?.amountCents || 0);
 }
 
+function scrollToCartPanel() {
+  const target = document.getElementById("cart") || document.getElementById("shipping");
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function scrollToShippingPanel() {
-  document.getElementById("shipping")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  scrollToCartPanel();
 }
 
 function buildRelatedListings(item, allItems) {
@@ -582,38 +695,10 @@ function renderGallery(item) {
 function renderContent(item) {
   if (!contentNode) return;
 
-  const baseActionState = getListingActionState(item);
   const shippingPolicy = getShippingPolicy(item);
   const shippingQuote = listingDetailState.shipping.quote;
   const shippingEstimatedTotal = shippingQuote ? getEstimatedTotalCents(item) : 0;
-  const actionState = { ...baseActionState };
-
-  if (baseActionState.action === "checkout" && !shippingQuote) {
-    actionState.action = "shipping";
-    actionState.buttonLabel =
-      shippingPolicy.mode === "calculated" ? "Estimate shipping first" : "Confirm shipping first";
-    actionState.statusLabel = "Address needed";
-    actionState.reason =
-      shippingPolicy.mode === "calculated"
-        ? "Add your delivery address below so we can calculate shipping before secure checkout opens."
-        : `${shippingPolicy.label}. Add your delivery address below so we can confirm the delivered total before checkout opens.`;
-    actionState.tone = "pending";
-  } else if (baseActionState.action === "checkout" && shippingQuote) {
-    actionState.buttonLabel = "Continue to Stripe";
-    actionState.statusLabel = shippingQuote.isEstimate ? "Estimated total ready" : "Delivered total ready";
-    actionState.reason = `${formatMoneyFromCents(shippingQuote.amountCents)} ${
-      shippingQuote.isEstimate ? "estimated shipping" : "shipping"
-    } to ${shippingQuote.destinationSummary}. ${
-      shippingQuote.isEstimate ? "Estimated" : "Delivered"
-    } total ${formatMoneyFromCents(shippingEstimatedTotal)}.`;
-    actionState.tone = "ready";
-  } else if (baseActionState.action === "auth" && shippingQuote) {
-    actionState.reason = `${formatMoneyFromCents(
-      shippingQuote.amountCents
-    )} ${shippingQuote.isEstimate ? "estimated shipping" : "shipping"} to ${
-      shippingQuote.destinationSummary
-    }. Sign in to continue to Stripe checkout.`;
-  }
+  const productActionState = getProductCartEntryState(item);
 
   const sellerName = item.seller_name || "Community seller";
   const thickness = formatThickness(item.thickness_mm);
@@ -626,7 +711,10 @@ function renderContent(item) {
     .filter(Boolean)
     .join("");
 
-  const busyLabel = listingDetailState.busy ? "Opening checkout..." : actionState.buttonLabel;
+  const canOpenCart = productActionState.action === "cart";
+  const busyLabel = listingDetailState.busy
+    ? "Opening checkout..."
+    : productActionState.buttonLabel;
   const totalNote = shippingQuote
     ? `${shippingQuote.isEstimate ? "Estimated" : "Delivered"} total ${formatMoneyFromCents(
         shippingEstimatedTotal
@@ -650,8 +738,16 @@ function renderContent(item) {
       </div>
     </div>
     <div class="listing-detail-specs">${specPills}</div>
-    <p class="listing-detail-copy">${ElevenZeroApp.escapeHtml(item.notes)}</p>
+    <p class="listing-detail-copy listing-product-note">${ElevenZeroApp.escapeHtml(item.notes)}</p>
     <div class="listing-detail-facts">
+      <article>
+        <strong>Condition</strong>
+        <span>${ElevenZeroApp.escapeHtml(item.condition)}</span>
+      </article>
+      <article>
+        <strong>Thickness</strong>
+        <span>${ElevenZeroApp.escapeHtml(thickness || "Not listed")}</span>
+      </article>
       <article>
         <strong>Ships from</strong>
         <span>${ElevenZeroApp.escapeHtml(item.location)}</span>
@@ -660,44 +756,28 @@ function renderContent(item) {
         <strong>Seller</strong>
         <span>${ElevenZeroApp.escapeHtml(sellerName)}</span>
       </article>
-      <article>
-        <strong>Posted</strong>
-        <span>${ElevenZeroApp.escapeHtml(formatPostedDate(item.created_at))}</span>
-      </article>
-      <article>
-        <strong>Photos</strong>
-        <span>${ElevenZeroApp.escapeHtml(listingPhotoLabel(item))}</span>
-      </article>
-      <article>
-        <strong>Shipping</strong>
-        <span>${ElevenZeroApp.escapeHtml(shippingPolicy.label)}</span>
-      </article>
     </div>
-    <div class="listing-detail-actions-bar">
-      <a class="button button-secondary" href="./shop.html">Back to shop</a>
-      <button class="button button-secondary" type="button" data-copy-listing-link>
-        Copy listing link
-      </button>
-    </div>
-    <div class="listing-purchase-row listing-purchase-row-detail">
+    <div class="listing-purchase-row listing-purchase-row-detail listing-product-buy-box">
       <div class="listing-purchase-copy">
         <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(
-          actionState.tone
-        )}">${ElevenZeroApp.escapeHtml(actionState.statusLabel)}</span>
-        <p class="listing-status-copy">${ElevenZeroApp.escapeHtml(actionState.reason)}</p>
+          productActionState.tone
+        )}">${ElevenZeroApp.escapeHtml(productActionState.statusLabel)}</span>
+        <p class="listing-status-copy">${ElevenZeroApp.escapeHtml(productActionState.reason)}</p>
       </div>
       <button
-        class="${
-          actionState.action === "checkout" || actionState.action === "auth"
-            ? "button button-dark"
-            : "button button-secondary"
-        } listing-buy-button"
+        class="${canOpenCart ? "button button-dark" : "button button-secondary"} listing-buy-button"
         type="button"
         data-detail-buy
-        data-buy-action="${ElevenZeroApp.escapeHtml(actionState.action)}"
-        ${actionState.action === "disabled" || listingDetailState.busy ? "disabled" : ""}
+        data-buy-action="${ElevenZeroApp.escapeHtml(productActionState.action)}"
+        ${!canOpenCart || listingDetailState.busy ? "disabled" : ""}
       >
         ${ElevenZeroApp.escapeHtml(busyLabel)}
+      </button>
+    </div>
+    <div class="listing-detail-actions-bar listing-detail-actions-subtle">
+      <a class="text-link" href="./shop.html">Back to shop</a>
+      <button class="text-link-button" type="button" data-copy-listing-link>
+        Copy listing link
       </button>
     </div>
     <div class="seller-status listing-detail-status" data-detail-status>
@@ -715,21 +795,14 @@ function renderContent(item) {
     const action = contentNode.querySelector("[data-detail-buy]")?.dataset.buyAction || "disabled";
     if (action === "disabled") return;
 
-    if (action === "shipping") {
-      setDetailStatus("Add your delivery address below, then click Estimate shipping first.", "warning");
-      scrollToShippingPanel();
+    if (action === "cart") {
+      saveCartDraft(item);
+      setDetailStatus("Added to cart. Review shipping and checkout below.", "success");
+      scrollToCartPanel();
       return;
     }
 
-    if (action === "auth") {
-      setDetailStatus("Please sign in first so we can open secure checkout for this listing.", "warning");
-      window.setTimeout(() => {
-        ElevenZeroApp.redirectToAuth(`${window.location.pathname}${window.location.search}#shipping`);
-      }, 700);
-      return;
-    }
-
-    await handleBuyListing(item.id);
+    setDetailStatus(productActionState.reason, productActionState.tone);
   });
 
   contentNode.querySelector("[data-copy-listing-link]")?.addEventListener("click", async () => {
@@ -746,10 +819,11 @@ function renderStory(item) {
   if (!storyNode) return;
 
   const thickness = formatThickness(item.thickness_mm);
-  const actionState = getListingActionState(item);
+  const actionState = getCartActionState(item);
   const shippingPolicy = getShippingPolicy(item);
   const shipping = listingDetailState.shipping;
   const quote = shipping.quote;
+  const estimatedTotalCents = quote ? getEstimatedTotalCents(item) : 0;
   const estimateButtonLabel = shipping.busy
     ? shippingPolicy.mode === "calculated"
       ? "Calculating..."
@@ -757,16 +831,23 @@ function renderStory(item) {
     : shippingPolicy.mode === "calculated"
       ? "Estimate shipping"
       : "Confirm shipping";
-  const checkoutSnapshotLabel =
-    actionState.action === "checkout"
-      ? (quote ? (quote.isEstimate ? "Estimated total ready" : "Delivered total ready") : "Delivery address needed")
-      : actionState.statusLabel;
   const shippingIntro =
     shippingPolicy.mode === "free"
-      ? "This seller offers free shipping. Enter the buyer address below so we can confirm the delivered total before checkout."
+      ? "This seller offers free shipping. Confirm the buyer address before checkout."
       : shippingPolicy.mode === "flat"
-        ? "This seller uses one flat shipping fee. Enter the buyer address below so we can confirm the delivered total before checkout."
-        : "Enter the buyer address below and we’ll estimate U.S. shipping for this paddle before Stripe checkout opens.";
+        ? "This seller uses one flat shipping fee. Confirm the buyer address before checkout."
+        : "Enter the buyer address and we’ll estimate U.S. shipping before checkout.";
+  const shippingLine = quote
+    ? formatMoneyFromCents(quote.amountCents)
+    : shippingPolicy.mode === "free"
+      ? "$0"
+      : shippingPolicy.mode === "flat"
+        ? shippingPolicy.label
+        : "Estimate needed";
+  const totalLine = quote ? formatMoneyFromCents(estimatedTotalCents) : "Calculated in cart";
+  const cartButtonDisabled =
+    actionState.action === "disabled" || listingDetailState.busy || shipping.busy;
+  const cartButtonLabel = listingDetailState.busy ? "Opening checkout..." : actionState.buttonLabel;
   const shippingMeta = [
     shippingPolicy.originZip ? `Origin ZIP ${shippingPolicy.originZip}` : "",
     shippingPolicy.weightOz ? `${Number(shippingPolicy.weightOz).toFixed(1).replace(/\.0$/, "")} oz packed weight` : "",
@@ -779,10 +860,42 @@ function renderStory(item) {
   const shippingNote = shippingPolicy.note || "";
 
   storyNode.innerHTML = `
-    <article class="listing-detail-panel listing-detail-panel-wide listing-shipping-panel" id="shipping">
-      <p class="eyebrow">Shipping estimate</p>
-      <h2>See the delivered total before checkout.</h2>
-      <p>${ElevenZeroApp.escapeHtml(shippingIntro)}</p>
+    <article class="listing-detail-panel listing-detail-panel-wide listing-shipping-panel listing-cart-panel" id="cart">
+      <div class="listing-cart-head">
+        <div>
+          <p class="eyebrow">Your cart</p>
+          <h2>Review before checkout.</h2>
+        </div>
+        <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(
+          actionState.tone
+        )}">${ElevenZeroApp.escapeHtml(actionState.statusLabel)}</span>
+      </div>
+
+      <div class="listing-cart-summary">
+        <article class="listing-cart-item">
+          <div>
+            <strong>${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(item.model)}</strong>
+            <span>${ElevenZeroApp.escapeHtml(
+              [item.condition, thickness, item.color].filter(Boolean).join(" · ")
+            )}</span>
+          </div>
+          <strong>${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</strong>
+        </article>
+        <div class="listing-cart-row">
+          <span>Subtotal</span>
+          <strong>${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</strong>
+        </div>
+        <div class="listing-cart-row">
+          <span>Shipping</span>
+          <strong>${ElevenZeroApp.escapeHtml(shippingLine)}</strong>
+        </div>
+        <div class="listing-cart-row listing-cart-total">
+          <span>Total</span>
+          <strong>${ElevenZeroApp.escapeHtml(totalLine)}</strong>
+        </div>
+      </div>
+
+      <p class="listing-cart-intro">${ElevenZeroApp.escapeHtml(shippingIntro)}</p>
       <div class="listing-shipping-policy">
         <div>
           <strong>Seller shipping setup</strong>
@@ -895,14 +1008,36 @@ function renderStory(item) {
             : ""
         }
       </form>
+
+      <div class="listing-cart-checkout">
+        <button
+          class="${actionState.action === "checkout" || actionState.action === "auth" ? "button button-dark" : "button button-secondary"} listing-buy-button"
+          type="button"
+          data-cart-checkout
+          data-cart-action="${ElevenZeroApp.escapeHtml(actionState.action)}"
+          ${cartButtonDisabled ? "disabled" : ""}
+        >
+          ${ElevenZeroApp.escapeHtml(cartButtonLabel)}
+        </button>
+        <p>${ElevenZeroApp.escapeHtml(actionState.reason)}</p>
+      </div>
     </article>
-    <article class="listing-detail-panel">
-      <p class="eyebrow">Listing notes</p>
-      <h2>${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(item.model)}</h2>
-      <p>${ElevenZeroApp.escapeHtml(item.notes)}</p>
+
+    <article class="listing-detail-panel listing-review-panel" id="reviews">
+      <p class="eyebrow">Reviews</p>
+      <h2>Buyer reviews</h2>
+      <div class="listing-review-empty">
+        <strong>No reviews yet</strong>
+        <span>Reviews will appear here after buyers complete purchases through Eleven Zero PB.</span>
+      </div>
+      <p class="listing-review-note">
+        For now, use the photos, condition, seller notes, and shipping details to decide if this paddle is right for you.
+      </p>
     </article>
+
     <article class="listing-detail-panel listing-detail-panel-soft">
-      <p class="eyebrow">Buyer snapshot</p>
+      <p class="eyebrow">Paddle info</p>
+      <h2>Details at a glance</h2>
       <div class="listing-detail-bullets">
         <div>
           <strong>Color</strong>
@@ -913,36 +1048,12 @@ function renderStory(item) {
           <span>${ElevenZeroApp.escapeHtml(thickness || "Not listed")}</span>
         </div>
         <div>
-          <strong>Condition</strong>
-          <span>${ElevenZeroApp.escapeHtml(item.condition)}</span>
+          <strong>Play style</strong>
+          <span>${ElevenZeroApp.escapeHtml(item.category || "Not listed")}</span>
         </div>
         <div>
-          <strong>Location</strong>
-          <span>${ElevenZeroApp.escapeHtml(item.location)}</span>
-        </div>
-      </div>
-    </article>
-    <article class="listing-detail-panel">
-      <p class="eyebrow">Marketplace snapshot</p>
-      <h2>What buyers should know first</h2>
-      <div class="listing-detail-bullets">
-        <div>
-          <strong>Checkout</strong>
-          <span>${ElevenZeroApp.escapeHtml(checkoutSnapshotLabel)}</span>
-        </div>
-        <div>
-          <strong>Listing age</strong>
+          <strong>Posted</strong>
           <span>${ElevenZeroApp.escapeHtml(formatPostedAge(item.created_at))}</span>
-        </div>
-        <div>
-          <strong>Seller payouts</strong>
-          <span>${ElevenZeroApp.escapeHtml(
-            item.seller_ready_for_payouts ? "Ready for live buyer payments" : "Still finishing seller setup"
-          )}</span>
-        </div>
-        <div>
-          <strong>Gallery</strong>
-          <span>${ElevenZeroApp.escapeHtml(listingPhotoLabel(item))}</span>
         </div>
       </div>
     </article>
@@ -954,6 +1065,31 @@ function renderStory(item) {
     shipping.statusTone
   );
   bindShippingForm();
+
+  storyNode.querySelector("[data-cart-checkout]")?.addEventListener("click", () => {
+    const cartAction = storyNode.querySelector("[data-cart-checkout]")?.dataset.cartAction || "disabled";
+
+    if (cartAction === "estimate-needed") {
+      setShippingStatus("Add your delivery address, then estimate shipping first.", "warning");
+      storyNode.querySelector("[data-shipping-form] input[name='line1']")?.focus();
+      return;
+    }
+
+    if (cartAction === "auth") {
+      setDetailStatus("Please sign in first so we can open secure checkout for this listing.", "warning");
+      window.setTimeout(() => {
+        ElevenZeroApp.redirectToAuth(`${window.location.pathname}${window.location.search}#cart`);
+      }, 700);
+      return;
+    }
+
+    if (cartAction === "checkout") {
+      handleBuyListing(item.id);
+      return;
+    }
+
+    setShippingStatus(actionState.reason, actionState.tone);
+  });
 }
 
 function renderRelatedListings(item) {
@@ -1181,8 +1317,8 @@ async function loadListingDetail() {
     renderContent(item);
     renderStory(item);
     renderRelatedListings(item);
-    if (window.location.hash === "#shipping") {
-      window.setTimeout(() => scrollToShippingPanel(), 120);
+    if (window.location.hash === "#shipping" || window.location.hash === "#cart") {
+      window.setTimeout(() => scrollToCartPanel(), 120);
     }
   } catch {
     renderNotFound();
