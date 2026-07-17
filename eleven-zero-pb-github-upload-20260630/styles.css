@@ -1232,12 +1232,12 @@ body[data-nav="sell"] .feature-photo-copy strong {
 
 .shop-inventory-main {
   min-width: 0;
-  padding: 34px 34px 46px;
+  padding: 28px 34px 46px;
 }
 
 .shop-ad-reserve {
-  min-height: 120px;
-  margin-bottom: 28px;
+  min-height: 28px;
+  margin-bottom: 18px;
 }
 
 .shop-results-toolbar {
@@ -1245,18 +1245,23 @@ body[data-nav="sell"] .feature-photo-copy strong {
   align-items: end;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(18, 18, 18, 0.08);
 }
 
 .shop-results-count {
-  margin: 0 0 8px;
-  color: rgba(18, 18, 18, 0.62);
-  font-weight: 850;
+  margin: 0 0 6px;
+  color: var(--forest);
+  font-size: 0.86rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .shop-inventory-page .results-title {
   font-family: var(--sans);
-  font-size: 1.22rem;
+  font-size: 1.34rem;
   line-height: 1.2;
   text-transform: none;
 }
@@ -1289,7 +1294,7 @@ body[data-nav="sell"] .feature-photo-copy strong {
 
 .shop-inventory-page .results-note {
   max-width: none;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   font-size: 0.94rem;
 }
 
@@ -1303,7 +1308,7 @@ body[data-nav="sell"] .feature-photo-copy strong {
 
 .shop-product-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 26px 22px;
+  gap: 30px 24px;
 }
 
 .shop-product-card {
@@ -1323,17 +1328,30 @@ body[data-nav="sell"] .feature-photo-copy strong {
 .shop-product-card .card-art {
   min-height: 286px;
   border: 1px solid rgba(18, 18, 18, 0.08);
-  border-radius: 8px;
+  border-radius: 14px;
   overflow: hidden;
   background: rgba(3, 45, 23, 0.04);
+  box-shadow: 0 14px 30px rgba(3, 26, 14, 0.06);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.shop-product-card:hover .card-art {
+  transform: translateY(-2px);
+  border-color: rgba(8, 233, 90, 0.32);
+  box-shadow: 0 18px 42px rgba(3, 26, 14, 0.1);
 }
 
 .shop-product-card .listing-photo {
   min-height: 286px;
+  transition: transform 220ms ease;
+}
+
+.shop-product-card:hover .listing-photo {
+  transform: scale(1.025);
 }
 
 .shop-product-card .card-body {
-  padding: 12px 0 0;
+  padding: 13px 2px 0;
 }
 
 .shop-price-line {
@@ -1376,17 +1394,25 @@ body[data-nav="sell"] .feature-photo-copy strong {
 
 .shop-card-meta,
 .shop-card-submeta {
-  margin: 5px 0 0;
   line-height: 1.28;
 }
 
 .shop-card-meta {
-  color: rgba(18, 18, 18, 0.7);
-  font-size: 0.94rem;
-  font-weight: 900;
+  display: inline-flex;
+  width: fit-content;
+  margin: 6px 0 0;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(3, 45, 23, 0.06);
+  color: rgba(3, 45, 23, 0.74);
+  font-size: 0.74rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .shop-card-submeta {
+  margin: 7px 0 0;
   color: rgba(18, 18, 18, 0.42);
   font-size: 0.8rem;
   font-weight: 750;
@@ -7244,8 +7270,7 @@ body.has-modal-open {
   }
 
   body[data-nav="shop"] .shop-ad-reserve {
-    min-height: 36px;
-    margin-bottom: 18px;
+    display: none;
   }
 
   body[data-nav="shop"] .shop-results-toolbar {
@@ -7375,10 +7400,15 @@ body.has-modal-open {
   }
 
   body[data-nav="shop"] .shop-card-meta {
+    display: block;
     margin-top: 5px;
+    padding: 0;
+    background: transparent;
     color: rgba(18, 18, 18, 0.62);
     font-size: 0.9rem;
     font-weight: 850;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   body[data-nav="shop"] .shop-card-submeta {
