@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Eleven Zero PB Courts</title>
+    <title>Find Pickleball Courts | Eleven Zero PB</title>
     <meta
       name="description"
-      content="Eleven Zero PB live pickleball finder for free public courts and pay-to-play facilities."
+      content="Search the Eleven Zero PB map for free public pickleball courts and pay-to-play facilities near you."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260705a" />
-    <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
+    <link rel="stylesheet" href="./styles.css?v=20260717courts-simple3" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260717courts-simple1" />
   </head>
-  <body class="courts-page" data-nav="courts">
+  <body class="courts-page courts-simple-page" data-nav="courts">
     <div class="page-shell">
       <header class="site-header">
         <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
@@ -20,7 +20,6 @@
             src="./assets/logo-primary.png"
             alt="Eleven Zero"
           />
-          <span class="brand-tag">Courts Directory</span>
         </a>
 
         <nav class="site-nav" aria-label="Primary">
@@ -36,529 +35,277 @@
       </header>
 
       <main id="top">
-        <section class="courts-hero">
-          <div class="courts-hero-copy reveal">
-            <p class="eyebrow">Play near you</p>
-            <h1>Open the map, click a pin, and find pickleball fast.</h1>
-            <p class="hero-text">
-              Start with featured pins right away, then run a live city search
-              to compare free public courts and pay-to-play facilities without
-              digging through scattered listings.
+        <section class="courts-simple-intro" id="finder">
+          <div class="courts-simple-heading reveal">
+            <div>
+              <p class="eyebrow">Find a place to play</p>
+              <h1>Pickleball courts near you.</h1>
+            </div>
+            <p>
+              Search an area, tap a map pin, and see the important details before you go.
             </p>
-
-            <div class="hero-actions">
-              <a class="button button-primary" href="#finder">Open the Map</a>
-              <a class="button button-secondary" href="#guide">How It Works</a>
-            </div>
-
-            <div class="courts-stats">
-              <article>
-                <strong class="stat-value" data-summary-total>0</strong>
-                <span>Courts in the current map view.</span>
-              </article>
-              <article>
-                <strong class="stat-value" data-summary-free>0</strong>
-                <span>Tagged as free or public play.</span>
-              </article>
-              <article>
-                <strong class="stat-value" data-summary-paid>0</strong>
-                <span>Tagged as paid, private, or membership access.</span>
-              </article>
-              <article>
-                <strong class="stat-value" data-summary-check>0</strong>
-                <span>Need venue confirmation before you go.</span>
-              </article>
-            </div>
           </div>
 
-          <div class="courts-hero-board reveal">
-            <div class="orb orb-one"></div>
-            <div class="orb orb-two"></div>
+          <form class="finder-form courts-simple-search reveal" data-court-search-form>
+            <label class="finder-field finder-field-search">
+              <span>City, state, or zip code</span>
+              <input
+                type="search"
+                name="query"
+                placeholder="Try Annandale, VA"
+                autocomplete="postal-code"
+              />
+            </label>
 
-            <article class="courts-hero-card courts-hero-card-main">
-              <div class="courts-hero-topline">
-                <span class="pill">Live search</span>
-                <span class="courts-hero-chip">City, state or zip</span>
-              </div>
+            <label class="finder-field">
+              <span>Distance</span>
+              <select name="radius">
+                <option value="15">15 miles</option>
+                <option value="25" selected>25 miles</option>
+                <option value="50">50 miles</option>
+                <option value="75">75 miles</option>
+                <option value="100">100 miles</option>
+              </select>
+            </label>
 
-              <div class="courts-map-card finder-panel" id="finder">
-                <img class="shape-ghost" src="./assets/brand-shape.png" alt="" />
+            <button class="button button-primary finder-submit" type="submit">
+              Search courts
+            </button>
+          </form>
 
-                <form class="finder-form" data-court-search-form>
-                  <label class="finder-field finder-field-search">
-                    <span>Search area</span>
-                    <input
-                      type="search"
-                      name="query"
-                      placeholder="Miami, FL or 33139"
-                      autocomplete="off"
-                    />
-                  </label>
+          <div class="finder-quick-search courts-simple-quick reveal" aria-label="Popular searches">
+            <span>Popular:</span>
+            <button class="city-pin" type="button" data-quick-search="Virginia">Virginia</button>
+            <button class="city-pin" type="button" data-quick-search="Miami, FL">Miami</button>
+            <button class="city-pin" type="button" data-quick-search="Austin, TX">Austin</button>
+          </div>
 
-                  <label class="finder-field">
-                    <span>Radius</span>
-                    <select name="radius">
-                      <option value="15">15 miles</option>
-                      <option value="25" selected>25 miles</option>
-                      <option value="50">50 miles</option>
-                      <option value="75">75 miles</option>
-                      <option value="100">100 miles</option>
-                    </select>
-                  </label>
+          <div class="finder-status courts-simple-status reveal" aria-live="polite" data-finder-status>
+            Search an area to load nearby courts from Google Maps.
+          </div>
 
-                  <button class="button button-primary finder-submit" type="submit">
-                    Search live courts
-                  </button>
-                </form>
-
-                <div class="finder-help">
-                  Use the featured pins below right away, or search a city, state,
-                  or zip code to refresh the map live. Statewide searches like
-                  Virginia now scan a wider set of regions automatically.
-                </div>
-
-                <div class="city-pins finder-quick-search" aria-label="Quick search cities">
-                  <button class="city-pin" type="button" data-quick-search="Virginia">
-                    Virginia
-                  </button>
-                  <button class="city-pin" type="button" data-quick-search="Miami, FL">
-                    Miami
-                  </button>
-                  <button class="city-pin" type="button" data-quick-search="Austin, TX">
-                    Austin
-                  </button>
-                  <button class="city-pin" type="button" data-quick-search="Scottsdale, AZ">
-                    Scottsdale
-                  </button>
-                  <button class="city-pin" type="button" data-quick-search="Charlotte, NC">
-                    Charlotte
-                  </button>
-                </div>
-
-                <div class="finder-status" aria-live="polite" data-finder-status>
-                  Featured courts are loaded below. Search a US city, state, or zip
-                  code any time to refresh the map live.
-                </div>
-
-                <section class="court-map-shell court-map-shell-hero" aria-label="Interactive courts map">
-                  <div class="court-map-head">
-                    <div>
-                      <p class="eyebrow">Interactive map</p>
-                      <h3>Click a pin and jump straight into the court.</h3>
-                    </div>
-
-                    <div class="court-map-legend" aria-label="Map legend">
-                      <span class="court-map-legend-item">
-                        <span class="court-map-dot court-map-dot-free"></span>
-                        Free
-                      </span>
-                      <span class="court-map-legend-item">
-                        <span class="court-map-dot court-map-dot-paid"></span>
-                        Paid
-                      </span>
-                      <span class="court-map-legend-item">
-                        <span class="court-map-dot court-map-dot-check"></span>
-                        Check access
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="court-map" data-court-map></div>
-                  <article class="court-map-selection" data-map-selection>
-                    <p class="eyebrow">Selected court</p>
-                    <h3>Pick a marker or use a “Show on map” button.</h3>
-                    <p>
-                      The map will center the selected court here so players can compare
-                      the cards with the map view more easily, then jump into directions,
-                      venue details, or partner links.
-                    </p>
-                  </article>
-                  <p class="court-map-status" data-map-status>
-                    Featured markers are ready now, and live searches will replace them with local results.
-                  </p>
-                </section>
-              </div>
-            </article>
-
-            <article class="courts-hero-note">
-              <img class="mini-icon" src="./assets/icon-chat.png" alt="" />
+          <section class="court-map-shell courts-simple-map-shell reveal" aria-label="Interactive courts map">
+            <div class="court-map-head">
               <div>
-                <span class="mini-kicker">Live community data</span>
-                <strong>
-                  Click a pin first, then refine the results below with ratings,
-                  crowd level, player level, and live city search.
-                </strong>
+                <p class="eyebrow">Court map</p>
+                <h2>Tap a pin to view a court.</h2>
               </div>
+
+              <div class="court-map-legend" aria-label="Map legend">
+                <span class="court-map-legend-item">
+                  <span class="court-map-dot court-map-dot-free"></span>
+                  Free
+                </span>
+                <span class="court-map-legend-item">
+                  <span class="court-map-dot court-map-dot-paid"></span>
+                  Paid
+                </span>
+                <span class="court-map-legend-item">
+                  <span class="court-map-dot court-map-dot-check"></span>
+                  Check access
+                </span>
+              </div>
+            </div>
+
+            <div class="court-map" data-court-map></div>
+            <article class="court-map-selection courts-simple-map-selection" data-map-selection>
+              <p class="eyebrow">Selected court</p>
+              <h3>Choose a pin on the map.</h3>
+              <p>The court name, address, and next steps will appear here.</p>
             </article>
-          </div>
+            <p class="court-map-status" data-map-status>
+              Loading the court map…
+            </p>
+          </section>
         </section>
 
-        <section class="directory-section section-block" id="directory">
-          <div class="section-heading reveal">
-            <div>
-              <p class="eyebrow">Courts directory</p>
-              <h2>Refine the map, compare courts, and add more real locations.</h2>
-            </div>
-
-            <p class="section-text">
-              The goal is simple: give players a clean map-first view, then let
-              them search, compare, review, and submit more courts without the
-              page getting in their way.
-            </p>
-          </div>
-
-          <div class="filter-row reveal" role="tablist" aria-label="Court filters">
-            <button class="filter-chip is-active" type="button" data-court-filter="all">
-              All
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="free">
-              Free to play
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="paid">
-              Pay to play
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="check">
-              Need to check
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="indoor">
-              Indoor
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="outdoor">
-              Outdoor
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="directory">
-              Saved directory
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="live">
-              Live map data
-            </button>
-            <button class="filter-chip" type="button" data-court-filter="rated">
-              Rated by players
-            </button>
-          </div>
-
+        <section class="directory-section courts-simple-directory" id="directory">
           <div class="results-meta reveal">
             <div>
-              <p class="eyebrow">Current results</p>
-              <h3 class="results-title" data-results-heading>Official courts directory</h3>
+              <p class="eyebrow">Courts</p>
+              <h2 class="results-title" data-results-heading>Courts directory</h2>
             </div>
-
             <p class="results-note" data-results-note>
-              Community-added courts and facilities will show here, with addresses, map links, and live city search.
+              Browse the current results or search a new area above.
             </p>
           </div>
 
-          <section class="court-tools-shell reveal" aria-label="Refine court results">
-            <div class="court-tools-head">
-              <div>
-                <p class="eyebrow">Refine the view</p>
-                <h3>Filter by quality, crowd, player level, and search terms.</h3>
-              </div>
-
-              <p class="results-note">
-                Use the quick chips above for access and surface, then narrow the
-                current results even more with search, rating, crowd, and level filters.
-              </p>
+          <div class="courts-simple-controls reveal">
+            <div class="filter-row courts-simple-filters" role="tablist" aria-label="Court filters">
+              <button class="filter-chip is-active" type="button" data-court-filter="all">All</button>
+              <button class="filter-chip" type="button" data-court-filter="free">Free</button>
+              <button class="filter-chip" type="button" data-court-filter="paid">Paid</button>
+              <button class="filter-chip" type="button" data-court-filter="indoor">Indoor</button>
+              <button class="filter-chip" type="button" data-court-filter="outdoor">Outdoor</button>
             </div>
 
-            <div class="court-tools-grid">
-              <label class="court-tool-field court-tool-field-search">
-                <span>Search in results</span>
-                <input
-                  type="search"
-                  placeholder="Court name, address, city, amenity"
-                  data-court-keyword
-                />
-              </label>
+            <label class="court-tool-field courts-simple-keyword">
+              <span class="sr-only">Search these results</span>
+              <input type="search" placeholder="Search these courts" data-court-keyword />
+            </label>
 
-              <label class="court-tool-field">
-                <span>Sort by</span>
-                <select data-court-sort>
-                  <option value="recommended" selected>Recommended</option>
-                  <option value="closest">Closest first</option>
-                  <option value="rating">Highest rated</option>
-                  <option value="reports">Most reviewed</option>
-                  <option value="name">Name A–Z</option>
-                </select>
-              </label>
+            <label class="court-tool-field courts-simple-sort">
+              <span class="sr-only">Sort courts</span>
+              <select data-court-sort>
+                <option value="recommended" selected>Recommended</option>
+                <option value="closest">Closest first</option>
+                <option value="rating">Highest rated</option>
+                <option value="name">Name A–Z</option>
+              </select>
+            </label>
+          </div>
 
-              <label class="court-tool-field">
-                <span>Court condition</span>
-                <select data-court-condition>
-                  <option value="">Any condition</option>
-                  <option value="great">Excellent only</option>
-                  <option value="solid">Solid shape or better</option>
-                  <option value="playable">Playable or better</option>
-                </select>
-              </label>
+          <div class="courts-grid courts-simple-grid" data-court-results></div>
 
-              <label class="court-tool-field">
-                <span>Crowd level</span>
-                <select data-court-busyness>
-                  <option value="">Any crowd level</option>
-                  <option value="quiet">Quiet</option>
-                  <option value="moderate">Moderate</option>
-                  <option value="busy">Busy</option>
-                  <option value="packed">Packed</option>
-                </select>
-              </label>
+          <div class="courts-simple-secondary reveal">
+            <details class="courts-simple-disclosure" id="court-reports">
+              <summary>
+                <span>
+                  <strong>Ratings and court conditions</strong>
+                  <small>Read or share a player report</small>
+                </span>
+              </summary>
 
-              <label class="court-tool-field">
-                <span>Player level</span>
-                <select data-court-player-level>
-                  <option value="">Any player level</option>
-                  <option value="beginner">Beginner-friendly</option>
-                  <option value="intermediate">Intermediate-heavy</option>
-                  <option value="advanced">Advanced-heavy</option>
-                  <option value="mixed">Mixed levels</option>
-                </select>
-              </label>
+              <section class="court-community-shell" id="court-community">
+                <div class="court-community-grid">
+                  <article class="court-community-panel">
+                    <p class="eyebrow">Selected court</p>
+                    <div data-court-report-summary>
+                      <h3>Choose a court first.</h3>
+                      <p class="court-community-empty-copy">
+                        Court condition, crowd level, and player reports will appear here.
+                      </p>
+                    </div>
+                    <div class="court-report-list" data-court-report-list></div>
+                  </article>
 
-              <button class="button button-secondary court-tool-reset" type="button" data-court-reset-filters>
-                Reset filters
-              </button>
-            </div>
+                  <article class="court-community-panel">
+                    <p class="eyebrow">Share a report</p>
+                    <h3 data-court-report-target>Choose a court above first.</h3>
+                    <form class="court-report-form" data-court-report-form>
+                      <label class="court-report-field">
+                        <span>Court condition</span>
+                        <select name="conditionRating">
+                          <option value="5">5 · Excellent</option>
+                          <option value="4">4 · Good</option>
+                          <option value="3" selected>3 · Fine</option>
+                          <option value="2">2 · Worn</option>
+                          <option value="1">1 · Rough</option>
+                        </select>
+                      </label>
 
-            <div class="court-tools-summary" data-court-tools-summary>
-              Showing the full courts directory right now.
-            </div>
-          </section>
+                      <label class="court-report-field">
+                        <span>How busy is it?</span>
+                        <select name="busynessRating">
+                          <option value="1">Quiet</option>
+                          <option value="2" selected>Moderate</option>
+                          <option value="3">Busy</option>
+                          <option value="4">Packed</option>
+                        </select>
+                      </label>
 
-          <div class="courts-grid" data-court-results></div>
+                      <label class="court-report-field">
+                        <span>Player level</span>
+                        <select name="playerLevel">
+                          <option value="beginner">Beginner-friendly</option>
+                          <option value="intermediate" selected>Intermediate-heavy</option>
+                          <option value="advanced">Advanced-heavy</option>
+                          <option value="mixed">Mixed levels</option>
+                        </select>
+                      </label>
 
-          <section class="court-community-shell reveal" id="court-community">
-            <div class="court-community-head">
-              <div>
-                <p class="eyebrow">Court community reports</p>
-                <h3>See how the courts actually play before you go.</h3>
-              </div>
+                      <label class="court-report-field court-report-field-wide">
+                        <span>Quick note</span>
+                        <textarea name="comment" rows="4" placeholder="What should other players know?"></textarea>
+                      </label>
 
-              <p class="results-note">
-                Players can share how the surface feels, how busy it usually gets,
-                and what kind of player level tends to show up there.
-              </p>
-            </div>
+                      <button class="button button-primary court-report-submit" type="submit">
+                        Post report
+                      </button>
+                    </form>
+                    <div class="court-report-status" data-court-report-status aria-live="polite">
+                      Sign in and choose a court to share a report.
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </details>
 
-            <div class="court-community-grid">
-              <article class="court-community-panel">
-                <p class="eyebrow">Selected court insight</p>
-                <div data-court-report-summary>
-                  <h3>Choose a court from the map or cards.</h3>
-                  <p class="court-community-empty-copy">
-                    We’ll show the court condition, crowd level, player mix, and
-                    recent player reports here.
+            <details class="courts-simple-disclosure" id="add-court">
+              <summary>
+                <span>
+                  <strong>Add a missing court</strong>
+                  <small>Submit it for Eleven Zero PB review</small>
+                </span>
+              </summary>
+
+              <section class="courts-simple-add-court">
+                <div class="courts-simple-add-copy">
+                  <p class="eyebrow">Community directory</p>
+                  <h2>Know a court we missed?</h2>
+                  <p>
+                    Add the basic details below. We review every court before it appears on the public map.
                   </p>
                 </div>
-                <div class="court-report-list" data-court-report-list></div>
-              </article>
 
-              <article class="court-community-panel">
-                <p class="eyebrow">Share your report</p>
-                <h3 data-court-report-target>Choose a court above first.</h3>
-                <form class="court-report-form" data-court-report-form>
-                  <label class="court-report-field">
-                    <span>Court condition</span>
-                    <select name="conditionRating">
-                      <option value="5">5 · Excellent</option>
-                      <option value="4">4 · Good</option>
-                      <option value="3" selected>3 · Fine</option>
-                      <option value="2">2 · Worn</option>
-                      <option value="1">1 · Rough</option>
+                <form class="seller-form courts-simple-add-form" data-court-directory-form>
+                  <label>
+                    Court or facility name <span class="seller-required">Required</span>
+                    <input type="text" name="name" placeholder="Ex: Mason District Park" required />
+                  </label>
+                  <label>
+                    City, state <span class="seller-required">Required</span>
+                    <input type="text" name="location" placeholder="Ex: Annandale, VA" required />
+                  </label>
+                  <label class="seller-field-wide">
+                    Street address
+                    <input type="text" name="address" placeholder="Exact address helps us place the pin" />
+                  </label>
+                  <label>
+                    Access <span class="seller-required">Required</span>
+                    <select name="accessKind" required>
+                      <option value="">Choose one</option>
+                      <option value="free">Free to play</option>
+                      <option value="paid">Pay to play</option>
                     </select>
                   </label>
-
-                  <label class="court-report-field">
-                    <span>How busy is it?</span>
-                    <select name="busynessRating">
-                      <option value="1">Quiet</option>
-                      <option value="2" selected>Moderate</option>
-                      <option value="3">Busy</option>
-                      <option value="4">Packed</option>
+                  <label>
+                    Court type <span class="seller-required">Required</span>
+                    <select name="surfaceKind" required>
+                      <option value="">Choose one</option>
+                      <option value="outdoor">Outdoor</option>
+                      <option value="indoor">Indoor</option>
                     </select>
                   </label>
-
-                  <label class="court-report-field">
-                    <span>Player level</span>
-                    <select name="playerLevel">
-                      <option value="beginner">Beginner-friendly</option>
-                      <option value="intermediate" selected>Intermediate-heavy</option>
-                      <option value="advanced">Advanced-heavy</option>
-                      <option value="mixed">Mixed levels</option>
-                    </select>
+                  <label>
+                    Number of courts <span class="seller-required">Required</span>
+                    <input type="number" name="courtCount" min="1" step="1" placeholder="4" required />
+                  </label>
+                  <label>
+                    Venue website
+                    <input type="text" name="website" placeholder="https://..." />
+                  </label>
+                  <label class="seller-field-wide">
+                    What should players know? <span class="seller-required">Required</span>
+                    <textarea name="description" rows="3" placeholder="Hours, reservations, lights, or open play details" required></textarea>
                   </label>
 
-                  <label class="court-report-field court-report-field-wide">
-                    <span>Quick note</span>
-                    <textarea
-                      name="comment"
-                      rows="5"
-                      placeholder="Example: surface felt clean, 5:30 pm was crowded, and most games looked intermediate."
-                    ></textarea>
-                  </label>
-
-                  <button class="button button-primary court-report-submit" type="submit">
-                    Post court report
-                  </button>
+                  <div class="seller-submit-strip seller-field-wide">
+                    <button class="button button-dark seller-submit-button" type="submit">
+                      Submit court for review
+                    </button>
+                    <div class="seller-submit-meta">
+                      <div class="seller-status" aria-live="polite" data-court-directory-status>
+                        Sign in to submit a court for review.
+                      </div>
+                      <a class="button button-secondary seller-auth-link" data-court-directory-auth href="./auth.html?next=%2Fcourts.html%23add-court">
+                        Sign in to add a court
+                      </a>
+                    </div>
+                  </div>
                 </form>
-                <div class="court-report-status" data-court-report-status aria-live="polite">
-                  Sign in and choose a court if you want to share a court report.
-                </div>
-              </article>
-            </div>
-          </section>
-
-          <section class="seller-section section-block" id="add-court">
-            <div class="seller-card reveal">
-              <div class="seller-copy">
-                <p class="eyebrow">Add a court or facility</p>
-                <h2>Help build the real Eleven Zero PB courts directory.</h2>
-                <p>
-                  Signed-in users can add real courts and pay-to-play facilities
-                  to the public directory. Every submission goes into review
-                  first, then we publish it once the details look right.
-                </p>
-
-                <div class="seller-note">
-                  <img class="seller-note-icon" src="./assets/icon-user.png" alt="" />
-                  <div>
-                    <strong>Best results</strong>
-                    <span>Use the real venue name and a specific city or address so the map pin lands correctly.</span>
-                  </div>
-                </div>
-              </div>
-
-              <form class="seller-form" data-court-directory-form>
-                <label>
-                  Court or facility name <span class="seller-required">Required</span>
-                  <input type="text" name="name" placeholder="Ex: East Bay Pickleball Club" required />
-                </label>
-                <label>
-                  City, state or address <span class="seller-required">Required</span>
-                  <input type="text" name="location" placeholder="Ex: Austin, TX" required />
-                </label>
-                <label>
-                  Exact street address (optional but better for the pin)
-                  <input
-                    type="text"
-                    name="address"
-                    placeholder="Ex: 1234 Pickleball Ln, Austin, TX 78701"
-                  />
-                </label>
-                <label>
-                  Access type <span class="seller-required">Required</span>
-                  <select name="accessKind" required>
-                    <option value="">Choose access type</option>
-                    <option value="free">Free to play</option>
-                    <option value="paid">Pay to play</option>
-                  </select>
-                </label>
-                <label>
-                  Surface <span class="seller-required">Required</span>
-                  <select name="surfaceKind" required>
-                    <option value="">Choose surface</option>
-                    <option value="outdoor">Outdoor</option>
-                    <option value="indoor">Indoor</option>
-                  </select>
-                </label>
-                <label>
-                  Court count <span class="seller-required">Required</span>
-                  <input type="number" name="courtCount" min="1" step="1" placeholder="8" required />
-                </label>
-                <label>
-                  Access note
-                  <input
-                    type="text"
-                    name="accessNote"
-                    placeholder="Ex: First come, first served or reservation required"
-                  />
-                </label>
-                <label>
-                  Amenities or quick highlights
-                  <input
-                    type="text"
-                    name="amenities"
-                    placeholder="Ex: Lights, restrooms, open play mornings"
-                  />
-                </label>
-                <label>
-                  Venue website
-                  <input
-                    type="text"
-                    name="website"
-                    placeholder="clubname.com or https://clubname.com"
-                  />
-                </label>
-                <label class="seller-field-wide">
-                  Short description <span class="seller-required">Required</span>
-                  <textarea
-                    name="description"
-                    rows="4"
-                    placeholder="Describe the vibe, setup, and what players should know before they go."
-                    required
-                  ></textarea>
-                </label>
-                <div class="seller-submit-strip">
-                  <button class="button button-dark seller-submit-button" type="submit">
-                    Submit court for review
-                  </button>
-                  <div class="seller-submit-meta">
-                    <div class="seller-form-help">
-                      Required fields are marked above. Affiliate and booking links are added by Eleven Zero PB after review.
-                    </div>
-                    <div class="seller-status" aria-live="polite" data-court-directory-status>
-                      Sign in to submit a court for review.
-                    </div>
-                    <a class="button button-secondary seller-auth-link" data-court-directory-auth href="./auth.html?next=%2Fcourts.html%23add-court">
-                      Sign in to add a court
-                    </a>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </section>
-        </section>
-
-        <section class="guide-section section-block" id="guide">
-          <div class="guide-panel reveal">
-            <div class="guide-copy">
-              <p class="eyebrow">How to use this page</p>
-              <h2>Separate access clearly, then confirm the final details.</h2>
-              <p>
-                This finder is designed to help players move faster: search the
-                city they care about, filter the style of play they want, and
-                quickly understand which listings look public, which look paid,
-                and which still need a phone call or website check.
-              </p>
-            </div>
-
-            <div class="guide-grid">
-              <article class="guide-card">
-                <img class="value-icon" src="./assets/icon-user.png" alt="" />
-                <h3>Free public courts</h3>
-                <p>
-                  Best for parks, city courts, and rec-center options tagged as
-                  public or no-fee play.
-                </p>
-              </article>
-
-              <article class="guide-card">
-                <img class="value-icon" src="./assets/icon-dollar.png" alt="" />
-                <h3>Paid facilities</h3>
-                <p>
-                  Best for clubs, indoor facilities, memberships, reservations,
-                  and premium drop-in sessions.
-                </p>
-              </article>
-
-              <article class="guide-card">
-                <img class="value-icon" src="./assets/icon-support.png" alt="" />
-                <h3>Needs confirmation</h3>
-                <p>
-                  Some live listings do not publish fee details in the source
-                  data yet, so Eleven Zero PB flags them honestly.
-                </p>
-              </article>
-            </div>
+              </section>
+            </details>
           </div>
         </section>
       </main>
@@ -571,23 +318,17 @@
             alt="Eleven Zero"
           />
           <p class="footer-copy">
-            Eleven Zero PB can help players buy paddles and also find where to
-            play. Live court search is built around Google Maps, with a backup
-            community-data search if Google is unavailable, so venue details
-            should still be confirmed before making the trip.
+            Search for free public courts and pay-to-play facilities, then confirm venue details before making the trip.
           </p>
         </div>
 
         <div class="footer-links">
-          <a href="./index.html">Marketplace</a>
+          <a href="./shop.html">Shop</a>
           <a href="#finder">Courts</a>
           <a href="./trainers.html">Trainers</a>
           <a href="./account.html">Account</a>
           <a href="./privacy.html">Privacy</a>
           <a href="./terms.html">Terms</a>
-          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
-            OSM attribution
-          </a>
         </div>
       </footer>
 
@@ -613,8 +354,7 @@
     </div>
 
     <script src="./app.js?v=20260705g"></script>
-    <script src="./courts.js?v=20260705j"></script>
+    <script src="./courts.js?v=20260717courts-simple3"></script>
     <script src="./header-tweaks.js?v=20260705f"></script>
   </body>
 </html>
-
