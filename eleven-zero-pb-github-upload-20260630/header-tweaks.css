@@ -196,4 +196,36 @@
   body.courts-simple-page .site-header.is-condensed .auth-slot-group {
     display: none;
   }
+
+  body.sell-simple-page .site-header.is-condensed {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 7px 10px;
+    border-radius: 17px;
+  }
+
+  body.sell-simple-page .site-header.is-condensed .brand-mark {
+    grid-column: 1;
+    justify-content: center;
+  }
+
+  body.sell-simple-page .site-header.is-condensed .brand-logo-header {
+    width: 116px;
+  }
+
+  body.sell-simple-page .site-header.is-condensed .site-nav {
+    grid-column: 1;
+    gap: 16px;
+    padding: 2px 0;
+    font-size: 0.72rem;
+  }
+
+  body.sell-simple-page .site-header.is-condensed .site-nav a {
+    flex: 0 0 auto;
+  }
+
+  body.sell-simple-page .site-header.is-condensed .nav-auth-slot,
+  body.sell-simple-page .site-header.is-condensed .auth-slot-group {
+    display: none;
+  }
 }
