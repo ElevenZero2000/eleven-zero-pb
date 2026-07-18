@@ -8,10 +8,10 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260707e" />
-    <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
+    <link rel="stylesheet" href="./styles.css?v=20260717sell1" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260717sell1" />
   </head>
-  <body data-nav="sell">
+  <body class="sell-simple-page" data-nav="sell">
     <div class="page-shell">
       <header class="site-header">
         <a class="brand-mark" href="./index.html" aria-label="Eleven Zero PB home">
@@ -35,28 +35,25 @@
       </header>
 
       <main id="top">
-        <section class="seller-section seller-section-focused" id="seller-form">
-          <div class="seller-card seller-card-focused reveal">
-            <div class="seller-copy seller-copy-focused">
-              <p class="eyebrow">Sell on Eleven Zero PB</p>
-              <h1>Sell your paddle</h1>
-              <p>
-                Add the details buyers need, upload clear photos, choose shipping, and send it for review.
-              </p>
-
-              <div class="seller-simple-strip" aria-label="Listing steps">
-                <span>Details</span>
-                <span>Photos</span>
-                <span>Shipping</span>
-                <span>Review</span>
+        <section class="seller-section seller-section-focused seller-simple-section" id="seller-form">
+          <div class="seller-card seller-card-focused seller-card-simple reveal">
+            <div class="seller-copy seller-copy-focused seller-simple-heading">
+              <div>
+                <p class="eyebrow">Sell on Eleven Zero PB</p>
+                <h1>Sell your paddle</h1>
+                <p>Tell buyers what it is, add clear photos, and choose shipping.</p>
+              </div>
+              <div class="seller-review-badge" aria-label="Every listing is reviewed before it goes live">
+                <span aria-hidden="true">✓</span>
+                <strong>Reviewed before it goes live</strong>
               </div>
             </div>
 
-            <form class="seller-form seller-form-focused" data-seller-form>
-              <article class="seller-form-block seller-form-block-primary">
+            <form class="seller-form seller-form-focused seller-form-simple" data-seller-form>
+              <article class="seller-form-block seller-form-block-primary seller-simple-panel">
                 <div class="seller-form-block-head">
-                  <p class="eyebrow">Paddle details</p>
-                  <p class="seller-form-help">Keep it direct. Buyers can ask follow-up questions later.</p>
+                  <h2>Paddle</h2>
+                  <p class="seller-form-help">The basics buyers use to decide.</p>
                 </div>
 
                 <div class="seller-basics-grid">
@@ -84,32 +81,34 @@
                     Ships from
                     <input type="text" name="location" placeholder="Ex: Miami, FL" />
                   </label>
-                  <label class="seller-field-wide">
-                    Notes for buyers <span class="seller-optional-label">optional</span>
-                    <textarea
-                      class="seller-notes-compact"
-                      name="notes"
-                      rows="3"
-                      placeholder="Example: Light edge wear, fresh grip, no cracks."
-                    ></textarea>
-                    <span class="seller-field-meta" data-seller-notes-counter>
-                      Optional. Mention wear, grip, and anything buyers should know.
-                    </span>
-                  </label>
+                  <details class="seller-extra-details seller-field-wide">
+                    <summary>Add notes for buyers <span>Optional</span></summary>
+                    <label>
+                      Condition notes
+                      <textarea
+                        class="seller-notes-compact"
+                        name="notes"
+                        rows="3"
+                        placeholder="Ex: Light edge wear, fresh grip, no cracks."
+                      ></textarea>
+                      <span class="seller-field-meta" data-seller-notes-counter>
+                        Mention wear, grip, or anything else a buyer should know.
+                      </span>
+                    </label>
+                  </details>
                 </div>
               </article>
 
-              <article class="seller-form-block seller-form-block-primary">
+              <article class="seller-form-block seller-form-block-primary seller-simple-panel">
                 <div class="seller-form-block-head">
-                  <p class="eyebrow">Photos and shipping</p>
-                  <p class="seller-form-help">Add at least one clear paddle photo before submitting.</p>
+                  <h2>Photos &amp; delivery</h2>
+                  <p class="seller-form-help">One clear photo is required. You can add up to four.</p>
                 </div>
 
                 <div class="seller-photo-upload seller-photo-upload-compact">
                   <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
-                    <span class="seller-file-kicker">Listing photos</span>
-                    <strong>Choose photos</strong>
-                    <span>Up to 4 images. Show the face, edge guard, handle, and wear.</span>
+                    <strong>Add paddle photos</strong>
+                    <span>Show the face, handle, and any wear.</span>
                   </label>
                   <input
                     class="seller-native-file-input"
@@ -122,7 +121,6 @@
                   />
                   <div class="seller-photo-toolbar seller-photo-toolbar-compact">
                     <span class="seller-photo-meta" data-photo-meta>0 of 4 photos selected.</span>
-                    <span class="seller-photo-meta">JPG or PNG work best</span>
                   </div>
                 </div>
 
@@ -130,7 +128,7 @@
 
                 <div class="seller-shipping-compact-grid">
                   <label>
-                    Shipping
+                    Delivery
                     <select name="shippingMode" data-shipping-mode>
                       <option value="calculated">Calculated at checkout</option>
                       <option value="flat">Flat shipping fee</option>
@@ -150,16 +148,14 @@
 
               <div class="seller-submit-strip seller-submit-strip-focused">
                 <button class="button button-dark seller-submit-button" type="submit">
-                  Submit for Review
+                  Submit listing for review
                 </button>
 
                 <div class="seller-submit-meta">
                   <div class="seller-status seller-status-inline seller-status-compact" aria-live="polite" data-seller-status>
                     Sign in to submit your paddle for review.
                   </div>
-                  <div class="seller-draft-status seller-draft-status-inline" data-seller-draft-status>
-                    Drafts save on this device while you work.
-                  </div>
+                  <div class="seller-draft-status seller-draft-status-inline" data-seller-draft-status>Draft saved on this device.</div>
                 </div>
               </div>
             </form>
@@ -194,7 +190,7 @@
     </div>
 
     <script src="./app.js?v=20260703f"></script>
-    <script src="./marketplace.js?v=20260707d"></script>
-    <script src="./header-tweaks.js?v=20260705f"></script>
+    <script src="./marketplace.js?v=20260717sell1"></script>
+    <script src="./header-tweaks.js?v=20260717sell1"></script>
   </body>
 </html>
