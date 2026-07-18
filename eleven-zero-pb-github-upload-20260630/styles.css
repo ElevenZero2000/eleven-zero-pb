@@ -7838,3 +7838,622 @@ body.has-modal-open {
     transform: none;
   }
 }
+
+/* Simplified courts experience */
+.courts-simple-page .courts-simple-intro {
+  margin-top: 24px;
+  padding: 30px;
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 24px 54px rgba(3, 26, 14, 0.09);
+}
+
+.courts-simple-page .courts-simple-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.courts-simple-page .courts-simple-heading h1 {
+  max-width: none;
+  margin: 8px 0 0;
+  font-family: var(--display);
+  font-size: clamp(3rem, 6vw, 5.9rem);
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.courts-simple-page .courts-simple-heading > p {
+  max-width: 28rem;
+  margin: 0;
+  color: rgba(18, 18, 18, 0.7);
+  font-size: 1.04rem;
+  line-height: 1.55;
+}
+
+.courts-simple-page .courts-simple-search {
+  grid-template-columns: minmax(0, 1fr) 180px 190px;
+  margin-top: 26px;
+  padding: 18px;
+  border-radius: 22px;
+  background: var(--forest);
+}
+
+.courts-simple-page .courts-simple-quick {
+  align-items: center;
+  margin-top: 14px;
+}
+
+.courts-simple-page .courts-simple-quick > span {
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.courts-simple-page .courts-simple-quick .city-pin {
+  min-height: 32px;
+  border-color: rgba(3, 45, 23, 0.1);
+  background: rgba(3, 45, 23, 0.06);
+  color: var(--forest);
+}
+
+.courts-simple-page .courts-simple-status {
+  margin-top: 14px;
+  padding: 12px 15px;
+  border-color: rgba(3, 45, 23, 0.08);
+  background: rgba(3, 45, 23, 0.045);
+  color: rgba(18, 18, 18, 0.68);
+  font-size: 0.9rem;
+}
+
+.courts-simple-page .courts-simple-status.is-success {
+  border-color: rgba(8, 233, 90, 0.2);
+  background: rgba(8, 233, 90, 0.1);
+  color: #0b5b2c;
+}
+
+.courts-simple-page .courts-simple-status.is-warning {
+  border-color: rgba(247, 241, 80, 0.32);
+  background: rgba(247, 241, 80, 0.16);
+  color: #695d00;
+}
+
+.courts-simple-page .courts-simple-status.is-error {
+  border-color: rgba(255, 98, 15, 0.2);
+  background: rgba(255, 98, 15, 0.1);
+  color: #8d2f00;
+}
+
+.courts-simple-page .courts-simple-map-shell {
+  margin: 18px 0 0;
+  padding: 18px;
+  border-radius: 24px;
+  box-shadow: none;
+}
+
+.courts-simple-page .courts-simple-map-shell .court-map-head h2 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: clamp(1.7rem, 3vw, 2.7rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.courts-simple-page .courts-simple-map-shell .court-map {
+  min-height: 480px;
+  margin-top: 16px;
+}
+
+.courts-simple-page .courts-simple-map-selection {
+  padding: 16px 18px;
+}
+
+.courts-simple-page .courts-simple-selected-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.courts-simple-page .courts-simple-selected-head .eyebrow {
+  margin-bottom: 0;
+}
+
+.courts-simple-page .courts-simple-selected-head h3 {
+  margin-top: 7px;
+}
+
+.courts-simple-page .courts-simple-map-selection .court-map-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.courts-simple-page .courts-simple-map-selection h3 {
+  font-size: 1.18rem;
+}
+
+.courts-simple-page .courts-simple-map-selection p {
+  line-height: 1.45;
+}
+
+.courts-simple-page .courts-simple-directory {
+  margin-top: 20px;
+  padding: 30px;
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.courts-simple-page .courts-simple-directory .results-title {
+  font-size: clamp(2.4rem, 4vw, 4.2rem);
+}
+
+.courts-simple-page .courts-simple-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.45fr) 190px;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 22px;
+  padding: 12px;
+  border: 1px solid rgba(3, 45, 23, 0.07);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.courts-simple-page .courts-simple-filters {
+  margin: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+
+.courts-simple-page .courts-simple-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.courts-simple-page .courts-simple-filters .filter-chip {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.courts-simple-page .courts-simple-keyword input,
+.courts-simple-page .courts-simple-sort select {
+  min-height: 46px;
+  border-radius: 13px;
+}
+
+.courts-simple-page .courts-simple-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.courts-simple-page .courts-simple-grid .court-card {
+  min-height: 250px;
+  padding: 20px;
+  border-radius: 22px;
+  box-shadow: none;
+}
+
+.courts-simple-page .courts-simple-grid .court-card h3 {
+  margin-top: 18px;
+  font-size: 1.75rem;
+  line-height: 0.98;
+}
+
+.courts-simple-page .courts-simple-grid .court-address {
+  margin-top: 10px;
+  color: rgba(18, 18, 18, 0.7);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.courts-simple-page .court-card-meta {
+  margin: 10px 0 0;
+  color: rgba(18, 18, 18, 0.56);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.courts-simple-page .court-detail-dialog {
+  width: min(680px, calc(100% - 28px));
+}
+
+.courts-simple-page .court-detail-simple-meta {
+  margin: 14px 0 0;
+  padding: 13px 15px;
+  border-radius: 16px;
+  background: rgba(3, 45, 23, 0.055);
+  color: rgba(18, 18, 18, 0.66);
+  line-height: 1.5;
+}
+
+.courts-simple-page .court-detail-simple-details {
+  margin-top: 14px;
+}
+
+.courts-simple-page .court-detail-simple-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.courts-simple-page .court-detail-simple-actions .button {
+  min-height: 48px;
+  padding: 0 14px;
+  text-align: center;
+}
+
+.courts-simple-page .courts-simple-grid .court-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+.courts-simple-page .courts-simple-grid .court-card-button {
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 0.84rem;
+}
+
+.courts-simple-page .courts-simple-secondary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.courts-simple-page .courts-simple-disclosure {
+  align-self: start;
+  overflow: hidden;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.courts-simple-page .courts-simple-disclosure[open] {
+  grid-column: 1 / -1;
+}
+
+.courts-simple-page .courts-simple-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 82px;
+  padding: 18px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.courts-simple-page .courts-simple-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.courts-simple-page .courts-simple-disclosure > summary::after {
+  content: "+";
+  display: grid;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(8, 233, 90, 0.14);
+  color: var(--forest);
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.courts-simple-page .courts-simple-disclosure[open] > summary::after {
+  content: "−";
+}
+
+.courts-simple-page .courts-simple-disclosure summary span,
+.courts-simple-page .courts-simple-disclosure summary strong,
+.courts-simple-page .courts-simple-disclosure summary small {
+  display: block;
+}
+
+.courts-simple-page .courts-simple-disclosure summary strong {
+  font-size: 1rem;
+}
+
+.courts-simple-page .courts-simple-disclosure summary small {
+  margin-top: 4px;
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.82rem;
+}
+
+.courts-simple-page .courts-simple-disclosure .court-community-shell {
+  margin: 0;
+  padding: 0 20px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.courts-simple-page .courts-simple-add-court {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 0 20px 22px;
+}
+
+.courts-simple-page .courts-simple-add-copy h2 {
+  margin: 8px 0 0;
+  font-family: var(--display);
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.courts-simple-page .courts-simple-add-copy p:last-child {
+  color: rgba(18, 18, 18, 0.68);
+  line-height: 1.55;
+}
+
+.courts-simple-page .courts-simple-add-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 20px;
+  border-radius: 20px;
+}
+
+.courts-simple-page .courts-simple-add-form .seller-field-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1080px) {
+  .courts-simple-page .courts-simple-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .courts-simple-page .courts-simple-filters {
+    grid-column: 1 / -1;
+  }
+
+  .courts-simple-page .courts-simple-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .courts-simple-page .page-shell {
+    width: min(100% - 16px, 1280px);
+    padding-top: 8px;
+  }
+
+  .courts-simple-page .site-header {
+    top: 8px;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 22px;
+  }
+
+  .courts-simple-page .brand-mark {
+    justify-content: center;
+  }
+
+  .courts-simple-page .brand-logo-header {
+    width: 146px;
+  }
+
+  .courts-simple-page .site-nav {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 18px;
+    overflow-x: auto;
+    padding: 3px 2px 2px;
+    font-size: 0.82rem;
+    scrollbar-width: none;
+  }
+
+  .courts-simple-page .site-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .courts-simple-page .nav-auth-slot {
+    display: none;
+  }
+
+  .courts-simple-page .courts-simple-intro,
+  .courts-simple-page .courts-simple-directory {
+    margin-top: 12px;
+    padding: 16px;
+    border-radius: 24px;
+  }
+
+  .courts-simple-page .courts-simple-heading {
+    display: block;
+  }
+
+  .courts-simple-page .courts-simple-heading h1 {
+    font-size: clamp(2.7rem, 14vw, 4rem);
+  }
+
+  .courts-simple-page .courts-simple-heading > p {
+    margin-top: 12px;
+    font-size: 0.92rem;
+  }
+
+  .courts-simple-page .courts-simple-search {
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 9px;
+    margin-top: 16px;
+    padding: 11px;
+    border-radius: 18px;
+  }
+
+  .courts-simple-page .courts-simple-search .finder-submit {
+    grid-column: 1 / -1;
+  }
+
+  .courts-simple-page .courts-simple-search .finder-field span {
+    font-size: 0.66rem;
+  }
+
+  .courts-simple-page .courts-simple-search .finder-field input,
+  .courts-simple-page .courts-simple-search .finder-field select,
+  .courts-simple-page .courts-simple-search .finder-submit {
+    min-height: 48px;
+  }
+
+  .courts-simple-page .courts-simple-quick {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .courts-simple-page .courts-simple-status {
+    font-size: 0.82rem;
+  }
+
+  .courts-simple-page .courts-simple-map-shell {
+    padding: 12px;
+    border-radius: 20px;
+  }
+
+  .courts-simple-page .courts-simple-map-shell .court-map-head {
+    gap: 10px;
+  }
+
+  .courts-simple-page .courts-simple-map-shell .court-map-head h2 {
+    font-size: 1.7rem;
+  }
+
+  .courts-simple-page .court-map-legend {
+    gap: 6px;
+  }
+
+  .courts-simple-page .court-map-legend-item {
+    min-height: 28px;
+    padding: 0 9px;
+    font-size: 0.68rem;
+  }
+
+  .courts-simple-page .courts-simple-map-shell .court-map {
+    min-height: 360px;
+  }
+
+  .courts-simple-page .courts-simple-map-selection {
+    margin-top: 10px;
+    padding: 13px 14px;
+  }
+
+  .courts-simple-page .court-map-status {
+    font-size: 0.76rem;
+  }
+
+  .courts-simple-page .results-meta {
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .courts-simple-page .courts-simple-directory .results-title {
+    font-size: 2.5rem;
+  }
+
+  .courts-simple-page .results-note {
+    font-size: 0.84rem;
+    line-height: 1.45;
+  }
+
+  .courts-simple-page .courts-simple-controls {
+    grid-template-columns: 1fr 112px;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding: 8px;
+    border-radius: 16px;
+  }
+
+  .courts-simple-page .courts-simple-keyword input,
+  .courts-simple-page .courts-simple-sort select {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 0.82rem;
+  }
+
+  .courts-simple-page .courts-simple-filters .filter-chip {
+    min-height: 36px;
+    padding: 0 13px;
+    font-size: 0.74rem;
+  }
+
+  .courts-simple-page .courts-simple-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .courts-simple-page .courts-simple-grid .court-card {
+    min-height: 0;
+    padding: 17px;
+  }
+
+  .courts-simple-page .courts-simple-grid .court-card h3 {
+    font-size: 1.55rem;
+  }
+
+  .courts-simple-page .courts-simple-grid .court-card-actions {
+    padding-top: 14px;
+  }
+
+  .courts-simple-page .court-detail-dialog {
+    width: min(100% - 16px, 680px);
+    padding: 18px;
+  }
+
+  .courts-simple-page .court-detail-body h2 {
+    font-size: clamp(2rem, 10vw, 3rem);
+  }
+
+  .courts-simple-page .court-detail-simple-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .courts-simple-page .courts-simple-secondary {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .courts-simple-page .courts-simple-disclosure[open] {
+    grid-column: auto;
+  }
+
+  .courts-simple-page .courts-simple-disclosure > summary {
+    min-height: 72px;
+    padding: 14px 16px;
+  }
+
+  .courts-simple-page .courts-simple-disclosure .court-community-shell {
+    padding: 0 12px 12px;
+  }
+
+  .courts-simple-page .court-community-grid,
+  .courts-simple-page .courts-simple-add-court,
+  .courts-simple-page .courts-simple-add-form {
+    grid-template-columns: 1fr;
+  }
+
+  .courts-simple-page .courts-simple-add-court {
+    gap: 14px;
+    padding: 0 14px 14px;
+  }
+
+  .courts-simple-page .courts-simple-add-form {
+    padding: 14px;
+  }
+
+  .courts-simple-page .courts-simple-add-form .seller-field-wide {
+    grid-column: auto;
+  }
+}
