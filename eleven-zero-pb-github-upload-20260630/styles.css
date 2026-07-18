@@ -9066,3 +9066,485 @@ body.has-modal-open {
     padding: 0 20px 24px;
   }
 }
+
+/* HOME PAGE — SIMPLE MARKETPLACE INTRO */
+.home-simple-page main {
+  padding-top: 30px;
+}
+
+.home-simple-page .home-simple-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.04fr) minmax(360px, 0.96fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.home-simple-page .home-simple-hero-copy,
+.home-simple-page .home-simple-photo,
+.home-simple-page .home-simple-how,
+.home-simple-page .home-simple-more,
+.home-simple-page .home-simple-cta {
+  border-radius: 34px;
+  box-shadow: 0 24px 58px rgba(2, 30, 16, 0.1);
+}
+
+.home-simple-page .home-simple-hero-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 620px;
+  padding: clamp(40px, 5.3vw, 70px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 88% 10%, rgba(255, 255, 255, 0.5), transparent 25%),
+    radial-gradient(circle at 8% 92%, rgba(121, 184, 232, 0.28), transparent 22%),
+    linear-gradient(135deg, #b9ff9a 0%, var(--acid) 60%, #d9ffc8 100%);
+}
+
+.home-simple-page .home-simple-hero-copy .eyebrow {
+  margin-bottom: 22px;
+  color: rgba(3, 45, 23, 0.66);
+}
+
+.home-simple-page .home-simple-hero-copy h1 {
+  max-width: 7.5ch;
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(4.6rem, 8.1vw, 8rem);
+  letter-spacing: -0.01em;
+  line-height: 0.84;
+  text-transform: uppercase;
+}
+
+.home-simple-page .home-simple-lead {
+  max-width: 31rem;
+  margin: 28px 0 0;
+  color: rgba(18, 18, 18, 0.72);
+  font-size: clamp(1.05rem, 1.45vw, 1.22rem);
+  line-height: 1.55;
+}
+
+.home-simple-page .home-simple-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.home-simple-page .home-simple-confidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(3, 45, 23, 0.14);
+}
+
+.home-simple-page .home-simple-confidence span {
+  position: relative;
+  padding-left: 17px;
+  color: rgba(3, 45, 23, 0.7);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.home-simple-page .home-simple-confidence span::before {
+  content: "";
+  position: absolute;
+  top: 0.34em;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--forest);
+}
+
+.home-simple-page .home-simple-photo {
+  position: relative;
+  min-height: 620px;
+  margin: 0;
+  overflow: hidden;
+  background: var(--forest);
+}
+
+.home-simple-page .home-simple-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 48%, rgba(2, 24, 12, 0.78) 100%);
+  pointer-events: none;
+}
+
+.home-simple-page .home-simple-photo img {
+  width: 100%;
+  height: 100%;
+  min-height: 620px;
+  object-fit: cover;
+  object-position: center 46%;
+}
+
+.home-simple-page .home-simple-photo figcaption {
+  position: absolute;
+  z-index: 1;
+  right: 30px;
+  bottom: 30px;
+  left: 30px;
+  display: grid;
+  gap: 7px;
+  color: #ffffff;
+}
+
+.home-simple-page .home-simple-photo figcaption span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.home-simple-page .home-simple-photo figcaption strong {
+  max-width: 12ch;
+  font-family: var(--display);
+  font-size: clamp(2.4rem, 4.3vw, 4rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.home-simple-page .home-simple-how {
+  margin-top: 24px;
+  padding: clamp(38px, 5vw, 62px);
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.home-simple-page .home-simple-section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 380px);
+  gap: 28px;
+  align-items: end;
+}
+
+.home-simple-page .home-simple-section-heading .eyebrow,
+.home-simple-page .home-simple-more-copy .eyebrow,
+.home-simple-page .home-simple-cta .eyebrow {
+  margin-bottom: 12px;
+}
+
+.home-simple-page .home-simple-section-heading h2,
+.home-simple-page .home-simple-more-copy h2,
+.home-simple-page .home-simple-cta h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(2.7rem, 5vw, 5rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.home-simple-page .home-simple-section-heading > p,
+.home-simple-page .home-simple-more-copy > p:last-child {
+  margin: 0;
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.home-simple-page .home-simple-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 38px;
+}
+
+.home-simple-page .home-simple-steps article {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 22px;
+  background: #f6f8f4;
+}
+
+.home-simple-page .home-simple-steps article > span {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--acid);
+  color: var(--forest);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.home-simple-page .home-simple-steps h3 {
+  margin: 18px 0 7px;
+  color: var(--ink);
+  font-size: 1.18rem;
+}
+
+.home-simple-page .home-simple-steps p {
+  margin: 0;
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.home-simple-page .home-simple-review-note {
+  margin: 20px 0 0;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(8, 233, 90, 0.1);
+  color: rgba(3, 45, 23, 0.76);
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.home-simple-page .home-simple-more {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.74fr) minmax(0, 1.26fr);
+  gap: 26px;
+  margin-top: 24px;
+  padding: clamp(38px, 5vw, 62px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 100%, rgba(8, 233, 90, 0.22), transparent 30%),
+    linear-gradient(135deg, #032d17, #08140d);
+  color: #ffffff;
+}
+
+.home-simple-page .home-simple-more-copy .eyebrow {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.home-simple-page .home-simple-more-copy h2 {
+  max-width: 9ch;
+}
+
+.home-simple-page .home-simple-more-copy > p:last-child {
+  max-width: 27rem;
+  margin-top: 18px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.home-simple-page .home-simple-more-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-self: stretch;
+}
+
+.home-simple-page .home-simple-more-links a {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 220px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  transition: transform 180ms ease, background 180ms ease;
+}
+
+.home-simple-page .home-simple-more-links a:hover {
+  transform: translateY(-3px);
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.home-simple-page .home-simple-more-links span {
+  color: var(--acid);
+  font-size: 0.73rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.home-simple-page .home-simple-more-links strong {
+  max-width: 13ch;
+  margin-top: 10px;
+  font-size: 1.12rem;
+  line-height: 1.25;
+}
+
+.home-simple-page .home-simple-more-links b {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  font-size: 1.45rem;
+}
+
+.home-simple-page .home-simple-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 24px;
+  padding: 34px 40px;
+  background: var(--acid);
+}
+
+.home-simple-page .home-simple-cta h2 {
+  font-size: clamp(2.4rem, 4vw, 4rem);
+}
+
+.home-simple-page .site-footer {
+  margin-top: 24px;
+}
+
+@media (max-width: 900px) {
+  .home-simple-page .home-simple-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-simple-page .home-simple-hero-copy,
+  .home-simple-page .home-simple-photo {
+    min-height: 0;
+  }
+
+  .home-simple-page .home-simple-photo {
+    aspect-ratio: 4 / 3;
+  }
+
+  .home-simple-page .home-simple-photo img {
+    min-height: 0;
+  }
+
+  .home-simple-page .home-simple-more {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-simple-page .home-simple-more-copy h2 {
+    max-width: 11ch;
+  }
+}
+
+@media (max-width: 720px) {
+  .home-simple-page main {
+    padding-top: 18px;
+  }
+
+  .home-simple-page .home-simple-hero {
+    gap: 14px;
+  }
+
+  .home-simple-page .home-simple-hero-copy,
+  .home-simple-page .home-simple-photo,
+  .home-simple-page .home-simple-how,
+  .home-simple-page .home-simple-more,
+  .home-simple-page .home-simple-cta {
+    border-radius: 24px;
+  }
+
+  .home-simple-page .home-simple-hero-copy {
+    padding: 34px 24px 30px;
+  }
+
+  .home-simple-page .home-simple-hero-copy .eyebrow {
+    margin-bottom: 16px;
+  }
+
+  .home-simple-page .home-simple-hero-copy h1 {
+    max-width: 8ch;
+    font-size: clamp(3.85rem, 18vw, 5.3rem);
+    line-height: 0.86;
+  }
+
+  .home-simple-page .home-simple-lead {
+    margin-top: 20px;
+    font-size: 0.98rem;
+  }
+
+  .home-simple-page .home-simple-actions {
+    margin-top: 24px;
+  }
+
+  .home-simple-page .home-simple-actions .button {
+    flex: 1 1 150px;
+    min-height: 52px;
+    padding: 0 18px;
+  }
+
+  .home-simple-page .home-simple-confidence {
+    gap: 9px 14px;
+    margin-top: 26px;
+    padding-top: 18px;
+  }
+
+  .home-simple-page .home-simple-confidence span {
+    font-size: 0.71rem;
+  }
+
+  .home-simple-page .home-simple-photo {
+    aspect-ratio: 1 / 0.92;
+  }
+
+  .home-simple-page .home-simple-photo figcaption {
+    right: 22px;
+    bottom: 22px;
+    left: 22px;
+  }
+
+  .home-simple-page .home-simple-photo figcaption strong {
+    font-size: 2.7rem;
+  }
+
+  .home-simple-page .home-simple-how,
+  .home-simple-page .home-simple-more {
+    margin-top: 14px;
+    padding: 32px 22px;
+  }
+
+  .home-simple-page .home-simple-section-heading {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .home-simple-page .home-simple-section-heading h2,
+  .home-simple-page .home-simple-more-copy h2 {
+    font-size: clamp(2.8rem, 13vw, 4rem);
+  }
+
+  .home-simple-page .home-simple-steps,
+  .home-simple-page .home-simple-more-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-simple-page .home-simple-steps {
+    gap: 10px;
+    margin-top: 26px;
+  }
+
+  .home-simple-page .home-simple-steps article {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    column-gap: 14px;
+    padding: 18px;
+  }
+
+  .home-simple-page .home-simple-steps h3 {
+    align-self: center;
+    margin: 0;
+  }
+
+  .home-simple-page .home-simple-steps p {
+    grid-column: 2;
+    margin-top: 4px;
+  }
+
+  .home-simple-page .home-simple-more-links a {
+    min-height: 150px;
+  }
+
+  .home-simple-page .home-simple-cta {
+    display: grid;
+    margin-top: 14px;
+    padding: 28px 24px;
+  }
+
+  .home-simple-page .home-simple-cta .button {
+    width: 100%;
+  }
+
+  .home-simple-page .site-footer {
+    margin-top: 14px;
+  }
+}
