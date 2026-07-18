@@ -901,85 +901,47 @@ function renderCourtDetailModal(court) {
   if (!courtDetailBody || !court) return;
 
   const summary = courtSummaryFor(court);
-  const reports = state.courtReportsByCourt[court.id] || [];
   const googleMapsUrl = buildGoogleMapsUrl(court);
-  const detailList = (court.details || [])
+  const detailMarkup = (court.details || [])
     .filter(Boolean)
-    .map((detail) => `<li>${escapeHtml(detail)}</li>`)
+    .slice(0, 3)
+    .map((detail) => `<span>${escapeHtml(detail)}</span>`)
     .join("");
-
-  const quickReportsMarkup = reports.length
-    ? reports
-        .slice(0, 3)
-        .map(
-          (item) => `
-            <article class="court-detail-note">
-              <div class="court-detail-note-head">
-                <strong>${escapeHtml(item.reviewerName)}</strong>
-                <span>${escapeHtml(formatCourtDate(item.createdAt))}</span>
-              </div>
-              <p>${escapeHtml(item.comment)}</p>
-            </article>
-          `
-        )
-        .join("")
-    : `<article class="court-detail-note court-detail-note-empty"><p>No player notes yet for this court.</p></article>`;
+  const distance = formatDistanceMiles(court.distanceMiles);
+  const reportCopy = summary
+    ? `${summary.conditionAverage}/5 condition · ${summary.busynessLabel} crowd · ${summary.reportCount} player ${summary.reportCount === 1 ? "report" : "reports"}`
+    : "No player reports yet";
 
   courtDetailBody.innerHTML = `
     <div class="court-detail-topline">
       ${buildTagMarkup(court)}
-      ${summary ? `<span class="court-detail-report-pill">${escapeHtml(String(summary.reportCount))} player report${summary.reportCount === 1 ? "" : "s"}</span>` : ""}
     </div>
     <h2 id="court-detail-title">${escapeHtml(court.name)}</h2>
     <p class="court-detail-location">${escapeHtml(court.location)}</p>
     ${court.address ? `<p class="court-detail-address">${escapeHtml(court.address)}</p>` : ""}
-    ${buildCourtInsightsMarkup(court)}
-    <div class="court-detail-layout">
-      <div class="court-detail-main">
-        <p class="court-detail-copy">${escapeHtml(court.description)}</p>
-        ${detailList ? `<ul class="court-detail-list">${detailList}</ul>` : ""}
-        ${buildCourtReportQuickMarkup(court)}
-        <div class="court-detail-actions">
-          <button class="button button-secondary" type="button" data-map-focus="${escapeHtml(
-            court.id
-          )}">Show on map</button>
-          <button class="button button-secondary" type="button" data-rate-court="${escapeHtml(
-            court.id
-          )}">Rate this court</button>
-          ${
-            googleMapsUrl
-              ? `<a class="button button-primary" href="${escapeHtml(
-                  googleMapsUrl
-                )}" target="_blank" rel="noreferrer">Open in Google Maps</a>`
-              : ""
-          }
-        </div>
-      </div>
-      <aside class="court-detail-side">
-        ${
-          court.website
-            ? `<a class="text-link" href="${escapeHtml(
-                court.website
-              )}" target="_blank" rel="noreferrer">Visit venue website</a>`
-            : ""
-        }
-        ${
-          court.osmUrl
-            ? `<a class="text-link" href="${escapeHtml(
-                court.osmUrl
-              )}" target="_blank" rel="noreferrer">Open map reference</a>`
-            : ""
-        }
-        ${
-          court.createdAt
-            ? `<p class="court-detail-meta">Added ${escapeHtml(formatCourtDate(court.createdAt))}</p>`
-            : ""
-        }
-        <div class="court-detail-notes">
-          <strong>Recent player notes</strong>
-          ${quickReportsMarkup}
-        </div>
-      </aside>
+    <p class="court-detail-simple-meta">${escapeHtml(
+      [distance, reportCopy].filter(Boolean).join(" · ")
+    )}</p>
+    ${detailMarkup ? `<div class="court-details court-detail-simple-details">${detailMarkup}</div>` : ""}
+    ${court.description ? `<p class="court-detail-copy">${escapeHtml(court.description)}</p>` : ""}
+    <div class="court-detail-actions court-detail-simple-actions">
+      ${
+        googleMapsUrl
+          ? `<a class="button button-primary" href="${escapeHtml(
+              googleMapsUrl
+            )}" target="_blank" rel="noreferrer">Open in Google Maps</a>`
+          : ""
+      }
+      ${
+        court.website
+          ? `<a class="button button-secondary" href="${escapeHtml(
+              court.website
+            )}" target="_blank" rel="noreferrer">Venue website</a>`
+          : ""
+      }
+      <button class="button button-secondary" type="button" data-rate-court="${escapeHtml(
+        court.id
+      )}">Rate this court</button>
     </div>
   `;
 }
@@ -1190,25 +1152,41 @@ function buildLinkMarkup(court) {
 }
 
 function renderCourtCard(court) {
+  const summary = courtSummaryFor(court);
+  const distance = formatDistanceMiles(court.distanceMiles);
+  const ratingCopy = summary
+    ? `${Number(summary.conditionAverage || 0).toFixed(1)}/5 condition · ${summary.reportCount} player ${summary.reportCount === 1 ? "report" : "reports"}`
+    : "No player reports yet";
+
   return `
     <article class="court-card reveal is-visible" data-court-id="${escapeHtml(court.id)}">
       <div class="court-card-top">
-        ${buildTagMarkup(court)}
+        <span class="court-tag court-tag-${escapeHtml(court.accessKind)}">${escapeHtml(
+          court.accessLabel
+        )}</span>
+        ${
+          court.surfaceKind !== "unknown"
+            ? `<span class="court-tag court-tag-surface">${escapeHtml(court.surfaceLabel)}</span>`
+            : ""
+        }
       </div>
       <h3>${escapeHtml(court.name)}</h3>
-      <p class="court-location">${escapeHtml(court.location)}</p>
-      ${
-        court.address
-          ? `<p class="court-address">${escapeHtml(court.address)}</p>`
-          : ""
-      }
-      ${buildCourtInsightsMarkup(court)}
-      <div class="court-details">
-        ${buildDetailMarkup(court.details)}
+      <p class="court-address">${escapeHtml(court.address || court.location)}</p>
+      <p class="court-card-meta">${escapeHtml(
+        [distance, ratingCopy].filter(Boolean).join(" · ")
+      )}</p>
+      <div class="court-card-actions">
+        <button class="button button-dark court-card-button" type="button" data-view-court="${escapeHtml(
+          court.id
+        )}">View details</button>
+        ${
+          Number.isFinite(court.lat) && Number.isFinite(court.lon)
+            ? `<button class="button button-secondary court-card-button" type="button" data-map-focus="${escapeHtml(
+                court.id
+              )}">Show on map</button>`
+            : ""
+        }
       </div>
-      <p class="court-copy">${escapeHtml(court.description)}</p>
-      ${buildCourtReportQuickMarkup(court)}
-      ${buildLinkMarkup(court)}
     </article>
   `;
 }
@@ -1445,88 +1423,37 @@ function buildMapSelection(court) {
   if (!mapSelection) return;
 
   if (!court) {
-    const quickSearchMarkup =
-      !state.courts.length && state.source === "directory"
-        ? `
-          <div class="court-map-selection-quick">
-            <strong>Start with a live city search</strong>
-            <div class="empty-state-quick-row">
-              ${DEFAULT_QUICK_SEARCHES.map(
-                (label) => `
-                  <button class="city-pin city-pin-dark" type="button" data-map-quick-search="${escapeHtml(
-                    label
-                  )}">
-                    ${escapeHtml(label)}
-                  </button>
-                `
-              ).join("")}
-            </div>
-          </div>
-        `
-        : "";
-
     mapSelection.innerHTML = `
       <p class="eyebrow">Selected court</p>
-      <h3>Pick a marker or use a “Show on map” button.</h3>
-      <p>
-        The map will center the selected court here so players can compare
-        the cards with the map view more easily.
-      </p>
-      ${quickSearchMarkup}
+      <h3>Choose a pin on the map.</h3>
+      <p>The court name, address, and next steps will appear here.</p>
     `;
     return;
   }
 
-  const detailMarkup = court.details
-    .filter(Boolean)
-    .slice(0, 3)
-    .map((detail) => `<li>${escapeHtml(detail)}</li>`)
-    .join("");
-
-  const websiteMarkup = court.website
-    ? `<a class="text-link text-link-popup" href="${escapeHtml(
-        court.website
-      )}" target="_blank" rel="noreferrer">Venue website</a>`
-    : "";
-
   const googleMapsUrl = buildGoogleMapsUrl(court);
   const googleMapsMarkup = googleMapsUrl
-    ? `<a class="text-link text-link-popup" href="${escapeHtml(
+    ? `<a class="button button-primary court-card-button" href="${escapeHtml(
         googleMapsUrl
       )}" target="_blank" rel="noreferrer">Open in Google Maps</a>`
     : "";
 
-  const mapMarkup = court.osmUrl
-    ? `<a class="text-link text-link-popup" href="${escapeHtml(
-        court.osmUrl
-      )}" target="_blank" rel="noreferrer">Open map reference</a>`
-    : "";
-
-  const reportMarkup = buildCourtReportQuickMarkup(court);
-
   mapSelection.innerHTML = `
-    <p class="eyebrow">Selected court</p>
-    <span class="court-tag court-tag-${escapeHtml(court.accessKind)}">${escapeHtml(
-      court.accessLabel
-    )}</span>
-    <h3>${escapeHtml(court.name)}</h3>
-    <p class="court-map-selection-location">${escapeHtml(court.location)}</p>
-    ${
-      court.address
-        ? `<p class="court-map-selection-address">${escapeHtml(court.address)}</p>`
-        : ""
-    }
-    <ul>${detailMarkup}</ul>
-    <p class="court-map-selection-copy">${escapeHtml(court.description)}</p>
-    ${reportMarkup}
-    <div class="court-map-popup-links">
-      <button class="text-link text-link-button text-link-popup" type="button" data-view-court="${escapeHtml(
+    <div class="courts-simple-selected-head">
+      <div>
+        <p class="eyebrow">Selected court</p>
+        <h3>${escapeHtml(court.name)}</h3>
+      </div>
+      <span class="court-tag court-tag-${escapeHtml(court.accessKind)}">${escapeHtml(
+        court.accessLabel
+      )}</span>
+    </div>
+    <p class="court-map-selection-address">${escapeHtml(court.address || court.location)}</p>
+    <div class="court-map-selection-actions">
+      <button class="button button-dark court-card-button" type="button" data-view-court="${escapeHtml(
         court.id
       )}">View details</button>
-      ${websiteMarkup}${googleMapsMarkup}${mapMarkup}
-      <button class="text-link text-link-button text-link-popup" type="button" data-rate-court="${escapeHtml(
-        court.id
-      )}">Rate this court</button>
+      ${googleMapsMarkup}
     </div>
   `;
 }
@@ -1610,7 +1537,10 @@ function setActiveCourt(courtId, { centerMap = false, scrollMap = false, scrollR
   }
 
   if (scrollReport) {
-    document.querySelector("#court-community")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const community = document.querySelector("#court-community");
+    const disclosure = community?.closest("details");
+    if (disclosure) disclosure.open = true;
+    community?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   loadCourtReportDetails(court);
