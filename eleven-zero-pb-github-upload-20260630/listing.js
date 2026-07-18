@@ -4,6 +4,7 @@ const storyNode = document.querySelector("[data-listing-story]");
 const relatedNode = document.querySelector("[data-related-shell]");
 const SHIPPING_DRAFT_STORAGE_KEY = "elevenZeroPbShippingAddressDraft";
 const CART_DRAFT_STORAGE_KEY = "elevenZeroPbCartDraft";
+const CART_ITEMS_STORAGE_KEY = "elevenZeroPbCartItems";
 
 function createDefaultShippingState() {
   return {
@@ -119,13 +120,28 @@ function persistShippingDraft() {
 function saveCartDraft(item) {
   if (!item) return;
 
-  writeStorageJson(CART_DRAFT_STORAGE_KEY, {
+  const cartItem = {
     listingId: item.id,
     title: `${item.brand || ""} ${item.model || ""}`.trim(),
+    brand: item.brand || "",
+    model: item.model || "",
+    condition: item.condition || "",
+    color: item.color || "",
+    thicknessMm: item.thickness_mm || "",
+    location: item.location || "",
     priceUsd: item.price_usd,
     image: item.images?.[0] || "",
     updatedAt: new Date().toISOString(),
-  });
+  };
+  const existingItems = readStorageJson(CART_ITEMS_STORAGE_KEY);
+  const currentItems = Array.isArray(existingItems) ? existingItems : [];
+  const nextItems = [
+    cartItem,
+    ...currentItems.filter((entry) => Number(entry?.listingId) !== Number(item.id)),
+  ].slice(0, 12);
+
+  writeStorageJson(CART_ITEMS_STORAGE_KEY, nextItems);
+  writeStorageJson(CART_DRAFT_STORAGE_KEY, cartItem);
 }
 
 function formatThickness(value) {
@@ -450,9 +466,9 @@ function getProductCartEntryState(item) {
 
   return {
     action: "cart",
-    buttonLabel: "Buy now",
+    buttonLabel: "Add to cart",
     statusLabel: "Ready to buy",
-    reason: "Add this paddle to your cart, then confirm shipping before secure checkout.",
+    reason: "Add this paddle to your cart, then review shipping before secure checkout.",
     tone: "ready",
   };
 }
@@ -695,94 +711,75 @@ function renderGallery(item) {
 function renderContent(item) {
   if (!contentNode) return;
 
-  const shippingPolicy = getShippingPolicy(item);
-  const shippingQuote = listingDetailState.shipping.quote;
-  const shippingEstimatedTotal = shippingQuote ? getEstimatedTotalCents(item) : 0;
   const productActionState = getProductCartEntryState(item);
-
-  const sellerName = item.seller_name || "Community seller";
   const thickness = formatThickness(item.thickness_mm);
   const specPills = [
-    item.color ? `<span>${ElevenZeroApp.escapeHtml(item.color)}</span>` : "",
-    thickness ? `<span>${ElevenZeroApp.escapeHtml(thickness)}</span>` : "",
     `<span>${ElevenZeroApp.escapeHtml(item.condition)}</span>`,
-    `<span>${ElevenZeroApp.escapeHtml(item.category)}</span>`,
+    item.category ? `<span>${ElevenZeroApp.escapeHtml(item.category)}</span>` : "",
+    thickness ? `<span>${ElevenZeroApp.escapeHtml(thickness)}</span>` : "",
   ]
     .filter(Boolean)
     .join("");
 
   const canOpenCart = productActionState.action === "cart";
-  const busyLabel = listingDetailState.busy
-    ? "Opening checkout..."
-    : productActionState.buttonLabel;
-  const totalNote = shippingQuote
-    ? `${shippingQuote.isEstimate ? "Estimated" : "Delivered"} total ${formatMoneyFromCents(
-        shippingEstimatedTotal
-      )}`
-    : shippingPolicy.mode === "calculated"
-      ? "Enter your delivery address below to estimate shipping."
-      : "Enter your delivery address below to confirm the delivered total.";
+  const busyLabel = listingDetailState.busy ? "Opening cart..." : productActionState.buttonLabel;
+  const productNote = String(item.notes || "").trim();
+  const needsBuyerNote = productActionState.tone !== "ready";
 
   contentNode.innerHTML = `
-    <p class="eyebrow">Marketplace listing</p>
-    <div class="listing-detail-head">
+    <p class="eyebrow">Marketplace paddle</p>
+    <div class="listing-detail-head listing-detail-head-simple">
       <div>
         <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
         <h1>${ElevenZeroApp.escapeHtml(item.model)}</h1>
       </div>
-      <div class="listing-detail-price-block">
-        <span class="listing-detail-price">${ElevenZeroApp.formatMoney(item.price_usd)}</span>
-        <span class="listing-detail-total-note${shippingQuote ? "" : " is-muted"}">
-          ${ElevenZeroApp.escapeHtml(totalNote)}
-        </span>
+      <div class="listing-simple-purchase">
+        <div class="listing-detail-price-block listing-detail-price-block-simple">
+          <span class="listing-detail-price">${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</span>
+          <span class="listing-detail-total-note">Shipping calculated in cart</span>
+        </div>
+        <button
+          class="${canOpenCart ? "button button-dark" : "button button-secondary"} listing-buy-button"
+          type="button"
+          data-detail-buy
+          data-buy-action="${ElevenZeroApp.escapeHtml(productActionState.action)}"
+          ${!canOpenCart || listingDetailState.busy ? "disabled" : ""}
+        >
+          ${ElevenZeroApp.escapeHtml(busyLabel)}
+        </button>
       </div>
     </div>
-    <div class="listing-detail-specs">${specPills}</div>
-    <p class="listing-detail-copy listing-product-note">${ElevenZeroApp.escapeHtml(item.notes)}</p>
-    <div class="listing-detail-facts">
-      <article>
-        <strong>Condition</strong>
-        <span>${ElevenZeroApp.escapeHtml(item.condition)}</span>
-      </article>
-      <article>
-        <strong>Thickness</strong>
-        <span>${ElevenZeroApp.escapeHtml(thickness || "Not listed")}</span>
-      </article>
-      <article>
-        <strong>Ships from</strong>
-        <span>${ElevenZeroApp.escapeHtml(item.location)}</span>
-      </article>
-      <article>
-        <strong>Seller</strong>
-        <span>${ElevenZeroApp.escapeHtml(sellerName)}</span>
-      </article>
+    <div class="listing-detail-specs listing-detail-specs-simple">${specPills}</div>
+    ${
+      needsBuyerNote
+        ? `
+          <div class="listing-product-buy-note">
+            <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(
+              productActionState.tone
+            )}">${ElevenZeroApp.escapeHtml(productActionState.statusLabel)}</span>
+            <p>${ElevenZeroApp.escapeHtml(productActionState.reason)}</p>
+          </div>
+        `
+        : ""
+    }
+    ${
+      productNote
+        ? `<p class="listing-detail-copy listing-product-note">${ElevenZeroApp.escapeHtml(productNote)}</p>`
+        : ""
+    }
+    <div class="listing-simple-mini-meta">
+      <span>${ElevenZeroApp.escapeHtml(item.condition)}</span>
+      <span>${ElevenZeroApp.escapeHtml(item.location || "Location not listed")}</span>
     </div>
-    <div class="listing-purchase-row listing-purchase-row-detail listing-product-buy-box">
-      <div class="listing-purchase-copy">
-        <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(
-          productActionState.tone
-        )}">${ElevenZeroApp.escapeHtml(productActionState.statusLabel)}</span>
-        <p class="listing-status-copy">${ElevenZeroApp.escapeHtml(productActionState.reason)}</p>
-      </div>
-      <button
-        class="${canOpenCart ? "button button-dark" : "button button-secondary"} listing-buy-button"
-        type="button"
-        data-detail-buy
-        data-buy-action="${ElevenZeroApp.escapeHtml(productActionState.action)}"
-        ${!canOpenCart || listingDetailState.busy ? "disabled" : ""}
-      >
-        ${ElevenZeroApp.escapeHtml(busyLabel)}
-      </button>
-    </div>
-    <div class="listing-detail-actions-bar listing-detail-actions-subtle">
-      <a class="text-link" href="./shop.html">Back to shop</a>
-      <button class="text-link-button" type="button" data-copy-listing-link>
-        Copy listing link
-      </button>
-    </div>
-    <div class="seller-status listing-detail-status" data-detail-status>
-      ${ElevenZeroApp.escapeHtml(listingDetailState.statusMessage)}
-    </div>
+    ${
+      listingDetailState.statusTone === "neutral"
+        ? ""
+        : `
+          <div class="seller-status listing-detail-status" data-detail-status>
+            ${ElevenZeroApp.escapeHtml(listingDetailState.statusMessage)}
+          </div>
+        `
+    }
   `;
 
   ElevenZeroApp.setStatus(
@@ -797,8 +794,13 @@ function renderContent(item) {
 
     if (action === "cart") {
       saveCartDraft(item);
-      setDetailStatus("Added to cart. Review shipping and checkout below.", "success");
-      scrollToCartPanel();
+      listingDetailState.busy = true;
+      listingDetailState.statusMessage = "Added to cart. Opening your cart now.";
+      listingDetailState.statusTone = "success";
+      renderContent(item);
+      window.setTimeout(() => {
+        window.location.href = `./cart.html?listingId=${encodeURIComponent(item.id)}`;
+      }, 300);
       return;
     }
 
@@ -819,226 +821,30 @@ function renderStory(item) {
   if (!storyNode) return;
 
   const thickness = formatThickness(item.thickness_mm);
-  const actionState = getCartActionState(item);
-  const shippingPolicy = getShippingPolicy(item);
-  const shipping = listingDetailState.shipping;
-  const quote = shipping.quote;
-  const estimatedTotalCents = quote ? getEstimatedTotalCents(item) : 0;
-  const estimateButtonLabel = shipping.busy
-    ? shippingPolicy.mode === "calculated"
-      ? "Calculating..."
-      : "Confirming..."
-    : shippingPolicy.mode === "calculated"
-      ? "Estimate shipping"
-      : "Confirm shipping";
-  const shippingIntro =
-    shippingPolicy.mode === "free"
-      ? "This seller offers free shipping. Confirm the buyer address before checkout."
-      : shippingPolicy.mode === "flat"
-        ? "This seller uses one flat shipping fee. Confirm the buyer address before checkout."
-        : "Enter the buyer address and we’ll estimate U.S. shipping before checkout.";
-  const shippingLine = quote
-    ? formatMoneyFromCents(quote.amountCents)
-    : shippingPolicy.mode === "free"
-      ? "$0"
-      : shippingPolicy.mode === "flat"
-        ? shippingPolicy.label
-        : "Estimate needed";
-  const totalLine = quote ? formatMoneyFromCents(estimatedTotalCents) : "Calculated in cart";
-  const cartButtonDisabled =
-    actionState.action === "disabled" || listingDetailState.busy || shipping.busy;
-  const cartButtonLabel = listingDetailState.busy ? "Opening checkout..." : actionState.buttonLabel;
-  const shippingMeta = [
-    shippingPolicy.originZip ? `Origin ZIP ${shippingPolicy.originZip}` : "",
-    shippingPolicy.weightOz ? `${Number(shippingPolicy.weightOz).toFixed(1).replace(/\.0$/, "")} oz packed weight` : "",
-    shippingPolicy.lengthIn && shippingPolicy.widthIn && shippingPolicy.heightIn
-      ? `${Number(shippingPolicy.lengthIn).toFixed(1).replace(/\.0$/, "")} × ${Number(
-          shippingPolicy.widthIn
-        ).toFixed(1).replace(/\.0$/, "")} × ${Number(shippingPolicy.heightIn).toFixed(1).replace(/\.0$/, "")} in`
-      : "",
-  ].filter(Boolean);
-  const shippingNote = shippingPolicy.note || "";
+  const sellerName = item.seller_name || "Community seller";
 
   storyNode.innerHTML = `
-    <article class="listing-detail-panel listing-detail-panel-wide listing-shipping-panel listing-cart-panel" id="cart">
-      <div class="listing-cart-head">
-        <div>
-          <p class="eyebrow">Your cart</p>
-          <h2>Review before checkout.</h2>
-        </div>
-        <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(
-          actionState.tone
-        )}">${ElevenZeroApp.escapeHtml(actionState.statusLabel)}</span>
-      </div>
-
-      <div class="listing-cart-summary">
-        <article class="listing-cart-item">
-          <div>
-            <strong>${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(item.model)}</strong>
-            <span>${ElevenZeroApp.escapeHtml(
-              [item.condition, thickness, item.color].filter(Boolean).join(" · ")
-            )}</span>
-          </div>
-          <strong>${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</strong>
-        </article>
-        <div class="listing-cart-row">
-          <span>Subtotal</span>
-          <strong>${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</strong>
-        </div>
-        <div class="listing-cart-row">
-          <span>Shipping</span>
-          <strong>${ElevenZeroApp.escapeHtml(shippingLine)}</strong>
-        </div>
-        <div class="listing-cart-row listing-cart-total">
-          <span>Total</span>
-          <strong>${ElevenZeroApp.escapeHtml(totalLine)}</strong>
-        </div>
-      </div>
-
-      <p class="listing-cart-intro">${ElevenZeroApp.escapeHtml(shippingIntro)}</p>
-      <div class="listing-shipping-policy">
-        <div>
-          <strong>Seller shipping setup</strong>
-          <span>${ElevenZeroApp.escapeHtml(shippingPolicy.label)}</span>
-        </div>
-        <p>${ElevenZeroApp.escapeHtml(shippingPolicy.explanation)}</p>
-        ${
-          shippingMeta.length || shippingNote
-            ? `
-              <div class="listing-shipping-policy-meta">
-                ${shippingMeta.map((itemLabel) => `<span>${ElevenZeroApp.escapeHtml(itemLabel)}</span>`).join("")}
-                ${shippingNote ? `<span>${ElevenZeroApp.escapeHtml(shippingNote)}</span>` : ""}
-              </div>
-            `
-            : ""
-        }
-      </div>
-      <form class="listing-shipping-form" data-shipping-form>
-        <div class="listing-shipping-grid">
-          <label>
-            <span>Street address</span>
-            <input
-              type="text"
-              name="line1"
-              placeholder="123 Main Street"
-              value="${ElevenZeroApp.escapeHtml(shipping.line1)}"
-            />
-          </label>
-          <label>
-            <span>Apartment, suite, etc. (optional)</span>
-            <input
-              type="text"
-              name="line2"
-              placeholder="Suite 4B"
-              value="${ElevenZeroApp.escapeHtml(shipping.line2)}"
-            />
-          </label>
-          <label>
-            <span>City</span>
-            <input
-              type="text"
-              name="city"
-              placeholder="Miami"
-              value="${ElevenZeroApp.escapeHtml(shipping.city)}"
-            />
-          </label>
-          <label>
-            <span>State</span>
-            <input
-              type="text"
-              name="state"
-              placeholder="FL"
-              value="${ElevenZeroApp.escapeHtml(shipping.state)}"
-            />
-          </label>
-          <label>
-            <span>ZIP code</span>
-            <input
-              type="text"
-              name="postalCode"
-              inputmode="numeric"
-              placeholder="33101"
-              value="${ElevenZeroApp.escapeHtml(shipping.postalCode)}"
-            />
-          </label>
-          <label>
-            <span>Country</span>
-            <input type="text" name="country" value="US" readonly />
-          </label>
-        </div>
-        <div class="listing-shipping-actions">
-          <button class="button button-dark" type="submit" ${shipping.busy ? "disabled" : ""}>
-            ${ElevenZeroApp.escapeHtml(estimateButtonLabel)}
-          </button>
-          <span class="listing-shipping-help">
-            ${
-              shippingPolicy.mode === "calculated"
-                ? "Carrier-ready estimates are using the seller shipping setup right now."
-                : "This shipping policy will carry into checkout after you confirm the address."
-            }
-          </span>
-        </div>
-        <div class="seller-status listing-detail-status" aria-live="polite" data-shipping-status>
-          ${ElevenZeroApp.escapeHtml(shipping.statusMessage)}
-        </div>
-        ${
-          quote
-            ? `
-              <div class="listing-shipping-quote-grid">
-                <article>
-                  <strong>${quote.isEstimate ? "Estimated shipping" : "Shipping"}</strong>
-                  <span>${ElevenZeroApp.escapeHtml(formatMoneyFromCents(quote.amountCents))}</span>
-                </article>
-                <article>
-                  <strong>Destination</strong>
-                  <span>${ElevenZeroApp.escapeHtml(quote.destinationSummary)}</span>
-                </article>
-                <article>
-                  <strong>Service level</strong>
-                  <span>${ElevenZeroApp.escapeHtml(quote.serviceLevel)}</span>
-                </article>
-                <article>
-                  <strong>${quote.isEstimate ? "Estimated total" : "Delivered total"}</strong>
-                  <span>${ElevenZeroApp.escapeHtml(
-                    formatMoneyFromCents(quote.estimatedTotalCents)
-                  )}</span>
-                </article>
-              </div>
-            `
-            : ""
-        }
-      </form>
-
-      <div class="listing-cart-checkout">
-        <button
-          class="${actionState.action === "checkout" || actionState.action === "auth" ? "button button-dark" : "button button-secondary"} listing-buy-button"
-          type="button"
-          data-cart-checkout
-          data-cart-action="${ElevenZeroApp.escapeHtml(actionState.action)}"
-          ${cartButtonDisabled ? "disabled" : ""}
-        >
-          ${ElevenZeroApp.escapeHtml(cartButtonLabel)}
-        </button>
-        <p>${ElevenZeroApp.escapeHtml(actionState.reason)}</p>
-      </div>
-    </article>
-
     <article class="listing-detail-panel listing-review-panel" id="reviews">
       <p class="eyebrow">Reviews</p>
-      <h2>Buyer reviews</h2>
+      <h2>Reviews</h2>
       <div class="listing-review-empty">
         <strong>No reviews yet</strong>
-        <span>Reviews will appear here after buyers complete purchases through Eleven Zero PB.</span>
+        <span>Buyer reviews will appear here after completed purchases.</span>
       </div>
-      <p class="listing-review-note">
-        For now, use the photos, condition, seller notes, and shipping details to decide if this paddle is right for you.
-      </p>
     </article>
 
-    <article class="listing-detail-panel listing-detail-panel-soft">
+    <article class="listing-detail-panel listing-detail-panel-soft listing-simple-details" id="details">
       <p class="eyebrow">Paddle info</p>
-      <h2>Details at a glance</h2>
+      <h2>Details</h2>
       <div class="listing-detail-bullets">
+        <div>
+          <strong>Seller</strong>
+          <span>${ElevenZeroApp.escapeHtml(sellerName)}</span>
+        </div>
+        <div>
+          <strong>Ships from</strong>
+          <span>${ElevenZeroApp.escapeHtml(item.location || "Not listed")}</span>
+        </div>
         <div>
           <strong>Color</strong>
           <span>${ElevenZeroApp.escapeHtml(item.color || "Not listed")}</span>
@@ -1058,93 +864,13 @@ function renderStory(item) {
       </div>
     </article>
   `;
-
-  ElevenZeroApp.setStatus(
-    storyNode.querySelector("[data-shipping-status]"),
-    shipping.statusMessage,
-    shipping.statusTone
-  );
-  bindShippingForm();
-
-  storyNode.querySelector("[data-cart-checkout]")?.addEventListener("click", () => {
-    const cartAction = storyNode.querySelector("[data-cart-checkout]")?.dataset.cartAction || "disabled";
-
-    if (cartAction === "estimate-needed") {
-      setShippingStatus("Add your delivery address, then estimate shipping first.", "warning");
-      storyNode.querySelector("[data-shipping-form] input[name='line1']")?.focus();
-      return;
-    }
-
-    if (cartAction === "auth") {
-      setDetailStatus("Please sign in first so we can open secure checkout for this listing.", "warning");
-      window.setTimeout(() => {
-        ElevenZeroApp.redirectToAuth(`${window.location.pathname}${window.location.search}#cart`);
-      }, 700);
-      return;
-    }
-
-    if (cartAction === "checkout") {
-      handleBuyListing(item.id);
-      return;
-    }
-
-    setShippingStatus(actionState.reason, actionState.tone);
-  });
 }
 
-function renderRelatedListings(item) {
+function renderRelatedListings() {
   if (!relatedNode) return;
 
-  if (!listingDetailState.relatedItems.length) {
-    relatedNode.innerHTML = `
-      <article class="listing-detail-panel">
-        <p class="eyebrow">You may also like</p>
-        <h2>More listings are coming soon.</h2>
-        <p>As more paddles go live, this page will suggest similar options here.</p>
-      </article>
-    `;
-    return;
-  }
-
-  relatedNode.innerHTML = `
-    <article class="listing-detail-panel">
-      <div class="listing-related-head">
-        <div>
-          <p class="eyebrow">You may also like</p>
-          <h2>Similar paddles from the marketplace</h2>
-        </div>
-        <p class="listing-related-copy">
-          Buyers looking at ${ElevenZeroApp.escapeHtml(item.brand)} ${ElevenZeroApp.escapeHtml(
-            item.model
-          )} often want nearby prices, matching play styles, or the same brand family.
-        </p>
-      </div>
-
-      <div class="listing-related-grid">
-        ${listingDetailState.relatedItems
-          .map(
-            (related) => `
-              <a class="listing-related-card" href="./listing.html?id=${encodeURIComponent(related.id)}">
-                <div class="listing-related-card-top">
-                  <strong>${ElevenZeroApp.escapeHtml(related.brand)} ${ElevenZeroApp.escapeHtml(
-                    related.model
-                  )}</strong>
-                  <span>${ElevenZeroApp.formatMoney(related.price_usd)}</span>
-                </div>
-                <p>${ElevenZeroApp.escapeHtml(
-                  [related.category, related.condition, related.location].filter(Boolean).join(" · ")
-                )}</p>
-                <div class="listing-related-meta">
-                  <span>${ElevenZeroApp.escapeHtml(listingPhotoLabel(related))}</span>
-                  <span>${ElevenZeroApp.escapeHtml(formatPostedAge(related.created_at))}</span>
-                </div>
-              </a>
-            `
-          )
-          .join("")}
-      </div>
-    </article>
-  `;
+  relatedNode.hidden = true;
+  relatedNode.innerHTML = "";
 }
 
 function renderNotFound() {
@@ -1171,6 +897,11 @@ function renderNotFound() {
 
   if (storyNode) {
     storyNode.innerHTML = "";
+  }
+
+  if (relatedNode) {
+    relatedNode.hidden = true;
+    relatedNode.innerHTML = "";
   }
 }
 
@@ -1296,10 +1027,7 @@ async function loadListingDetail() {
   }
 
   try {
-    const [response, listingFeed] = await Promise.all([
-      ElevenZeroApp.request(`/api/listings/${listingId}`),
-      ElevenZeroApp.request("/api/listings"),
-    ]);
+    const response = await ElevenZeroApp.request(`/api/listings/${listingId}`);
     const item = response.item;
     if (!item) {
       renderNotFound();
@@ -1307,7 +1035,7 @@ async function loadListingDetail() {
     }
 
     listingDetailState.item = item;
-    listingDetailState.relatedItems = buildRelatedListings(item, listingFeed.items || []);
+    listingDetailState.relatedItems = [];
     listingDetailState.selectedImageIndex = 0;
     listingDetailState.lightboxOpen = false;
     listingDetailState.shipping = restoreShippingDraftState();
@@ -1316,7 +1044,7 @@ async function loadListingDetail() {
     renderLightbox(item);
     renderContent(item);
     renderStory(item);
-    renderRelatedListings(item);
+    renderRelatedListings();
     if (window.location.hash === "#shipping" || window.location.hash === "#cart") {
       window.setTimeout(() => scrollToCartPanel(), 120);
     }
