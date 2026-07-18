@@ -2,6 +2,38 @@ const signinForm = document.querySelector("[data-signin-form]");
 const signinStatus = document.querySelector("[data-signin-status]");
 const signupForm = document.querySelector("[data-signup-form]");
 const signupStatus = document.querySelector("[data-signup-status]");
+const authModeButtons = Array.from(document.querySelectorAll("[data-auth-mode]"));
+const authPanels = Array.from(document.querySelectorAll("[data-auth-panel]"));
+
+function getInitialAuthMode() {
+  const requestedMode = new URLSearchParams(window.location.search).get("mode");
+  return requestedMode === "signup" || requestedMode === "create" ? "signup" : "signin";
+}
+
+function setAuthMode(mode, { updateUrl = false } = {}) {
+  const nextMode = mode === "signup" ? "signup" : "signin";
+
+  authModeButtons.forEach((button) => {
+    const isActive = button.dataset.authMode === nextMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
+  });
+
+  authPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.authPanel !== nextMode;
+  });
+
+  if (updateUrl) {
+    const url = new URL(window.location.href);
+    if (nextMode === "signup") {
+      url.searchParams.set("mode", "signup");
+    } else {
+      url.searchParams.delete("mode");
+    }
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+  }
+}
 
 function setFormPending(form, isPending, idleLabel, pendingLabel) {
   if (!form) return;
@@ -64,6 +96,14 @@ async function handleSignup(event) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setAuthMode(getInitialAuthMode());
+
+  authModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setAuthMode(button.dataset.authMode, { updateUrl: true });
+    });
+  });
+
   await ElevenZeroApp.boot;
 
   if (ElevenZeroApp.session?.authenticated) {
