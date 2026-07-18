@@ -713,43 +713,32 @@ function renderContent(item) {
 
   const productActionState = getProductCartEntryState(item);
   const thickness = formatThickness(item.thickness_mm);
-  const specPills = [
-    `<span>${ElevenZeroApp.escapeHtml(item.condition)}</span>`,
-    item.category ? `<span>${ElevenZeroApp.escapeHtml(item.category)}</span>` : "",
-    thickness ? `<span>${ElevenZeroApp.escapeHtml(thickness)}</span>` : "",
-  ]
-    .filter(Boolean)
-    .join("");
-
   const canOpenCart = productActionState.action === "cart";
   const busyLabel = listingDetailState.busy ? "Opening cart..." : productActionState.buttonLabel;
   const productNote = String(item.notes || "").trim();
   const needsBuyerNote = productActionState.tone !== "ready";
 
   contentNode.innerHTML = `
-    <p class="eyebrow">Marketplace paddle</p>
-    <div class="listing-detail-head listing-detail-head-simple">
-      <div>
-        <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
-        <h1>${ElevenZeroApp.escapeHtml(item.model)}</h1>
-      </div>
-      <div class="listing-simple-purchase">
-        <div class="listing-detail-price-block listing-detail-price-block-simple">
-          <span class="listing-detail-price">${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</span>
-          <span class="listing-detail-total-note">Shipping calculated in cart</span>
-        </div>
-        <button
-          class="${canOpenCart ? "button button-dark" : "button button-secondary"} listing-buy-button"
-          type="button"
-          data-detail-buy
-          data-buy-action="${ElevenZeroApp.escapeHtml(productActionState.action)}"
-          ${!canOpenCart || listingDetailState.busy ? "disabled" : ""}
-        >
-          ${ElevenZeroApp.escapeHtml(busyLabel)}
-        </button>
-      </div>
+    <div class="listing-product-heading">
+      <p class="eyebrow">Marketplace paddle</p>
+      <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
+      <h1>${ElevenZeroApp.escapeHtml(item.model)}</h1>
     </div>
-    <div class="listing-detail-specs listing-detail-specs-simple">${specPills}</div>
+    <div class="listing-simple-purchase">
+      <div class="listing-detail-price-block listing-detail-price-block-simple">
+        <span class="listing-detail-price">${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(item.price_usd))}</span>
+        <span class="listing-detail-total-note">Shipping calculated in cart</span>
+      </div>
+      <button
+        class="${canOpenCart ? "button button-dark" : "button button-secondary"} listing-buy-button"
+        type="button"
+        data-detail-buy
+        data-buy-action="${ElevenZeroApp.escapeHtml(productActionState.action)}"
+        ${!canOpenCart || listingDetailState.busy ? "disabled" : ""}
+      >
+        ${ElevenZeroApp.escapeHtml(busyLabel)}
+      </button>
+    </div>
     ${
       needsBuyerNote
         ? `
@@ -762,15 +751,33 @@ function renderContent(item) {
         `
         : ""
     }
+    <div class="listing-product-summary-grid" aria-label="Paddle summary">
+      <article>
+        <span>Condition</span>
+        <strong>${ElevenZeroApp.escapeHtml(item.condition || "Not listed")}</strong>
+      </article>
+      <article>
+        <span>Play style</span>
+        <strong>${ElevenZeroApp.escapeHtml(item.category || "Not listed")}</strong>
+      </article>
+      <article>
+        <span>Thickness</span>
+        <strong>${ElevenZeroApp.escapeHtml(thickness || "Not listed")}</strong>
+      </article>
+    </div>
     ${
       productNote
-        ? `<p class="listing-detail-copy listing-product-note">${ElevenZeroApp.escapeHtml(productNote)}</p>`
+        ? `
+          <section class="listing-product-about" aria-label="About this paddle">
+            <strong>About this paddle</strong>
+            <p class="listing-detail-copy">${ElevenZeroApp.escapeHtml(productNote)}</p>
+          </section>
+        `
         : ""
     }
-    <div class="listing-simple-mini-meta">
-      <span>${ElevenZeroApp.escapeHtml(item.condition)}</span>
-      <span>${ElevenZeroApp.escapeHtml(item.location || "Location not listed")}</span>
-    </div>
+    <p class="listing-product-location">
+      Ships from <strong>${ElevenZeroApp.escapeHtml(item.location || "location not listed")}</strong>
+    </p>
     ${
       listingDetailState.statusTone === "neutral"
         ? ""
@@ -824,18 +831,9 @@ function renderStory(item) {
   const sellerName = item.seller_name || "Community seller";
 
   storyNode.innerHTML = `
-    <article class="listing-detail-panel listing-review-panel" id="reviews">
-      <p class="eyebrow">Reviews</p>
-      <h2>Reviews</h2>
-      <div class="listing-review-empty">
-        <strong>No reviews yet</strong>
-        <span>Buyer reviews will appear here after completed purchases.</span>
-      </div>
-    </article>
-
     <article class="listing-detail-panel listing-detail-panel-soft listing-simple-details" id="details">
       <p class="eyebrow">Paddle info</p>
-      <h2>Details</h2>
+      <h2>Paddle details</h2>
       <div class="listing-detail-bullets">
         <div>
           <strong>Seller</strong>
@@ -861,6 +859,15 @@ function renderStory(item) {
           <strong>Posted</strong>
           <span>${ElevenZeroApp.escapeHtml(formatPostedAge(item.created_at))}</span>
         </div>
+      </div>
+    </article>
+
+    <article class="listing-detail-panel listing-review-panel" id="reviews">
+      <p class="eyebrow">Buyer feedback</p>
+      <h2>Reviews</h2>
+      <div class="listing-review-empty">
+        <strong>No reviews yet</strong>
+        <span>Verified buyer reviews will appear here after completed purchases.</span>
       </div>
     </article>
   `;
