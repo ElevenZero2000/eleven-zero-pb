@@ -228,4 +228,36 @@
   body.sell-simple-page .site-header.is-condensed .auth-slot-group {
     display: none;
   }
+
+  body.auth-simple-page .site-header.is-condensed {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 7px 10px;
+    border-radius: 17px;
+  }
+
+  body.auth-simple-page .site-header.is-condensed .brand-mark {
+    grid-column: 1;
+    justify-content: center;
+  }
+
+  body.auth-simple-page .site-header.is-condensed .brand-logo-header {
+    width: 116px;
+  }
+
+  body.auth-simple-page .site-header.is-condensed .site-nav {
+    grid-column: 1;
+    gap: 16px;
+    padding: 2px 0;
+    font-size: 0.72rem;
+  }
+
+  body.auth-simple-page .site-header.is-condensed .site-nav a {
+    flex: 0 0 auto;
+  }
+
+  body.auth-simple-page .site-header.is-condensed .nav-auth-slot,
+  body.auth-simple-page .site-header.is-condensed .auth-slot-group {
+    display: none;
+  }
 }
