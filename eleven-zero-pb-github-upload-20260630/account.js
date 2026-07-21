@@ -25,9 +25,15 @@ const adminCourts = document.querySelector("[data-admin-courts]");
 const adminTrainers = document.querySelector("[data-admin-trainers]");
 const adminTrainerReviews = document.querySelector("[data-admin-trainer-reviews]");
 const adminCourtReports = document.querySelector("[data-admin-court-reports]");
+const adminCommerceNotifications = document.querySelector("[data-admin-commerce-notifications]");
+const adminSalesSummary = document.querySelector("[data-admin-sales-summary]");
+const adminSalesChart = document.querySelector("[data-admin-sales-chart]");
+const adminChartNote = document.querySelector("[data-admin-chart-note]");
 const ownerHelpCopy = document.querySelector("[data-owner-help-copy]");
 
 let latestSellerProfile = null;
+let latestSalesAnalytics = {};
+let activeSalesPeriod = "day";
 
 function renderDashboardList(target, items, renderItem, emptyTitle, emptyCopy) {
   if (!target) return;
@@ -599,6 +605,119 @@ function renderAdminReviews(target, items, type) {
     .join("");
 }
 
+function formatAdminActivityDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently";
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function renderAdminCommerceNotifications(items) {
+  if (!adminCommerceNotifications) return;
+  if (!items.length) {
+    renderAdminEmpty(
+      adminCommerceNotifications,
+      "No buying or selling activity yet",
+      "New paddle submissions and completed purchases will appear here automatically."
+    );
+    return;
+  }
+
+  adminCommerceNotifications.innerHTML = items
+    .map((item) => {
+      const isPurchase = item.type === "purchase";
+      const paddleName = [item.brand, item.model].filter(Boolean).join(" ") || "a paddle";
+      const personName = isPurchase
+        ? item.buyer_name || item.buyer_email || "A buyer"
+        : item.seller_name || item.seller_email || "A seller";
+      const title = isPurchase ? "Paddle purchased" : "Paddle submitted for sale";
+      const detail = isPurchase
+        ? `${personName} bought ${paddleName} for ${formatCents(item.amount_total_cents)}.`
+        : `${personName} submitted ${paddleName} for review.`;
+      const listingId = Number(item.listing_id || 0);
+
+      return `
+        <article class="admin-notification admin-notification-${isPurchase ? "purchase" : "listing"}">
+          <span class="admin-notification-icon" aria-hidden="true">${isPurchase ? "✓" : "+"}</span>
+          <div>
+            <strong>${escapeAttr(title)}</strong>
+            <p>${escapeAttr(detail)}</p>
+            <span>${escapeAttr(formatAdminActivityDate(item.activity_at))}</span>
+          </div>
+          ${
+            listingId
+              ? `<a href="./listing.html?id=${escapeAttr(listingId)}" aria-label="Open ${escapeAttr(paddleName)} listing">Open</a>`
+              : ""
+          }
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderAdminSalesChart(period = activeSalesPeriod) {
+  if (!adminSalesChart || !adminSalesSummary) return;
+
+  const series = latestSalesAnalytics?.[period] || { buckets: [], summary: {} };
+  const buckets = series.buckets || [];
+  const summary = series.summary || {};
+  const maxBuyers = Math.max(1, ...buckets.map((bucket) => Number(bucket.buyers || 0)));
+  const periodCopy = {
+    day: "per day for the last 14 days",
+    month: "per month for the last 12 months",
+    quarter: "per quarter for the last 8 quarters",
+    year: "per year for the last 5 years",
+  };
+
+  activeSalesPeriod = period;
+  document.querySelectorAll("[data-admin-sales-period]").forEach((button) => {
+    const isActive = button.dataset.adminSalesPeriod === period;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+
+  adminSalesSummary.innerHTML = `
+    <div><strong>${escapeAttr(summary.buyers || 0)}</strong><span>Unique buyers</span></div>
+    <div><strong>${escapeAttr(summary.orders || 0)}</strong><span>Paid orders</span></div>
+    <div><strong>${escapeAttr(formatCents(summary.revenueCents || 0))}</strong><span>Order value</span></div>
+  `;
+
+  const columnCount = Math.max(1, buckets.length);
+  adminSalesChart.style.gridTemplateColumns = `repeat(${columnCount}, minmax(36px, 1fr))`;
+  adminSalesChart.style.minWidth = `${Math.max(420, columnCount * 44)}px`;
+
+  if (!buckets.length) {
+    adminSalesChart.innerHTML = '<div class="admin-chart-empty">Sales activity will appear after the first completed purchase.</div>';
+  } else {
+    adminSalesChart.innerHTML = buckets
+      .map((bucket) => {
+        const buyers = Number(bucket.buyers || 0);
+        const barHeight = buyers ? Math.max(12, Math.round((buyers / maxBuyers) * 100)) : 3;
+        const accessibleLabel = `${bucket.label}: ${buyers} unique ${buyers === 1 ? "buyer" : "buyers"}, ${bucket.orders || 0} paid ${Number(bucket.orders || 0) === 1 ? "order" : "orders"}`;
+        return `
+          <div class="admin-chart-column" title="${escapeAttr(accessibleLabel)}">
+            <span class="admin-chart-value">${escapeAttr(buyers)}</span>
+            <div class="admin-chart-track">
+              <span class="admin-chart-fill" style="height: ${barHeight}%"></span>
+            </div>
+            <span class="admin-chart-label">${escapeAttr(bucket.label)}</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  if (adminChartNote) {
+    adminChartNote.textContent = `Each bar shows unique buyers ${periodCopy[period]}.`;
+  }
+}
+
 async function loadAdminDashboard() {
   if (!ElevenZeroApp.session?.user?.isAdmin) {
     adminPanel?.classList.add("is-hidden");
@@ -642,6 +761,9 @@ async function loadAdminDashboard() {
     renderAdminTrainers(response.trainers || []);
     renderAdminReviews(adminTrainerReviews, response.trainerReviews || [], "trainerReview");
     renderAdminReviews(adminCourtReports, response.courtReports || [], "courtReport");
+    renderAdminCommerceNotifications(response.commerceNotifications || []);
+    latestSalesAnalytics = response.salesAnalytics || {};
+    renderAdminSalesChart(activeSalesPeriod);
     setAdminStatus("Owner tools loaded.", "success");
   } catch (error) {
     setAdminStatus(error.message, "error");
@@ -763,6 +885,12 @@ function bindAdminPanel() {
   });
 
   adminPanel?.addEventListener("click", async (event) => {
+    const periodButton = event.target.closest("[data-admin-sales-period]");
+    if (periodButton) {
+      renderAdminSalesChart(periodButton.dataset.adminSalesPeriod || "day");
+      return;
+    }
+
     const reviewButton = event.target.closest("[data-admin-review]");
     if (reviewButton) {
       await reviewAdminRecord(
