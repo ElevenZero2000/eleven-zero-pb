@@ -7,10 +7,12 @@ import mimetypes
 import os
 import re
 import secrets
+import smtplib
 import sqlite3
 import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +51,13 @@ GOOGLE_MAPS_MAP_ID = os.getenv("GOOGLE_MAPS_MAP_ID", "").strip()
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", GOOGLE_MAPS_API_KEY).strip()
 SHIPPO_API_KEY = os.getenv("SHIPPO_API_KEY", "").strip()
 SHIPPO_LABEL_FILE_TYPE = os.getenv("SHIPPO_LABEL_FILE_TYPE", "PDF").strip().upper() or "PDF"
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+SMTP_USE_TLS = env_flag("SMTP_USE_TLS", True)
+SMTP_USE_SSL = env_flag("SMTP_USE_SSL", False)
+EMAIL_FROM = os.getenv("EMAIL_FROM", SUPPORT_EMAIL or PRIMARY_OWNER_EMAIL).strip()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
@@ -881,6 +890,12 @@ LISTING_APPROVAL_LABELS = {
     "rejected": "Needs changes",
 }
 
+LISTING_SALE_LABELS = {
+    "available": "Available",
+    "pending": "Sale pending",
+    "sold": "Sold",
+}
+
 COURT_APPROVAL_LABELS = {
     "pending": "Pending review",
     "approved": "Live",
@@ -891,6 +906,13 @@ COURT_APPROVAL_LABELS = {
 def normalize_listing_approval_status(value: str, default: str = "pending") -> str:
     normalized = compact_whitespace(value).lower()
     if normalized in LISTING_APPROVAL_LABELS:
+        return normalized
+    return default
+
+
+def normalize_listing_sale_status(value: str, default: str = "available") -> str:
+    normalized = compact_whitespace(value).lower()
+    if normalized in LISTING_SALE_LABELS:
         return normalized
     return default
 
@@ -1300,6 +1322,281 @@ def shippo_transaction_error(transaction: dict) -> str:
     return "Shippo did not create a shipping label."
 
 
+def transactional_email_is_configured() -> bool:
+    return bool(SMTP_HOST and SMTP_PORT and SMTP_USERNAME and SMTP_PASSWORD and EMAIL_FROM)
+
+
+def order_email_row(session_id: str) -> sqlite3.Row | None:
+    with closing(connect_db()) as connection:
+        return connection.execute(
+            """
+            SELECT
+              orders.*,
+              listings.brand,
+              listings.model,
+              buyers.name AS buyer_name,
+              buyers.email AS buyer_email,
+              sellers.name AS seller_name
+            FROM orders
+            LEFT JOIN listings ON listings.id = orders.listing_id
+            LEFT JOIN users AS buyers ON buyers.id = orders.buyer_user_id
+            LEFT JOIN users AS sellers ON sellers.id = orders.seller_user_id
+            WHERE orders.stripe_checkout_session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+
+
+def send_purchase_confirmation_for_order(session_id: str) -> sqlite3.Row | None:
+    """Send one branded buyer receipt without allowing an email failure to break checkout."""
+    order_row = order_email_row(session_id)
+    if not order_row or order_row["status"] != "paid":
+        return order_row
+    if order_row["buyer_confirmation_sent_at"]:
+        return order_row
+
+    buyer_email = compact_whitespace(order_row["buyer_email"] or "")
+    if "@" not in buyer_email:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_confirmation_status = 'error',
+                    buyer_confirmation_error = 'The buyer account does not have a valid email address.'
+                WHERE stripe_checkout_session_id = ?
+                  AND buyer_confirmation_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+        return order_email_row(session_id)
+
+    if not transactional_email_is_configured():
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_confirmation_status = 'not_configured',
+                    buyer_confirmation_error = 'Transactional email is not configured.'
+                WHERE stripe_checkout_session_id = ?
+                  AND buyer_confirmation_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+        return order_email_row(session_id)
+
+    with closing(connect_db()) as connection:
+        claimed = connection.execute(
+            """
+            UPDATE orders
+            SET buyer_confirmation_status = 'sending', buyer_confirmation_error = ''
+            WHERE stripe_checkout_session_id = ?
+              AND buyer_confirmation_sent_at IS NULL
+              AND buyer_confirmation_status IN ('pending', 'error', 'not_configured')
+            """,
+            (session_id,),
+        )
+        connection.commit()
+        if claimed.rowcount != 1:
+            return order_email_row(session_id)
+
+    title = " ".join(
+        part for part in [order_row["brand"], order_row["model"]] if compact_whitespace(part)
+    ).strip() or "pickleball paddle"
+    total = int(order_row["amount_total_cents"] or 0) / 100
+    shipping = int(order_row["shipping_amount_cents"] or 0) / 100
+    address = {}
+    try:
+        address = json.loads(order_row["shipping_address_json"] or "{}")
+    except json.JSONDecodeError:
+        address = {}
+    destination = ", ".join(
+        part
+        for part in [
+            compact_whitespace(address.get("city", "")),
+            " ".join(
+                part
+                for part in [
+                    compact_whitespace(address.get("state", "")),
+                    compact_whitespace(address.get("postalCode", "")),
+                ]
+                if part
+            ),
+        ]
+        if part
+    )
+
+    message = EmailMessage()
+    message["Subject"] = f"Purchase confirmed — {title}"
+    message["From"] = f"Eleven Zero PB <{EMAIL_FROM}>"
+    message["To"] = buyer_email
+    message.set_content(
+        "\n".join(
+            [
+                f"Hi {order_row['buyer_name'] or 'there'},",
+                "",
+                f"Your purchase of {title} is confirmed.",
+                f"Order total: ${total:,.2f}",
+                f"Shipping: ${shipping:,.2f}",
+                f"Seller: {order_row['seller_name'] or 'Eleven Zero PB seller'}",
+                *([f"Shipping to: {destination}"] if destination else []),
+                "",
+                "The seller is preparing the prepaid shipping label. We will keep the order connected to your Eleven Zero PB account.",
+                f"Order reference: EZPB-{order_row['id']}",
+                "",
+                "Questions? Reply to this email and the Eleven Zero PB team will help.",
+                "",
+                "Eleven Zero PB",
+                SITE_URL or "https://11zeropb.com",
+            ]
+        )
+    )
+
+    try:
+        if SMTP_USE_SSL:
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        with server:
+            if SMTP_USE_TLS and not SMTP_USE_SSL:
+                server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(message)
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_confirmation_status = 'sent',
+                    buyer_confirmation_sent_at = ?,
+                    buyer_confirmation_error = ''
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (utc_now(), session_id),
+            )
+            connection.commit()
+    except (OSError, TypeError, ValueError, smtplib.SMTPException) as error:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_confirmation_status = 'error', buyer_confirmation_error = ?
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (compact_whitespace(str(error))[:500], session_id),
+            )
+            connection.commit()
+
+    return order_email_row(session_id)
+
+
+def mark_listing_sale_pending_for_order(session_id: str) -> None:
+    with closing(connect_db()) as connection:
+        connection.execute(
+            """
+            UPDATE listings
+            SET sale_status = 'pending'
+            WHERE id = (
+              SELECT listing_id
+              FROM orders
+              WHERE stripe_checkout_session_id = ?
+                AND (status = 'paid' OR stripe_payment_status = 'paid')
+            )
+              AND sale_status = 'available'
+            """,
+            (session_id,),
+        )
+        connection.commit()
+
+
+def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
+    """Create a fresh live Shippo rate before a deliberate label retry."""
+    with closing(connect_db()) as connection:
+        order_row = connection.execute(
+            """
+            SELECT
+              orders.*,
+              listings.brand,
+              listings.model,
+              listings.location,
+              listings.price_usd,
+              listings.shipping_mode,
+              listings.shipping_flat_usd,
+              listings.shipping_origin_zip,
+              listings.shipping_origin_street1,
+              listings.shipping_weight_oz,
+              listings.shipping_length_in,
+              listings.shipping_width_in,
+              listings.shipping_height_in,
+              listings.shipping_note,
+              sellers.name AS seller_name
+            FROM orders
+            JOIN listings ON listings.id = orders.listing_id
+            LEFT JOIN users AS sellers ON sellers.id = orders.seller_user_id
+            WHERE orders.stripe_checkout_session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+
+    if not order_row:
+        return None
+    if order_row["shippo_label_url"] or order_row["shippo_transaction_id"]:
+        return order_row
+
+    try:
+        address = json.loads(order_row["shipping_address_json"] or "{}")
+        quote = build_shipping_quote_for_listing(order_row, address)
+        if quote.get("rate_kind") != "live" or not quote.get("shippo_rate_id"):
+            raise ValueError("Shippo could not return a new live rate for this order.")
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET shippo_rate_id = ?,
+                    shippo_shipment_id = ?,
+                    shipping_carrier = ?,
+                    shipping_service = ?,
+                    shipping_status = 'pending',
+                    shipping_error = ''
+                WHERE stripe_checkout_session_id = ?
+                  AND shippo_transaction_id = ''
+                  AND shippo_label_url = ''
+                """,
+                (
+                    quote.get("shippo_rate_id", ""),
+                    quote.get("shippo_shipment_id", ""),
+                    quote.get("carrier", ""),
+                    quote.get("service", ""),
+                    session_id,
+                ),
+            )
+            connection.commit()
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET shipping_status = 'attention_needed', shipping_error = ?
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (compact_whitespace(str(error))[:500], session_id),
+            )
+            connection.commit()
+
+    with closing(connect_db()) as connection:
+        return connection.execute(
+            "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+            (session_id,),
+        ).fetchone()
+
+
+def finalize_paid_order(session_id: str) -> sqlite3.Row | None:
+    mark_listing_sale_pending_for_order(session_id)
+    order_row = purchase_shippo_label_for_order(session_id)
+    send_purchase_confirmation_for_order(session_id)
+    return order_row
+
+
 def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
     """Purchase one label after payment and persist it for the seller.
 
@@ -1524,6 +1821,7 @@ def init_database() -> None:
               shipping_note TEXT NOT NULL DEFAULT '',
               image_data_json TEXT NOT NULL DEFAULT '[]',
               approval_status TEXT NOT NULL DEFAULT 'approved',
+              sale_status TEXT NOT NULL DEFAULT 'available',
               reviewed_at TEXT,
               created_at TEXT NOT NULL
             );
@@ -1577,6 +1875,9 @@ def init_database() -> None:
               tracking_url TEXT NOT NULL DEFAULT '',
               shipping_status TEXT NOT NULL DEFAULT 'not_ready',
               shipping_error TEXT NOT NULL DEFAULT '',
+              buyer_confirmation_status TEXT NOT NULL DEFAULT 'pending',
+              buyer_confirmation_sent_at TEXT,
+              buyer_confirmation_error TEXT NOT NULL DEFAULT '',
               platform_fee_cents INTEGER NOT NULL,
               stripe_payment_status TEXT NOT NULL DEFAULT 'unpaid',
               stripe_session_status TEXT NOT NULL DEFAULT 'open',
@@ -1651,6 +1952,7 @@ def init_database() -> None:
         add_column_if_missing(connection, "listings", "shipping_note", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "listings", "image_data_json", "TEXT NOT NULL DEFAULT '[]'")
         add_column_if_missing(connection, "listings", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
+        add_column_if_missing(connection, "listings", "sale_status", "TEXT NOT NULL DEFAULT 'available'")
         add_column_if_missing(connection, "listings", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
@@ -1665,11 +1967,31 @@ def init_database() -> None:
         add_column_if_missing(connection, "orders", "tracking_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_status", "TEXT NOT NULL DEFAULT 'not_ready'")
         add_column_if_missing(connection, "orders", "shipping_error", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "buyer_confirmation_status", "TEXT NOT NULL DEFAULT 'pending'")
+        add_column_if_missing(connection, "orders", "buyer_confirmation_sent_at", "TEXT")
+        add_column_if_missing(connection, "orders", "buyer_confirmation_error", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "courts_directory", "reviewed_at", "TEXT")
+
+        # Keep older paid orders consistent with the current sale-state model.
+        # This safely repairs listings created before sale_status existed without
+        # purchasing labels or sending email during application startup.
+        connection.execute(
+            """
+            UPDATE listings
+            SET sale_status = 'pending'
+            WHERE sale_status = 'available'
+              AND id IN (
+                SELECT listing_id
+                FROM orders
+                WHERE listing_id IS NOT NULL
+                  AND (status = 'paid' OR stripe_payment_status = 'paid')
+              )
+            """
+        )
 
         listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
         trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
@@ -2182,8 +2504,15 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
     approval_status = normalize_listing_approval_status(
         row_value(row, "approval_status", "approved"), default="approved"
     )
+    sale_status = normalize_listing_sale_status(
+        row_value(row, "sale_status", "available"), default="available"
+    )
 
-    if approval_status == "pending":
+    if sale_status == "pending":
+        reason = "A buyer has purchased this paddle. The sale is pending final confirmation."
+    elif sale_status == "sold":
+        reason = "This paddle has been sold."
+    elif approval_status == "pending":
         reason = "This listing is waiting for Eleven Zero PB review before it can go live."
     elif approval_status == "rejected":
         reason = "This listing is paused and needs seller updates before it can go live."
@@ -2204,6 +2533,7 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
         "priceCents": max(price_usd, 0) * 100,
         "available": bool(
             approval_status == "approved"
+            and sale_status == "available"
             and seller_user_id
             and seller_profile["readyForPayouts"]
             and stripe_is_configured()
@@ -2226,6 +2556,9 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
     approval_status = normalize_listing_approval_status(
         row_value(row, "approval_status", "approved"), default="approved"
     )
+    sale_status = normalize_listing_sale_status(
+        row_value(row, "sale_status", "available"), default="available"
+    )
 
     return {
         "id": row["id"],
@@ -2243,6 +2576,8 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         "created_at": row["created_at"],
         "approval_status": approval_status,
         "approval_label": LISTING_APPROVAL_LABELS.get(approval_status, "Pending review"),
+        "sale_status": sale_status,
+        "sale_label": LISTING_SALE_LABELS.get(sale_status, "Available"),
         "reviewed_at": row_value(row, "reviewed_at"),
         "seller_name": row["seller_name"],
         "shipping": shipping_policy,
@@ -2627,6 +2962,20 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_admin_listing_review(body)
             return
 
+        if parsed.path == "/api/admin/listings/sale-status":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_listing_sale_status(body)
+            return
+
+        if parsed.path == "/api/admin/orders/send-confirmation":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_send_order_confirmation(body)
+            return
+
         if parsed.path == "/api/admin/listings/delete":
             user = self.require_user()
             if not self.require_admin(user):
@@ -2695,6 +3044,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/shipping/quote":
             self.handle_shipping_quote(body)
+            return
+
+        if parsed.path == "/api/orders/shipping/retry":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_retry_shipping_label(user, body)
             return
 
         if parsed.path == "/api/checkout/create-session":
@@ -2805,7 +3161,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 )
                 connection.commit()
             if order_status == "paid":
-                purchase_shippo_label_for_order(session_id)
+                finalize_paid_order(session_id)
         elif event_type in {"checkout.session.expired", "checkout.session.async_payment_failed"}:
             with closing(connect_db()) as connection:
                 connection.execute(
@@ -2852,6 +3208,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_note,
                   listings.image_data_json,
                   listings.approval_status,
+                  listings.sale_status,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -2898,6 +3255,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_note,
                   listings.image_data_json,
                   listings.approval_status,
+                  listings.sale_status,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -3103,6 +3461,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_note,
                   listings.image_data_json,
                   listings.approval_status,
+                  listings.sale_status,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -3303,6 +3662,22 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         approval_status = normalize_listing_approval_status(
             row_value(listing_row, "approval_status", "approved"), default="approved"
         )
+        sale_status = normalize_listing_sale_status(
+            row_value(listing_row, "sale_status", "available"), default="available"
+        )
+
+        if sale_status != "available":
+            self.send_json(
+                {
+                    "error": (
+                        "This paddle has a sale pending and is no longer available."
+                        if sale_status == "pending"
+                        else "This paddle has already been sold."
+                    )
+                },
+                status=HTTPStatus.CONFLICT,
+            )
+            return
 
         if approval_status == "pending":
             self.send_json(
@@ -3634,7 +4009,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             connection.commit()
 
         if order_status == "paid":
-            purchase_shippo_label_for_order(session_id)
+            finalize_paid_order(session_id)
             order_row = self.fetch_order_row(session_id) or order_row
 
         listing_title = " ".join(part for part in [order_row["brand"], order_row["model"]] if part).strip()
@@ -3658,6 +4033,77 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "trackingUrl": order_row["tracking_url"],
                     "platformFeeCents": order_row["platform_fee_cents"],
                 },
+            }
+        )
+
+    def handle_retry_shipping_label(self, user: dict, body: dict):
+        session_id = compact_whitespace(body.get("sessionId", ""))
+        if not session_id.startswith("cs_"):
+            self.send_json(
+                {"error": "Choose a valid paid order before retrying the shipping label."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        order_row = self.fetch_order_row(session_id)
+        if not order_row:
+            self.send_json({"error": "That order could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        is_admin = bool(user.get("isAdmin"))
+        if int(order_row["seller_user_id"] or 0) != int(user["id"]) and not is_admin:
+            self.send_json(
+                {"error": "Only this order’s seller or the Eleven Zero PB owner can retry its label."},
+                status=HTTPStatus.FORBIDDEN,
+            )
+            return
+
+        if order_row["status"] != "paid" and order_row["stripe_payment_status"] != "paid":
+            self.send_json(
+                {"error": "The payment must be confirmed before a prepaid label can be purchased."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
+        if order_row["shippo_label_url"]:
+            self.send_json(
+                {
+                    "ok": True,
+                    "message": "This prepaid label is already ready.",
+                    "shippingStatus": order_row["shipping_status"],
+                    "labelUrl": order_row["shippo_label_url"],
+                    "trackingNumber": order_row["tracking_number"],
+                    "trackingUrl": order_row["tracking_url"],
+                }
+            )
+            return
+
+        refreshed_order = refresh_shippo_rate_for_order(session_id)
+        if refreshed_order and refreshed_order["shipping_status"] == "pending":
+            refreshed_order = purchase_shippo_label_for_order(session_id)
+        refreshed_order = refreshed_order or self.fetch_order_row(session_id)
+
+        if not refreshed_order or refreshed_order["shipping_status"] != "label_ready":
+            self.send_json(
+                {
+                    "error": (
+                        compact_whitespace(row_value(refreshed_order, "shipping_error", ""))
+                        or "Shippo could not create the prepaid label. Please check the seller address and try again."
+                    ),
+                    "shippingStatus": row_value(refreshed_order, "shipping_status", "attention_needed"),
+                },
+                status=HTTPStatus.BAD_GATEWAY,
+            )
+            return
+
+        self.send_json(
+            {
+                "ok": True,
+                "message": "The prepaid shipping label is ready to print.",
+                "shippingStatus": refreshed_order["shipping_status"],
+                "labelUrl": refreshed_order["shippo_label_url"],
+                "trackingNumber": refreshed_order["tracking_number"],
+                "trackingUrl": refreshed_order["tracking_url"],
             }
         )
 
@@ -3705,6 +4151,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   price_usd,
                   location,
                   approval_status,
+                  sale_status,
                   reviewed_at,
                   created_at
                 FROM listings
@@ -3809,7 +4256,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 SELECT
                   orders.id,
                   orders.listing_id,
+                  orders.stripe_checkout_session_id,
                   orders.amount_total_cents,
+                  orders.shipping_status,
+                  orders.shipping_error,
+                  orders.buyer_confirmation_status,
+                  orders.buyer_confirmation_error,
+                  orders.buyer_confirmation_sent_at,
                   COALESCE(orders.completed_at, orders.created_at) AS activity_at,
                   listings.brand,
                   listings.model,
@@ -3835,6 +4288,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.model,
                   listings.price_usd,
                   listings.approval_status,
+                  listings.sale_status,
                   listings.created_at AS activity_at,
                   users.name AS seller_name,
                   users.email AS seller_email
@@ -3870,6 +4324,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_note,
                   listings.image_data_json,
                   listings.approval_status,
+                  listings.sale_status,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -4128,6 +4583,109 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         ).strip() or "Listing"
         status_label = LISTING_APPROVAL_LABELS.get(requested_status, "Pending review")
         self.send_json({"ok": True, "message": f"{title} is now marked as {status_label.lower()}."})
+
+    def handle_admin_listing_sale_status(self, body: dict):
+        listing_id = int(body.get("id") or 0)
+        requested_status = normalize_listing_sale_status(body.get("status", ""), default="")
+
+        if listing_id <= 0:
+            self.send_json(
+                {"error": "Choose a valid listing to update."}, status=HTTPStatus.BAD_REQUEST
+            )
+            return
+
+        if requested_status not in LISTING_SALE_LABELS:
+            self.send_json(
+                {"error": "Choose available, sale pending, or sold for this listing."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            listing_row = connection.execute(
+                "SELECT brand, model FROM listings WHERE id = ?", (listing_id,)
+            ).fetchone()
+            if not listing_row:
+                self.send_json({"error": "Listing not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+            connection.execute(
+                "UPDATE listings SET sale_status = ? WHERE id = ?",
+                (requested_status, listing_id),
+            )
+            connection.commit()
+
+        title = " ".join(
+            part for part in [listing_row["brand"], listing_row["model"]] if compact_whitespace(part)
+        ).strip() or "Listing"
+        self.send_json(
+            {
+                "ok": True,
+                "message": f"{title} is now marked {LISTING_SALE_LABELS[requested_status].lower()}.",
+            }
+        )
+
+    def handle_admin_send_order_confirmation(self, body: dict):
+        session_id = compact_whitespace(body.get("sessionId", ""))
+        if not session_id.startswith("cs_"):
+            self.send_json(
+                {"error": "Choose a valid paid order before sending its confirmation."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        order_row = order_email_row(session_id)
+        if not order_row:
+            self.send_json({"error": "That order could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+        if order_row["status"] != "paid" and order_row["stripe_payment_status"] != "paid":
+            self.send_json(
+                {"error": "The payment must be confirmed before sending a purchase confirmation."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
+        if order_row["buyer_confirmation_sent_at"]:
+            self.send_json({"ok": True, "message": "The buyer confirmation was already sent."})
+            return
+
+        if not transactional_email_is_configured():
+            self.send_json(
+                {
+                    "error": (
+                        "Buyer email is ready, but transactional email is not configured. "
+                        "Add the Eleven Zero PB Gmail app password in Render first."
+                    )
+                },
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_confirmation_status = 'pending', buyer_confirmation_error = ''
+                WHERE stripe_checkout_session_id = ?
+                  AND buyer_confirmation_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+
+        result = send_purchase_confirmation_for_order(session_id)
+        if result and result["buyer_confirmation_status"] == "sent":
+            self.send_json({"ok": True, "message": "Purchase confirmation sent to the buyer."})
+            return
+
+        self.send_json(
+            {
+                "error": (
+                    compact_whitespace(row_value(result, "buyer_confirmation_error", ""))
+                    or "The purchase confirmation could not be sent."
+                )
+            },
+            status=HTTPStatus.BAD_GATEWAY,
+        )
 
     def handle_admin_listing_delete(self, body: dict):
         listing_id = int(body.get("id") or 0)
@@ -4752,6 +5310,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.shipping_note,
                   listings.image_data_json,
                   listings.approval_status,
+                  listings.sale_status,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
