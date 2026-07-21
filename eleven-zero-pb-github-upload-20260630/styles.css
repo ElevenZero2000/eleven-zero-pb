@@ -165,11 +165,31 @@
   margin-top: 4px;
 }
 
-.seller-sale-actions a {
+.seller-sale-actions a,
+.seller-sale-retry {
   color: var(--ink);
   font-weight: 800;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.seller-sale-retry {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.seller-sale-retry:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.seller-sale-error {
+  max-width: 62ch;
+  color: #8b2f1f !important;
+  font-weight: 650;
 }
 
 @media (max-width: 640px) {
@@ -3001,6 +3021,25 @@ body[data-nav="sell"] .feature-photo-copy strong {
 .listing-status-neutral {
   background: rgba(18, 18, 18, 0.08);
   color: rgba(18, 18, 18, 0.72);
+}
+
+.listing-sale-overlay {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  color: white;
+  background: rgba(3, 52, 27, 0.92);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  font-size: 0.73rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .listing-status-copy {
@@ -6039,6 +6078,40 @@ body[data-nav="sell"] .seller-file-dropzone {
   font-weight: 800;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.admin-notification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.admin-notification-actions button,
+.admin-notification-state {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid rgba(3, 45, 23, 0.14);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--forest);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-notification-state.is-ready {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(8, 233, 90, 0.1);
+  border-color: rgba(8, 233, 90, 0.28);
+  cursor: default;
+}
+
+.admin-notification .admin-notification-error {
+  color: #a13a24;
+  font-weight: 700;
 }
 
 .admin-period-switcher {
