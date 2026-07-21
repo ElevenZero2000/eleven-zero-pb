@@ -22,6 +22,121 @@
   --body: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
+/* Managed marketplace shipping */
+.seller-managed-shipping {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(3, 45, 23, 0.12);
+  border-radius: 24px;
+  background: rgba(3, 45, 23, 0.045);
+}
+
+.seller-managed-shipping-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.seller-managed-shipping-copy strong {
+  display: block;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.seller-managed-shipping-copy p,
+.seller-managed-shipping-note,
+.seller-managed-shipping small {
+  color: var(--muted);
+}
+
+.seller-managed-shipping-copy p,
+.seller-managed-shipping-note {
+  margin: 5px 0 0;
+  line-height: 1.55;
+}
+
+.seller-managed-shipping-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border-radius: 50%;
+  color: #00331b;
+  background: #00ed64;
+  font-weight: 900;
+}
+
+.seller-managed-shipping small {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.seller-managed-shipping-note {
+  padding-top: 14px;
+  border-top: 1px solid rgba(3, 45, 23, 0.1);
+  font-size: 0.86rem;
+}
+
+.account-sales-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.account-sales-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-sales-details summary::after {
+  content: "+";
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  background: var(--ink);
+  font-size: 1.25rem;
+}
+
+.account-sales-details[open] summary::after {
+  content: "−";
+}
+
+.account-sales-details .list-stack {
+  margin-top: 20px;
+}
+
+.seller-sale-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.seller-sale-actions a {
+  color: var(--ink);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .seller-managed-shipping {
+    padding: 18px;
+    border-radius: 20px;
+  }
+}
+
 /* Simplified trainers directory */
 .trainers-page .trainer-simple-main {
   display: grid;

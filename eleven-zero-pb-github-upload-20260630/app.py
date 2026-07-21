@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import re
 import secrets
 import sqlite3
+import time
 from contextlib import closing
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -46,11 +48,20 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 GOOGLE_MAPS_MAP_ID = os.getenv("GOOGLE_MAPS_MAP_ID", "").strip()
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", GOOGLE_MAPS_API_KEY).strip()
 SHIPPO_API_KEY = os.getenv("SHIPPO_API_KEY", "").strip()
+SHIPPO_LABEL_FILE_TYPE = os.getenv("SHIPPO_LABEL_FILE_TYPE", "PDF").strip().upper() or "PDF"
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 STRIPE_COUNTRY = os.getenv("STRIPE_COUNTRY", "US").strip().upper() or "US"
 STRIPE_PLATFORM_FEE_PERCENT = float(os.getenv("PLATFORM_FEE_PERCENT", "8.5"))
 STRIPE_API_BASE = "https://api.stripe.com/v1"
+
+DEFAULT_PADDLE_PACKAGE = {
+    "weight_oz": 24.0,
+    "length_in": 20.0,
+    "width_in": 10.0,
+    "height_in": 4.0,
+}
 
 US_STATE_NAMES = {
     "AL": "Alabama",
@@ -367,10 +378,22 @@ def shipping_policy_from_row(row: sqlite3.Row | dict | None) -> dict:
     flat_usd = int(row_value(row, "shipping_flat_usd", 0) or 0)
     origin_zip = parse_zip_code(row_value(row, "shipping_origin_zip", ""))
     origin_street1 = compact_whitespace(row_value(row, "shipping_origin_street1", ""))
-    weight_oz = parse_shipping_weight_oz(row_value(row, "shipping_weight_oz", ""))
-    length_in = parse_shipping_dimension_in(row_value(row, "shipping_length_in", ""))
-    width_in = parse_shipping_dimension_in(row_value(row, "shipping_width_in", ""))
-    height_in = parse_shipping_dimension_in(row_value(row, "shipping_height_in", ""))
+    weight_oz = (
+        parse_shipping_weight_oz(row_value(row, "shipping_weight_oz", ""))
+        or DEFAULT_PADDLE_PACKAGE["weight_oz"]
+    )
+    length_in = (
+        parse_shipping_dimension_in(row_value(row, "shipping_length_in", ""))
+        or DEFAULT_PADDLE_PACKAGE["length_in"]
+    )
+    width_in = (
+        parse_shipping_dimension_in(row_value(row, "shipping_width_in", ""))
+        or DEFAULT_PADDLE_PACKAGE["width_in"]
+    )
+    height_in = (
+        parse_shipping_dimension_in(row_value(row, "shipping_height_in", ""))
+        or DEFAULT_PADDLE_PACKAGE["height_in"]
+    )
     note = compact_whitespace(row_value(row, "shipping_note", ""))
 
     if mode == "free":
@@ -382,7 +405,7 @@ def shipping_policy_from_row(row: sqlite3.Row | dict | None) -> dict:
     else:
         label = "Calculated shipping at checkout"
         explanation = (
-            "Buyer enters the delivery address first, then Eleven Zero PB estimates the shipped total."
+            "Buyer enters the delivery address first, then Eleven Zero PB calculates the carrier rate."
         )
 
     return {
@@ -402,7 +425,9 @@ def shipping_policy_from_row(row: sqlite3.Row | dict | None) -> dict:
         "note": note,
         "label": label,
         "explanation": explanation,
-        "carrierReady": bool(origin_zip and weight_oz and length_in and width_in and height_in),
+        "carrierReady": bool(
+            origin_zip and origin_street1 and weight_oz and length_in and width_in and height_in
+        ),
     }
 
 
@@ -478,6 +503,7 @@ def build_shippo_rate_quote_for_listing(
         if best_rate is None or amount_value < best_rate["amount_value"]:
             best_rate = {
                 "amount_value": amount_value,
+                "object_id": str(rate.get("object_id") or ""),
                 "provider": str(rate.get("provider") or "Carrier"),
                 "service_name": (
                     str(rate.get("servicelevel_name") or "").strip()
@@ -514,6 +540,10 @@ def build_shippo_rate_quote_for_listing(
         "is_estimate": False,
         "provider_label": f"{best_rate['provider']} live rate",
         "policy_label": shipping_policy["label"],
+        "shippo_rate_id": best_rate["object_id"],
+        "shippo_shipment_id": str(shipment.get("object_id") or ""),
+        "carrier": best_rate["provider"],
+        "service": best_rate["service_name"],
     }
 
 
@@ -1127,6 +1157,112 @@ def shippo_request(path: str, payload: dict) -> dict:
         raise ValueError("Shippo could not be reached right now.") from exc
 
 
+def shippo_transaction_error(transaction: dict) -> str:
+    messages = transaction.get("messages") or []
+    if isinstance(messages, list):
+        text = "; ".join(
+            compact_whitespace(
+                item.get("text") if isinstance(item, dict) else str(item)
+            )
+            for item in messages
+            if item
+        )
+        if text:
+            return text
+    return "Shippo did not create a shipping label."
+
+
+def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
+    """Purchase one label after payment and persist it for the seller.
+
+    The conditional update claims the order before the external request so repeated
+    checkout-status calls do not purchase duplicate labels.
+    """
+    with closing(connect_db()) as connection:
+        order_row = connection.execute(
+            "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if not order_row:
+            return None
+        if order_row["shippo_label_url"] or order_row["shippo_transaction_id"]:
+            return order_row
+        if not order_row["shippo_rate_id"]:
+            return order_row
+
+        claimed = connection.execute(
+            """
+            UPDATE orders
+            SET shipping_status = 'purchasing', shipping_error = ''
+            WHERE stripe_checkout_session_id = ?
+              AND shippo_transaction_id = ''
+              AND shippo_label_url = ''
+              AND shipping_status = 'pending'
+            """,
+            (session_id,),
+        )
+        connection.commit()
+        if claimed.rowcount != 1:
+            return connection.execute(
+                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+                (session_id,),
+            ).fetchone()
+
+    try:
+        transaction = shippo_request(
+            "/transactions/",
+            {
+                "rate": order_row["shippo_rate_id"],
+                "label_file_type": SHIPPO_LABEL_FILE_TYPE,
+                "async": False,
+                "metadata": f"Eleven Zero PB order {order_row['id']}",
+            },
+        )
+        label_url = str(transaction.get("label_url") or "").strip()
+        transaction_id = str(transaction.get("object_id") or "").strip()
+        tracking_number = str(transaction.get("tracking_number") or "").strip()
+        tracking_url = str(transaction.get("tracking_url_provider") or "").strip()
+        transaction_status = str(transaction.get("status") or "").strip().upper()
+        if transaction_status == "ERROR" or not label_url:
+            raise ValueError(shippo_transaction_error(transaction))
+
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET
+                  shippo_transaction_id = ?,
+                  shippo_label_url = ?,
+                  tracking_number = ?,
+                  tracking_url = ?,
+                  shipping_status = 'label_ready',
+                  shipping_error = ''
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (transaction_id, label_url, tracking_number, tracking_url, session_id),
+            )
+            connection.commit()
+            return connection.execute(
+                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+                (session_id,),
+            ).fetchone()
+    except (RuntimeError, ValueError) as error:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET shipping_status = 'attention_needed', shipping_error = ?
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (compact_whitespace(str(error))[:500], session_id),
+            )
+            connection.commit()
+            return connection.execute(
+                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+                (session_id,),
+            ).fetchone()
+
+
 def google_places_is_configured() -> bool:
     return bool(GOOGLE_PLACES_API_KEY)
 
@@ -1303,6 +1439,16 @@ def init_database() -> None:
               shipping_amount_cents INTEGER NOT NULL DEFAULT 0,
               shipping_label TEXT NOT NULL DEFAULT '',
               shipping_address_json TEXT NOT NULL DEFAULT '{}',
+              shippo_rate_id TEXT NOT NULL DEFAULT '',
+              shippo_shipment_id TEXT NOT NULL DEFAULT '',
+              shippo_transaction_id TEXT NOT NULL DEFAULT '',
+              shippo_label_url TEXT NOT NULL DEFAULT '',
+              shipping_carrier TEXT NOT NULL DEFAULT '',
+              shipping_service TEXT NOT NULL DEFAULT '',
+              tracking_number TEXT NOT NULL DEFAULT '',
+              tracking_url TEXT NOT NULL DEFAULT '',
+              shipping_status TEXT NOT NULL DEFAULT 'not_ready',
+              shipping_error TEXT NOT NULL DEFAULT '',
               platform_fee_cents INTEGER NOT NULL,
               stripe_payment_status TEXT NOT NULL DEFAULT 'unpaid',
               stripe_session_status TEXT NOT NULL DEFAULT 'open',
@@ -1381,6 +1527,16 @@ def init_database() -> None:
         add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
+        add_column_if_missing(connection, "orders", "shippo_rate_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shippo_shipment_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shippo_transaction_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shippo_label_url", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shipping_carrier", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shipping_service", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "tracking_number", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "tracking_url", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "shipping_status", "TEXT NOT NULL DEFAULT 'not_ready'")
+        add_column_if_missing(connection, "orders", "shipping_error", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
@@ -1982,7 +2138,9 @@ def site_config_payload() -> dict:
         "googleMapsMapId": GOOGLE_MAPS_MAP_ID,
         "googlePlacesSearchEnabled": google_places_is_configured(),
         "shippoConfigured": bool(SHIPPO_API_KEY),
+        "managedShippingEnabled": bool(SHIPPO_API_KEY),
         "stripeConfigured": stripe_is_configured(),
+        "stripeWebhookConfigured": bool(STRIPE_WEBHOOK_SECRET),
         "stripeMode": stripe_mode(),
         "stripePublishableKeyPresent": bool(STRIPE_PUBLISHABLE_KEY),
         "platformFeePercent": STRIPE_PLATFORM_FEE_PERCENT,
@@ -2277,6 +2435,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_json({"error": "Unknown API route."}, status=HTTPStatus.NOT_FOUND)
 
     def handle_api_post(self, parsed):
+        if parsed.path == "/api/stripe/webhook":
+            self.handle_stripe_webhook()
+            return
+
         try:
             body = self.json_body()
         except ValueError:
@@ -2429,6 +2591,111 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_json({"error": "Unknown API route."}, status=HTTPStatus.NOT_FOUND)
+
+    def handle_stripe_webhook(self):
+        if not STRIPE_WEBHOOK_SECRET:
+            self.send_json(
+                {"error": "Stripe webhooks are not configured yet."},
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(content_length) if content_length else b""
+        signature_header = self.headers.get("Stripe-Signature", "")
+        signature_parts: dict[str, list[str]] = {}
+        for part in signature_header.split(","):
+            key, separator, value = part.partition("=")
+            if separator:
+                signature_parts.setdefault(key.strip(), []).append(value.strip())
+
+        timestamp_raw = (signature_parts.get("t") or [""])[0]
+        signatures = signature_parts.get("v1") or []
+        try:
+            timestamp = int(timestamp_raw)
+        except ValueError:
+            timestamp = 0
+
+        signed_payload = f"{timestamp}.".encode("utf-8") + raw_body
+        expected_signature = hmac.new(
+            STRIPE_WEBHOOK_SECRET.encode("utf-8"),
+            signed_payload,
+            hashlib.sha256,
+        ).hexdigest()
+        signature_valid = any(
+            secrets.compare_digest(expected_signature, signature) for signature in signatures
+        )
+        timestamp_valid = timestamp > 0 and abs(int(time.time()) - timestamp) <= 300
+        if not signature_valid or not timestamp_valid:
+            self.send_json(
+                {"error": "Stripe webhook signature could not be verified."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        try:
+            event = json.loads(raw_body.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json({"error": "Invalid Stripe webhook body."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        event_type = str(event.get("type") or "")
+        session = (event.get("data") or {}).get("object") or {}
+        session_id = str(session.get("id") or "")
+        if not session_id.startswith("cs_"):
+            self.send_json({"received": True})
+            return
+
+        if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
+            payment_status = str(session.get("payment_status") or "paid")
+            order_status = "paid" if payment_status == "paid" else "processing"
+            completed_at = utc_now() if order_status == "paid" else None
+            with closing(connect_db()) as connection:
+                connection.execute(
+                    """
+                    UPDATE orders
+                    SET
+                      stripe_payment_intent_id = ?,
+                      stripe_payment_status = ?,
+                      stripe_session_status = ?,
+                      status = ?,
+                      completed_at = CASE
+                        WHEN ? IS NOT NULL THEN COALESCE(completed_at, ?)
+                        ELSE completed_at
+                      END
+                    WHERE stripe_checkout_session_id = ?
+                    """,
+                    (
+                        str(session.get("payment_intent") or ""),
+                        payment_status,
+                        str(session.get("status") or "complete"),
+                        order_status,
+                        completed_at,
+                        completed_at,
+                        session_id,
+                    ),
+                )
+                connection.commit()
+            if order_status == "paid":
+                purchase_shippo_label_for_order(session_id)
+        elif event_type in {"checkout.session.expired", "checkout.session.async_payment_failed"}:
+            with closing(connect_db()) as connection:
+                connection.execute(
+                    """
+                    UPDATE orders
+                    SET stripe_payment_status = ?, stripe_session_status = ?, status = ?
+                    WHERE stripe_checkout_session_id = ?
+                    """,
+                    (
+                        str(session.get("payment_status") or "unpaid"),
+                        str(session.get("status") or "expired"),
+                        "expired" if event_type == "checkout.session.expired" else "payment_failed",
+                        session_id,
+                    ),
+                )
+                connection.commit()
+
+        self.send_json({"received": True})
 
     def fetch_listings(self) -> list[dict]:
         with closing(connect_db()) as connection:
@@ -2970,10 +3237,26 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         shipping_cents = int(shipping_quote["amount_cents"])
         final_total_cents = total_cents + shipping_cents
 
+        if (
+            shipping_quote.get("rate_kind") == "estimate"
+            or not shipping_quote.get("shippo_rate_id")
+        ):
+            self.send_json(
+                {
+                    "error": (
+                        "Prepaid shipping is temporarily unavailable for this paddle. "
+                        "Please try again shortly or contact Eleven Zero PB support."
+                    )
+                },
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
         platform_fee_cents = min(
             total_cents - 1,
             max(0, int(round(total_cents * STRIPE_PLATFORM_FEE_PERCENT / 100))),
         )
+        stripe_application_fee_cents = platform_fee_cents + shipping_cents
 
         product_name = f"{listing['brand']} {listing['model']}".strip()
         payload = {
@@ -2990,9 +3273,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "line_items[1][quantity]": "1",
             "line_items[1][price_data][currency]": "usd",
             "line_items[1][price_data][unit_amount]": str(shipping_cents),
-            "line_items[1][price_data][product_data][name]": "Estimated shipping",
+            "line_items[1][price_data][product_data][name]": "Prepaid shipping",
             "line_items[1][price_data][product_data][description]": shipping_quote["summary"],
-            "payment_intent_data[application_fee_amount]": str(platform_fee_cents),
+            # Keep the marketplace commission plus the buyer-paid shipping amount on
+            # Eleven Zero. The product proceeds still route to the connected seller.
+            "payment_intent_data[application_fee_amount]": str(stripe_application_fee_cents),
             "payment_intent_data[transfer_data][destination]": seller_profile["connectedAccountId"],
             "shipping_address_collection[allowed_countries][0]": "US",
             "phone_number_collection[enabled]": "true",
@@ -3032,12 +3317,17 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   shipping_amount_cents,
                   shipping_label,
                   shipping_address_json,
+                  shippo_rate_id,
+                  shippo_shipment_id,
+                  shipping_carrier,
+                  shipping_service,
+                  shipping_status,
                   platform_fee_cents,
                   stripe_payment_status,
                   stripe_session_status,
                   status,
                   created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     listing["id"],
@@ -3049,6 +3339,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     shipping_cents,
                     shipping_quote["label"],
                     json.dumps(shipping_quote["address"], separators=(",", ":")),
+                    shipping_quote.get("shippo_rate_id", ""),
+                    shipping_quote.get("shippo_shipment_id", ""),
+                    shipping_quote.get("carrier", ""),
+                    shipping_quote.get("service", ""),
+                    "pending" if shipping_quote.get("shippo_rate_id") else "manual",
                     platform_fee_cents,
                     str(session.get("payment_status") or "unpaid"),
                     str(session.get("status") or "open"),
@@ -3072,6 +3367,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "fee": {
                     "platformFeePercent": STRIPE_PLATFORM_FEE_PERCENT,
                     "platformFeeCents": platform_fee_cents,
+                    "shippingHeldByPlatformCents": shipping_cents,
                 },
                 "shipping": {
                     "amountCents": shipping_cents,
@@ -3209,6 +3505,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             connection.commit()
 
+        if order_status == "paid":
+            purchase_shippo_label_for_order(session_id)
+            order_row = self.fetch_order_row(session_id) or order_row
+
         listing_title = " ".join(part for part in [order_row["brand"], order_row["model"]] if part).strip()
 
         self.send_json(
@@ -3225,6 +3525,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "amountTotalCents": order_row["amount_total_cents"],
                     "shippingAmountCents": order_row["shipping_amount_cents"],
                     "shippingLabel": order_row["shipping_label"],
+                    "shippingStatus": order_row["shipping_status"],
+                    "trackingNumber": order_row["tracking_number"],
+                    "trackingUrl": order_row["tracking_url"],
                     "platformFeeCents": order_row["platform_fee_cents"],
                 },
             }
@@ -3293,6 +3596,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """,
                 (user_id,),
             ).fetchall()
+            recent_sales = connection.execute(
+                """
+                SELECT
+                  orders.stripe_checkout_session_id,
+                  orders.amount_total_cents,
+                  orders.shipping_amount_cents,
+                  orders.shipping_carrier,
+                  orders.shipping_service,
+                  orders.shippo_label_url,
+                  orders.tracking_number,
+                  orders.tracking_url,
+                  orders.shipping_status,
+                  orders.shipping_error,
+                  orders.status,
+                  orders.created_at,
+                  listings.brand,
+                  listings.model
+                FROM orders
+                LEFT JOIN listings ON listings.id = orders.listing_id
+                WHERE orders.seller_user_id = ?
+                ORDER BY orders.created_at DESC
+                LIMIT 10
+                """,
+                (user_id,),
+            ).fetchall()
 
         return {
             "user": serialize_user(user),
@@ -3304,6 +3632,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             },
             "recentListings": [row_to_dict(row) for row in recent_listings],
             "recentTrainers": [row_to_dict(row) for row in recent_trainers],
+            "recentSales": [row_to_dict(row) for row in recent_sales],
         }
 
     def build_admin_dashboard(self) -> dict:
@@ -4017,26 +4346,34 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
         images = normalize_listing_image_payload(body.get("images", []))
         price_usd = parse_whole_dollar_amount(body.get("price"))
-        shipping_mode = str(body.get("shippingMode", "")).strip().lower() or "calculated"
+        shipping_mode = "calculated"
         shipping_flat_usd = parse_whole_dollar_amount(body.get("shippingFlat"))
         shipping_origin_zip_raw = str(body.get("shippingOriginZip", "")).strip()
         shipping_origin_zip = parse_zip_code(shipping_origin_zip_raw)
         shipping_origin_street1 = compact_whitespace(body.get("shippingOriginStreet1", ""))
         shipping_weight_raw = str(body.get("shippingWeightOz", "")).strip()
         shipping_weight_oz = (
-            parse_shipping_weight_oz(shipping_weight_raw) if shipping_weight_raw else 24.0
+            parse_shipping_weight_oz(shipping_weight_raw)
+            if shipping_weight_raw
+            else DEFAULT_PADDLE_PACKAGE["weight_oz"]
         )
         shipping_length_raw = str(body.get("shippingLengthIn", "")).strip()
         shipping_width_raw = str(body.get("shippingWidthIn", "")).strip()
         shipping_height_raw = str(body.get("shippingHeightIn", "")).strip()
         shipping_length_in = (
-            parse_shipping_dimension_in(shipping_length_raw) if shipping_length_raw else None
+            parse_shipping_dimension_in(shipping_length_raw)
+            if shipping_length_raw
+            else DEFAULT_PADDLE_PACKAGE["length_in"]
         )
         shipping_width_in = (
-            parse_shipping_dimension_in(shipping_width_raw) if shipping_width_raw else None
+            parse_shipping_dimension_in(shipping_width_raw)
+            if shipping_width_raw
+            else DEFAULT_PADDLE_PACKAGE["width_in"]
         )
         shipping_height_in = (
-            parse_shipping_dimension_in(shipping_height_raw) if shipping_height_raw else None
+            parse_shipping_dimension_in(shipping_height_raw)
+            if shipping_height_raw
+            else DEFAULT_PADDLE_PACKAGE["height_in"]
         )
         shipping_note = str(body.get("shippingNote", "")).strip()
 
@@ -4057,13 +4394,6 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if thickness_raw and thickness_mm is None:
             self.send_json(
                 {"error": "Add a valid paddle thickness in millimeters if you include it."},
-                status=HTTPStatus.BAD_REQUEST,
-            )
-            return
-
-        if shipping_mode not in {"calculated", "flat", "free"}:
-            self.send_json(
-                {"error": "Choose calculated, flat, or free shipping for this listing."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -4101,6 +4431,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if shipping_mode == "calculated" and not shipping_origin_zip:
             self.send_json(
                 {"error": "Add the shipping origin ZIP code so buyer shipping can be calculated better."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if shipping_mode == "calculated" and not shipping_origin_street1:
+            self.send_json(
+                {"error": "Add the street address the paddle will ship from. It stays private and is used only for the prepaid label."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
