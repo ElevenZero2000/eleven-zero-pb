@@ -202,6 +202,49 @@ class ManagedShippingTests(unittest.TestCase):
         self.assertEqual(second["shipping_status"], "attention_needed")
         self.assertEqual(second["shipping_error"], "Carrier rejected this parcel.")
 
+    def test_listing_submission_requires_ready_stripe_payouts(self):
+        captured = {}
+
+        class StubHandler:
+            def fetch_seller_profile(self, user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": False,
+                        "connectedAccountId": "",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(StubHandler(), {"id": 42}, {})
+
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertEqual(captured["payload"]["code"], "seller_payouts_required")
+        self.assertEqual(captured["payload"]["actionUrl"], "./account.html#seller-payouts")
+
+    def test_ready_stripe_seller_reaches_listing_validation(self):
+        captured = {}
+
+        class StubHandler:
+            def fetch_seller_profile(self, user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(StubHandler(), {"id": 42}, {})
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertNotEqual(captured["payload"].get("code"), "seller_payouts_required")
+
 
 if __name__ == "__main__":
     unittest.main()
