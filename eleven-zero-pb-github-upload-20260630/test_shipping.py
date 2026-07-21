@@ -418,8 +418,81 @@ class ManagedShippingTests(unittest.TestCase):
         self.assertEqual(len(sent_messages), 1)
         self.assertEqual(first["buyer_confirmation_status"], "sent")
         self.assertEqual(second["buyer_confirmation_status"], "sent")
-        self.assertIn("Purchase confirmed", sent_messages[0]["Subject"])
-        self.assertIn("JOOLA Perseus", sent_messages[0].get_content())
+        self.assertIn("Order confirmed", sent_messages[0]["Subject"])
+        plain_part = sent_messages[0].get_body(preferencelist=("plain",))
+        html_part = sent_messages[0].get_body(preferencelist=("html",))
+        self.assertIsNotNone(plain_part)
+        self.assertIsNotNone(html_part)
+        self.assertIn("JOOLA Perseus", plain_part.get_content())
+        self.assertIn("Your order is confirmed", html_part.get_content())
+        self.assertIn("View your account", html_part.get_content())
+        self.assertIn("cid:eleven-zero-logo", html_part.get_content())
+        self.assertIn("Paddle price: $150.00", plain_part.get_content())
+        self.assertIn("$150.00", html_part.get_content())
+        self.assertIn("$10.00", html_part.get_content())
+        self.assertIn("$160.00", html_part.get_content())
+        self.assertTrue(
+            any(part.get_content_type() == "image/png" for part in sent_messages[0].walk())
+        )
+
+    def test_seller_shipping_label_email_is_sent_once(self):
+        self.create_paid_order("cs_test_seller_label_email")
+        app.SMTP_HOST = "smtp.example.com"
+        app.SMTP_USERNAME = "user"
+        app.SMTP_PASSWORD = "app-password"
+        app.EMAIL_FROM = "11zeropb@gmail.com"
+        sent_messages = []
+
+        class FakeSMTP:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def starttls(self):
+                pass
+
+            def login(self, *_args):
+                pass
+
+            def send_message(self, message):
+                sent_messages.append(message)
+
+        def fake_transaction(_path, _payload):
+            return {
+                "object_id": "transaction_seller_email",
+                "status": "SUCCESS",
+                "label_url": "https://example.com/prepaid-label.pdf",
+                "tracking_number": "SELLERTRACK123",
+                "tracking_url_provider": "https://example.com/track/SELLERTRACK123",
+            }
+
+        app.smtplib.SMTP = FakeSMTP
+        app.shippo_request = fake_transaction
+        first = app.purchase_shippo_label_for_order("cs_test_seller_label_email")
+        second = app.purchase_shippo_label_for_order("cs_test_seller_label_email")
+
+        self.assertEqual(len(sent_messages), 1)
+        self.assertEqual(first["seller_label_email_status"], "sent")
+        self.assertEqual(second["seller_label_email_status"], "sent")
+        self.assertEqual(sent_messages[0]["To"], "fulfillment-seller@example.com")
+        self.assertIn("Shipping label ready", sent_messages[0]["Subject"])
+        plain_part = sent_messages[0].get_body(preferencelist=("plain",))
+        html_part = sent_messages[0].get_body(preferencelist=("html",))
+        self.assertIsNotNone(plain_part)
+        self.assertIsNotNone(html_part)
+        self.assertIn("https://example.com/prepaid-label.pdf", plain_part.get_content())
+        self.assertIn("How to ship the paddle", plain_part.get_content())
+        self.assertIn("Open shipping label", html_part.get_content())
+        self.assertIn("Pack and ship in six steps", html_part.get_content())
+        self.assertIn("cid:eleven-zero-logo", html_part.get_content())
+        self.assertTrue(
+            any(part.get_content_type() == "image/png" for part in sent_messages[0].walk())
+        )
 
     def test_sale_pending_listing_cannot_start_checkout(self):
         state = app.listing_checkout_state_from_row(
