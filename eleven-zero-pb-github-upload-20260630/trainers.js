@@ -3,6 +3,7 @@ const trainerPageState = {
   level: "all",
   format: "all",
   activeFilter: "all",
+  visibleLimit: window.matchMedia("(max-width: 760px)").matches ? 4 : 6,
   trainers: [],
   reviews: [],
 };
@@ -27,6 +28,7 @@ const trainerReviewForm = document.querySelector("[data-trainer-review-form]");
 const trainerReviewStatus = document.querySelector("[data-review-status]");
 const trainerReviewList = document.querySelector("[data-review-list]");
 const trainerReviewSelect = document.querySelector("[data-review-trainer-select]");
+const trainerLoadMore = document.querySelector("[data-trainer-load-more]");
 
 const formatLabels = {
   private: "Private lessons",
@@ -173,58 +175,52 @@ function renderTrainerCard(trainer) {
   const tenureMonths = getMonthsOnPlatform(trainer.joined_at);
   const levelLabel = levelLabels[trainer.level] || "Player focus";
   const formatLabel = formatLabels[trainer.format] || "Coaching";
+  const contactHref = trainer.email
+    ? `mailto:${ElevenZeroApp.escapeHtml(trainer.email)}`
+    : "./auth.html?next=./trainers.html";
 
   return `
-    <article class="court-card trainer-card reveal is-visible">
-      <div class="trainer-card-top">
+    <article class="trainer-simple-card reveal is-visible" data-trainer-card>
+      <div class="trainer-simple-card-head">
         <div class="trainer-avatar" aria-hidden="true">${ElevenZeroApp.escapeHtml(
           trainer.initials
         )}</div>
         <div class="trainer-heading">
-          <div class="trainer-title-row">
-            <h3>${ElevenZeroApp.escapeHtml(trainer.name)}</h3>
-            <span class="trainer-rate">${ElevenZeroApp.escapeHtml(trainer.rate)}</span>
-          </div>
-          <p class="court-location">${ElevenZeroApp.escapeHtml(trainer.location)}</p>
+          <h3>${ElevenZeroApp.escapeHtml(trainer.name)}</h3>
+          <p>${ElevenZeroApp.escapeHtml(trainer.location)}</p>
         </div>
+        <span class="trainer-rate">${ElevenZeroApp.escapeHtml(trainer.rate)}</span>
       </div>
 
-      <div class="trainer-badge-row">
-        <span class="trainer-badge ${
-          trainer.verified ? "trainer-badge-verified" : "trainer-badge-pending"
-        }">
-          ${trainer.verified ? "Verified profile" : "Pending verification"}
-        </span>
-        <span class="trainer-badge trainer-badge-level">${ElevenZeroApp.escapeHtml(
-          levelLabel
-        )}</span>
-        <span class="trainer-badge trainer-badge-format">${ElevenZeroApp.escapeHtml(
-          formatLabel
-        )}</span>
-      </div>
-
-      <div class="trainer-trust-row">
+      <div class="trainer-simple-trust">
         ${renderTrainerRatingPill(trainer)}
         <div class="trainer-tenure-pill">
           <span>${ElevenZeroApp.escapeHtml(formatTenureLong(tenureMonths))}</span>
         </div>
       </div>
 
-      <p class="trainer-meta">${ElevenZeroApp.escapeHtml(trainer.experience)}</p>
-
-      <div class="court-details">
-        <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
+      <div class="trainer-simple-tags">
         <span>${ElevenZeroApp.escapeHtml(levelLabel)}</span>
-        <span>${ElevenZeroApp.escapeHtml(trainer.availability)}</span>
+        <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
+        <span>${trainer.verified ? "Verified profile" : "New profile"}</span>
       </div>
 
-      <p class="court-copy">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
+      <p class="trainer-simple-bio">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
+
+      <div class="trainer-simple-card-foot">
+        <div>
+          <strong>${ElevenZeroApp.escapeHtml(trainer.experience)}</strong>
+          <span>${ElevenZeroApp.escapeHtml(trainer.availability)}</span>
+        </div>
+        <a class="button button-dark" href="${contactHref}">Contact trainer</a>
+      </div>
     </article>
   `;
 }
 
 function renderTrainerResults() {
   const visible = getVisibleTrainers();
+  const displayed = visible.slice(0, trainerPageState.visibleLimit);
 
   trainerFilterButtons.forEach((button) => {
     const isActive = button.dataset.trainerFilter === trainerPageState.activeFilter;
@@ -257,11 +253,12 @@ function renderTrainerResults() {
   }
   if (trainerResultsNote) {
     trainerResultsNote.textContent = ElevenZeroApp.session?.authenticated
-      ? "You’re signed in, so you can review trainers or publish your own coaching profile."
-      : "Sign in to review a trainer or publish your own coaching profile.";
+      ? "Compare experience, ratings, and availability. You can also leave a review."
+      : "Compare experience, ratings, availability, and time on Eleven Zero.";
   }
 
   if (!visible.length) {
+    if (trainerLoadMore) trainerLoadMore.hidden = true;
     trainerResults.innerHTML = `
       <article class="empty-state reveal is-visible">
         <p class="eyebrow">No matches</p>
@@ -273,7 +270,14 @@ function renderTrainerResults() {
     return;
   }
 
-  trainerResults.innerHTML = visible.map(renderTrainerCard).join("");
+  trainerResults.innerHTML = displayed.map(renderTrainerCard).join("");
+  if (trainerLoadMore) {
+    const hasMore = displayed.length < visible.length;
+    trainerLoadMore.hidden = !hasMore;
+    trainerLoadMore.textContent = hasMore
+      ? `Show all ${visible.length} trainers`
+      : "All trainers are showing";
+  }
   ElevenZeroApp.setStatus(
     trainerStatus,
     `Showing ${visible.length} trainer match${visible.length === 1 ? "" : "es"}.`,
@@ -295,7 +299,7 @@ function renderReviewFeed() {
     return;
   }
 
-  trainerReviewList.innerHTML = trainerPageState.reviews.slice(0, 8).map((review) => {
+  trainerReviewList.innerHTML = trainerPageState.reviews.slice(0, 4).map((review) => {
     const stars = "★".repeat(Number(review.rating || 0));
     const dateLabel = new Date(review.created_at).toLocaleDateString("en-US", {
       month: "short",
@@ -344,6 +348,20 @@ function readSearchState() {
   trainerPageState.search = trainerSearchInput?.value?.trim() || "";
   trainerPageState.level = trainerLevelSelect?.value || "all";
   trainerPageState.format = trainerFormatSelect?.value || "all";
+}
+
+function resetTrainerLimit() {
+  trainerPageState.visibleLimit = window.matchMedia("(max-width: 760px)").matches ? 4 : 6;
+}
+
+function openTrainerPanelFromHash() {
+  const hash = window.location.hash;
+  if (!hash) return;
+
+  const panel = document.querySelector(hash);
+  if (panel instanceof HTMLDetailsElement) {
+    panel.open = true;
+  }
 }
 
 async function loadTrainerData() {
@@ -410,25 +428,30 @@ async function handleTrainerReview(event) {
 document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
   await loadTrainerData();
+  openTrainerPanelFromHash();
 
   trainerForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     readSearchState();
+    resetTrainerLimit();
     renderTrainerResults();
   });
 
   trainerSearchInput?.addEventListener("input", () => {
     readSearchState();
+    resetTrainerLimit();
     renderTrainerResults();
   });
 
   trainerLevelSelect?.addEventListener("change", () => {
     readSearchState();
+    resetTrainerLimit();
     renderTrainerResults();
   });
 
   trainerFormatSelect?.addEventListener("change", () => {
     readSearchState();
+    resetTrainerLimit();
     renderTrainerResults();
   });
 
@@ -452,4 +475,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   trainerJoinForm?.addEventListener("submit", handleTrainerJoin);
   trainerReviewForm?.addEventListener("submit", handleTrainerReview);
+  trainerLoadMore?.addEventListener("click", () => {
+    trainerPageState.visibleLimit = trainerPageState.trainers.length;
+    renderTrainerResults();
+  });
+  window.addEventListener("hashchange", openTrainerPanelFromHash);
 });
