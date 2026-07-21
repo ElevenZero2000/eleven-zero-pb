@@ -356,6 +356,27 @@ function getListingActionState(item) {
   const sellerUserId = Number(item.seller_user_id || 0);
   const isOwner = currentUserId && sellerUserId && currentUserId === sellerUserId;
   const approvalStatus = item.approval_status || "approved";
+  const saleStatus = item.sale_status || "available";
+
+  if (saleStatus === "pending") {
+    return {
+      action: "disabled",
+      buttonLabel: "Sale pending",
+      statusLabel: "Sale pending",
+      reason: "A buyer has purchased this paddle and the order is being finalized.",
+      tone: "pending",
+    };
+  }
+
+  if (saleStatus === "sold") {
+    return {
+      action: "disabled",
+      buttonLabel: "Sold",
+      statusLabel: "Sold",
+      reason: "This paddle is no longer available.",
+      tone: "neutral",
+    };
+  }
 
   if (isOwner) {
     if (approvalStatus === "pending") {
@@ -433,6 +454,27 @@ function getProductCartEntryState(item) {
   const sellerUserId = Number(item.seller_user_id || 0);
   const isOwner = currentUserId && sellerUserId && currentUserId === sellerUserId;
   const approvalStatus = item.approval_status || "approved";
+  const saleStatus = item.sale_status || "available";
+
+  if (saleStatus === "pending") {
+    return {
+      action: "disabled",
+      buttonLabel: "Sale pending",
+      statusLabel: "Sale pending",
+      reason: "A buyer has purchased this paddle and the order is being finalized.",
+      tone: "pending",
+    };
+  }
+
+  if (saleStatus === "sold") {
+    return {
+      action: "disabled",
+      buttonLabel: "Sold",
+      statusLabel: "Sold",
+      reason: "This paddle is no longer available.",
+      tone: "neutral",
+    };
+  }
 
   if (isOwner) {
     return {
