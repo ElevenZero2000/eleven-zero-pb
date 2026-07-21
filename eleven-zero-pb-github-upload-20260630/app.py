@@ -13,6 +13,7 @@ import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from html import escape
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -1336,7 +1337,8 @@ def order_email_row(session_id: str) -> sqlite3.Row | None:
               listings.model,
               buyers.name AS buyer_name,
               buyers.email AS buyer_email,
-              sellers.name AS seller_name
+              sellers.name AS seller_name,
+              sellers.email AS seller_email
             FROM orders
             LEFT JOIN listings ON listings.id = orders.listing_id
             LEFT JOIN users AS buyers ON buyers.id = orders.buyer_user_id
@@ -1345,6 +1347,180 @@ def order_email_row(session_id: str) -> sqlite3.Row | None:
             """,
             (session_id,),
         ).fetchone()
+
+
+def build_purchase_confirmation_message(
+    order_row: sqlite3.Row,
+    title: str,
+    total: float,
+    shipping: float,
+    destination: str,
+) -> EmailMessage:
+    """Build a branded, email-client-safe receipt with a plain-text fallback."""
+    site_url = (SITE_URL or "https://11zeropb.com").rstrip("/")
+    account_url = f"{site_url}/account.html"
+    logo_path = APP_ROOT / "assets" / "logo-primary.png"
+    logo_src = "cid:eleven-zero-logo" if logo_path.exists() else f"{site_url}/assets/logo-primary.png"
+    buyer_name = compact_whitespace(order_row["buyer_name"] or "") or "there"
+    seller_name = compact_whitespace(order_row["seller_name"] or "") or "Eleven Zero PB seller"
+    order_reference = f"EZPB-{order_row['id']}"
+    paddle_price = max(total - shipping, 0)
+
+    message = EmailMessage()
+    message["Subject"] = f"Order confirmed — {title}"
+    message["From"] = f"Eleven Zero PB <{EMAIL_FROM}>"
+    message["To"] = compact_whitespace(order_row["buyer_email"] or "")
+    message.set_content(
+        "\n".join(
+            [
+                f"Hi {buyer_name},",
+                "",
+                f"Your purchase of {title} is confirmed.",
+                f"Paddle price: ${paddle_price:,.2f}",
+                f"Shipping: ${shipping:,.2f}",
+                f"Order total: ${total:,.2f}",
+                f"Seller: {seller_name}",
+                *([f"Shipping to: {destination}"] if destination else []),
+                "",
+                "What happens next:",
+                "1. The seller prepares your prepaid shipping label.",
+                "2. Shipping and tracking updates stay connected to your Eleven Zero PB account.",
+                f"Order reference: {order_reference}",
+                "",
+                f"View your account: {account_url}",
+                "",
+                "Questions? Reply to this email and the Eleven Zero PB team will help.",
+                "",
+                "Eleven Zero PB",
+                site_url,
+            ]
+        )
+    )
+
+    safe_buyer_name = escape(buyer_name)
+    safe_title = escape(title)
+    safe_seller_name = escape(seller_name)
+    safe_destination = escape(destination)
+    safe_order_reference = escape(order_reference)
+    safe_account_url = escape(account_url, quote=True)
+    safe_site_url = escape(site_url, quote=True)
+    safe_support_email = escape(SUPPORT_EMAIL or EMAIL_FROM, quote=True)
+    shipping_destination_html = ""
+    if destination:
+        shipping_destination_html = f"""
+          <tr>
+            <td style="padding:0 0 18px;color:#5d6f64;font-size:14px;line-height:1.5;">Shipping to</td>
+            <td align="right" style="padding:0 0 18px;color:#042814;font-size:14px;font-weight:700;line-height:1.5;">{safe_destination}</td>
+          </tr>"""
+
+    message.add_alternative(
+        f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Order confirmed</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f2e8;color:#042814;font-family:'Avenir Next','Segoe UI',Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your {safe_title} purchase is confirmed. Order {safe_order_reference}.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f6f2e8;">
+      <tr>
+        <td align="center" style="padding:28px 14px;">
+          <table role="presentation" width="620" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:620px;background:#ffffff;border-radius:28px;overflow:hidden;box-shadow:0 18px 48px rgba(3,45,23,.12);">
+            <tr>
+              <td style="padding:26px 34px;background:#032d17;">
+                <a href="{safe_site_url}" style="display:inline-block;text-decoration:none;">
+                  <img src="{logo_src}" width="210" alt="Eleven Zero PB" style="display:block;width:210px;max-width:100%;height:auto;border:0;">
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:38px 34px 18px;">
+                <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:#d9ffe5;color:#06552a;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">✓ Payment confirmed</span>
+                <h1 style="margin:20px 0 12px;color:#042814;font-size:34px;line-height:1.08;letter-spacing:-.025em;">Your order is confirmed.</h1>
+                <p style="margin:0;color:#5d6f64;font-size:16px;line-height:1.65;">Hi {safe_buyer_name}, your purchase is confirmed. We’ll keep the shipping process connected to your Eleven Zero PB account.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 34px 8px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border:1px solid #e4ebe6;border-radius:20px;">
+                  <tr>
+                    <td colspan="2" style="padding:22px 22px 18px;border-bottom:1px solid #e4ebe6;">
+                      <div style="color:#5d6f64;font-size:12px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;">Order summary</div>
+                      <div style="margin-top:8px;color:#042814;font-size:21px;font-weight:800;line-height:1.3;">{safe_title}</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" style="padding:22px 22px 4px;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                        <tr>
+                          <td style="padding:0 0 18px;color:#5d6f64;font-size:14px;">Seller</td>
+                          <td align="right" style="padding:0 0 18px;color:#042814;font-size:14px;font-weight:700;">{safe_seller_name}</td>
+                        </tr>
+                        {shipping_destination_html}
+                        <tr>
+                          <td style="padding:0 0 18px;color:#5d6f64;font-size:14px;">Paddle price</td>
+                          <td align="right" style="padding:0 0 18px;color:#042814;font-size:14px;font-weight:700;">${paddle_price:,.2f}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:0 0 18px;color:#5d6f64;font-size:14px;">Shipping</td>
+                          <td align="right" style="padding:0 0 18px;color:#042814;font-size:14px;font-weight:700;">${shipping:,.2f}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:17px 0 19px;border-top:1px solid #e4ebe6;color:#042814;font-size:16px;font-weight:800;">Order total</td>
+                          <td align="right" style="padding:17px 0 19px;border-top:1px solid #e4ebe6;color:#042814;font-size:22px;font-weight:900;">${total:,.2f}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px 34px 8px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f3fff6;border-radius:20px;">
+                  <tr>
+                    <td style="padding:22px;">
+                      <div style="color:#042814;font-size:16px;font-weight:800;">What happens next</div>
+                      <p style="margin:10px 0 0;color:#5d6f64;font-size:14px;line-height:1.65;">The seller prepares the prepaid shipping label. Tracking updates will remain connected to your account.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:26px 34px 34px;">
+                <a href="{safe_account_url}" style="display:inline-block;padding:15px 25px;border-radius:999px;background:#00ed64;color:#032d17;font-size:15px;font-weight:900;text-decoration:none;">View your account</a>
+                <p style="margin:20px 0 0;color:#7b8b82;font-size:12px;line-height:1.6;">Order reference: <strong style="color:#52645a;">{safe_order_reference}</strong></p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:24px 34px;background:#032d17;color:#b8cabf;font-size:12px;line-height:1.7;">
+                Questions? Reply to this email or contact <a href="mailto:{safe_support_email}" style="color:#00ed64;text-decoration:none;">{safe_support_email}</a>.<br>
+                Eleven Zero PB · Built for the pickleball community
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>""",
+        subtype="html",
+    )
+
+    if logo_path.exists():
+        html_part = message.get_payload()[-1]
+        html_part.add_related(
+            logo_path.read_bytes(),
+            maintype="image",
+            subtype="png",
+            cid="<eleven-zero-logo>",
+            filename="eleven-zero-pb.png",
+            disposition="inline",
+        )
+
+    return message
 
 
 def send_purchase_confirmation_for_order(session_id: str) -> sqlite3.Row | None:
@@ -1427,31 +1603,7 @@ def send_purchase_confirmation_for_order(session_id: str) -> sqlite3.Row | None:
         if part
     )
 
-    message = EmailMessage()
-    message["Subject"] = f"Purchase confirmed — {title}"
-    message["From"] = f"Eleven Zero PB <{EMAIL_FROM}>"
-    message["To"] = buyer_email
-    message.set_content(
-        "\n".join(
-            [
-                f"Hi {order_row['buyer_name'] or 'there'},",
-                "",
-                f"Your purchase of {title} is confirmed.",
-                f"Order total: ${total:,.2f}",
-                f"Shipping: ${shipping:,.2f}",
-                f"Seller: {order_row['seller_name'] or 'Eleven Zero PB seller'}",
-                *([f"Shipping to: {destination}"] if destination else []),
-                "",
-                "The seller is preparing the prepaid shipping label. We will keep the order connected to your Eleven Zero PB account.",
-                f"Order reference: EZPB-{order_row['id']}",
-                "",
-                "Questions? Reply to this email and the Eleven Zero PB team will help.",
-                "",
-                "Eleven Zero PB",
-                SITE_URL or "https://11zeropb.com",
-            ]
-        )
-    )
+    message = build_purchase_confirmation_message(order_row, title, total, shipping, destination)
 
     try:
         if SMTP_USE_SSL:
@@ -1481,6 +1633,331 @@ def send_purchase_confirmation_for_order(session_id: str) -> sqlite3.Row | None:
                 """
                 UPDATE orders
                 SET buyer_confirmation_status = 'error', buyer_confirmation_error = ?
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (compact_whitespace(str(error))[:500], session_id),
+            )
+            connection.commit()
+
+    return order_email_row(session_id)
+
+
+def build_seller_shipping_label_message(
+    order_row: sqlite3.Row,
+    title: str,
+    destination: str,
+) -> EmailMessage:
+    """Build the seller's branded label-ready email with packing instructions."""
+    site_url = (SITE_URL or "https://11zeropb.com").rstrip("/")
+    account_url = f"{site_url}/account.html"
+    logo_path = APP_ROOT / "assets" / "logo-primary.png"
+    logo_src = "cid:eleven-zero-logo" if logo_path.exists() else f"{site_url}/assets/logo-primary.png"
+    seller_name = compact_whitespace(order_row["seller_name"] or "") or "there"
+    buyer_name = compact_whitespace(order_row["buyer_name"] or "") or "the buyer"
+    label_url = compact_whitespace(order_row["shippo_label_url"] or "")
+    tracking_number = compact_whitespace(order_row["tracking_number"] or "")
+    tracking_url = compact_whitespace(order_row["tracking_url"] or "")
+    carrier = compact_whitespace(order_row["shipping_carrier"] or "")
+    service = compact_whitespace(order_row["shipping_service"] or "")
+    shipping_service = " · ".join(part for part in [carrier, service] if part) or "Prepaid shipping"
+    order_reference = f"EZPB-{order_row['id']}"
+
+    message = EmailMessage()
+    message["Subject"] = f"Shipping label ready — {title}"
+    message["From"] = f"Eleven Zero PB <{EMAIL_FROM}>"
+    message["To"] = compact_whitespace(order_row["seller_email"] or "")
+    message.set_content(
+        "\n".join(
+            [
+                f"Hi {seller_name},",
+                "",
+                f"Your prepaid shipping label for {title} is ready.",
+                f"Buyer: {buyer_name}",
+                *([f"Ship to: {destination}"] if destination else []),
+                f"Shipping service: {shipping_service}",
+                *([f"Tracking number: {tracking_number}"] if tracking_number else []),
+                f"Order reference: {order_reference}",
+                "",
+                f"Open and print the prepaid label: {label_url}",
+                "",
+                "How to ship the paddle:",
+                "1. Open the label and print it at 100% or Actual Size.",
+                "2. Place the paddle in a rigid box with padding around the face, edges, and handle.",
+                "3. Seal the box securely and remove or fully cover every old label and barcode.",
+                "4. Attach the new label flat on the largest side. Keep the barcode uncovered.",
+                f"5. Drop the package off with {carrier or 'the carrier shown on the label'}.",
+                "6. Keep the drop-off receipt until delivery is confirmed.",
+                "",
+                *([f"Track the package: {tracking_url}"] if tracking_url else []),
+                f"Manage this order: {account_url}",
+                "",
+                "Questions? Reply to this email and the Eleven Zero PB team will help.",
+                "",
+                "Eleven Zero PB",
+                site_url,
+            ]
+        )
+    )
+
+    safe_seller_name = escape(seller_name)
+    safe_buyer_name = escape(buyer_name)
+    safe_title = escape(title)
+    safe_destination = escape(destination)
+    safe_shipping_service = escape(shipping_service)
+    safe_tracking_number = escape(tracking_number)
+    safe_order_reference = escape(order_reference)
+    safe_label_url = escape(label_url, quote=True)
+    safe_tracking_url = escape(tracking_url, quote=True)
+    safe_account_url = escape(account_url, quote=True)
+    safe_site_url = escape(site_url, quote=True)
+    safe_support_email = escape(SUPPORT_EMAIL or EMAIL_FROM, quote=True)
+
+    destination_html = ""
+    if destination:
+        destination_html = f"""
+                        <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Ship to</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">{safe_destination}</td>
+                        </tr>"""
+    tracking_html = ""
+    if tracking_number:
+        tracking_value = safe_tracking_number
+        if tracking_url:
+            tracking_value = f'<a href="{safe_tracking_url}" style="color:#06552a;text-decoration:underline;">{safe_tracking_number}</a>'
+        tracking_html = f"""
+                        <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Tracking</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">{tracking_value}</td>
+                        </tr>"""
+
+    message.add_alternative(
+        f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Shipping label ready</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f2e8;color:#042814;font-family:'Avenir Next','Segoe UI',Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Print the prepaid label for {safe_title} and prepare order {safe_order_reference} for drop-off.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f6f2e8;">
+      <tr>
+        <td align="center" style="padding:28px 14px;">
+          <table role="presentation" width="620" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:620px;background:#ffffff;border-radius:28px;overflow:hidden;box-shadow:0 18px 48px rgba(3,45,23,.12);">
+            <tr>
+              <td style="padding:26px 34px;background:#032d17;">
+                <a href="{safe_site_url}" style="display:inline-block;text-decoration:none;">
+                  <img src="{logo_src}" width="210" alt="Eleven Zero PB" style="display:block;width:210px;max-width:100%;height:auto;border:0;">
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:38px 34px 16px;">
+                <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:#d9ffe5;color:#06552a;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">✓ Ready to ship</span>
+                <h1 style="margin:20px 0 12px;color:#042814;font-size:34px;line-height:1.08;letter-spacing:-.025em;">Your shipping label is ready.</h1>
+                <p style="margin:0;color:#5d6f64;font-size:16px;line-height:1.65;">Hi {safe_seller_name}, the prepaid label for <strong style="color:#042814;">{safe_title}</strong> is ready to print. Follow the steps below to ship it safely.</p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:16px 34px 22px;">
+                <a href="{safe_label_url}" style="display:inline-block;padding:16px 28px;border-radius:999px;background:#00ed64;color:#032d17;font-size:15px;font-weight:900;text-decoration:none;">Open shipping label</a>
+                <p style="margin:12px 0 0;color:#7b8b82;font-size:12px;line-height:1.6;">Print at 100% or Actual Size. Do not resize the barcode.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:4px 34px 8px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border:1px solid #e4ebe6;border-radius:20px;">
+                  <tr>
+                    <td colspan="2" style="padding:22px 22px 18px;border-bottom:1px solid #e4ebe6;">
+                      <div style="color:#5d6f64;font-size:12px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;">Shipment summary</div>
+                      <div style="margin-top:8px;color:#042814;font-size:21px;font-weight:800;line-height:1.3;">{safe_title}</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" style="padding:22px 22px 4px;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                        <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Buyer</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">{safe_buyer_name}</td>
+                        </tr>
+                        {destination_html}
+                        <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Service</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">{safe_shipping_service}</td>
+                        </tr>
+                        {tracking_html}
+                        <tr>
+                          <td style="padding:16px 0 18px;border-top:1px solid #e4ebe6;color:#5d6f64;font-size:14px;">Order reference</td>
+                          <td align="right" style="padding:16px 0 18px;border-top:1px solid #e4ebe6;color:#042814;font-size:14px;font-weight:800;">{safe_order_reference}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px 34px 8px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f3fff6;border-radius:20px;">
+                  <tr>
+                    <td style="padding:24px;">
+                      <div style="color:#042814;font-size:17px;font-weight:900;">Pack and ship in six steps</div>
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:14px;">
+                        <tr><td valign="top" style="width:26px;padding:0 8px 10px 0;color:#06552a;font-size:14px;font-weight:900;">1.</td><td style="padding:0 0 10px;color:#52645a;font-size:14px;line-height:1.55;">Print the label at 100% or Actual Size.</td></tr>
+                        <tr><td valign="top" style="width:26px;padding:0 8px 10px 0;color:#06552a;font-size:14px;font-weight:900;">2.</td><td style="padding:0 0 10px;color:#52645a;font-size:14px;line-height:1.55;">Protect the paddle in a rigid box with padding around the face, edges, and handle.</td></tr>
+                        <tr><td valign="top" style="width:26px;padding:0 8px 10px 0;color:#06552a;font-size:14px;font-weight:900;">3.</td><td style="padding:0 0 10px;color:#52645a;font-size:14px;line-height:1.55;">Seal the box securely and remove or cover old labels and barcodes.</td></tr>
+                        <tr><td valign="top" style="width:26px;padding:0 8px 10px 0;color:#06552a;font-size:14px;font-weight:900;">4.</td><td style="padding:0 0 10px;color:#52645a;font-size:14px;line-height:1.55;">Attach the label flat on the largest side and keep the barcode uncovered.</td></tr>
+                        <tr><td valign="top" style="width:26px;padding:0 8px 10px 0;color:#06552a;font-size:14px;font-weight:900;">5.</td><td style="padding:0 0 10px;color:#52645a;font-size:14px;line-height:1.55;">Drop it off with the carrier shown on the label.</td></tr>
+                        <tr><td valign="top" style="width:26px;padding:0 8px 0 0;color:#06552a;font-size:14px;font-weight:900;">6.</td><td style="padding:0;color:#52645a;font-size:14px;line-height:1.55;">Keep the drop-off receipt until delivery is confirmed.</td></tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:26px 34px 34px;">
+                <a href="{safe_account_url}" style="display:inline-block;color:#06552a;font-size:14px;font-weight:800;text-decoration:underline;">Manage this order in your account</a>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:24px 34px;background:#032d17;color:#b8cabf;font-size:12px;line-height:1.7;">
+                Questions? Reply to this email or contact <a href="mailto:{safe_support_email}" style="color:#00ed64;text-decoration:none;">{safe_support_email}</a>.<br>
+                Eleven Zero PB · Built for the pickleball community
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>""",
+        subtype="html",
+    )
+
+    if logo_path.exists():
+        html_part = message.get_payload()[-1]
+        html_part.add_related(
+            logo_path.read_bytes(),
+            maintype="image",
+            subtype="png",
+            cid="<eleven-zero-logo>",
+            filename="eleven-zero-pb.png",
+            disposition="inline",
+        )
+
+    return message
+
+
+def send_seller_shipping_label_email_for_order(session_id: str) -> sqlite3.Row | None:
+    """Send the prepaid label to the seller once without blocking fulfillment."""
+    order_row = order_email_row(session_id)
+    if not order_row or order_row["shipping_status"] != "label_ready":
+        return order_row
+    if not compact_whitespace(order_row["shippo_label_url"] or ""):
+        return order_row
+    if order_row["seller_label_email_sent_at"]:
+        return order_row
+
+    seller_email = compact_whitespace(order_row["seller_email"] or "")
+    if "@" not in seller_email:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_label_email_status = 'error',
+                    seller_label_email_error = 'The seller account does not have a valid email address.'
+                WHERE stripe_checkout_session_id = ?
+                  AND seller_label_email_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+        return order_email_row(session_id)
+
+    if not transactional_email_is_configured():
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_label_email_status = 'not_configured',
+                    seller_label_email_error = 'Transactional email is not configured.'
+                WHERE stripe_checkout_session_id = ?
+                  AND seller_label_email_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+        return order_email_row(session_id)
+
+    with closing(connect_db()) as connection:
+        claimed = connection.execute(
+            """
+            UPDATE orders
+            SET seller_label_email_status = 'sending', seller_label_email_error = ''
+            WHERE stripe_checkout_session_id = ?
+              AND seller_label_email_sent_at IS NULL
+              AND seller_label_email_status IN ('pending', 'error', 'not_configured')
+            """,
+            (session_id,),
+        )
+        connection.commit()
+        if claimed.rowcount != 1:
+            return order_email_row(session_id)
+
+    title = " ".join(
+        part for part in [order_row["brand"], order_row["model"]] if compact_whitespace(part)
+    ).strip() or "pickleball paddle"
+    address = {}
+    try:
+        address = json.loads(order_row["shipping_address_json"] or "{}")
+    except json.JSONDecodeError:
+        address = {}
+    destination = ", ".join(
+        part
+        for part in [
+            compact_whitespace(address.get("city", "")),
+            " ".join(
+                part
+                for part in [
+                    compact_whitespace(address.get("state", "")),
+                    compact_whitespace(address.get("postalCode", "")),
+                ]
+                if part
+            ),
+        ]
+        if part
+    )
+    message = build_seller_shipping_label_message(order_row, title, destination)
+
+    try:
+        if SMTP_USE_SSL:
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        with server:
+            if SMTP_USE_TLS and not SMTP_USE_SSL:
+                server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(message)
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_label_email_status = 'sent',
+                    seller_label_email_sent_at = ?,
+                    seller_label_email_error = ''
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (utc_now(), session_id),
+            )
+            connection.commit()
+    except (OSError, TypeError, ValueError, smtplib.SMTPException) as error:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_label_email_status = 'error', seller_label_email_error = ?
                 WHERE stripe_checkout_session_id = ?
                 """,
                 (compact_whitespace(str(error))[:500], session_id),
@@ -1603,6 +2080,7 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
     The conditional update claims the order before the external request so repeated
     checkout-status calls do not purchase duplicate labels.
     """
+    already_ready = False
     with closing(connect_db()) as connection:
         order_row = connection.execute(
             "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
@@ -1611,27 +2089,30 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
         if not order_row:
             return None
         if order_row["shippo_label_url"] or order_row["shippo_transaction_id"]:
+            already_ready = True
+        elif not order_row["shippo_rate_id"]:
             return order_row
-        if not order_row["shippo_rate_id"]:
-            return order_row
-
-        claimed = connection.execute(
-            """
-            UPDATE orders
-            SET shipping_status = 'purchasing', shipping_error = ''
-            WHERE stripe_checkout_session_id = ?
-              AND shippo_transaction_id = ''
-              AND shippo_label_url = ''
-              AND shipping_status = 'pending'
-            """,
-            (session_id,),
-        )
-        connection.commit()
-        if claimed.rowcount != 1:
-            return connection.execute(
-                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+        else:
+            claimed = connection.execute(
+                """
+                UPDATE orders
+                SET shipping_status = 'purchasing', shipping_error = ''
+                WHERE stripe_checkout_session_id = ?
+                  AND shippo_transaction_id = ''
+                  AND shippo_label_url = ''
+                  AND shipping_status = 'pending'
+                """,
                 (session_id,),
-            ).fetchone()
+            )
+            connection.commit()
+            if claimed.rowcount != 1:
+                return connection.execute(
+                    "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+                    (session_id,),
+                ).fetchone()
+
+    if already_ready:
+        return send_seller_shipping_label_email_for_order(session_id)
 
     try:
         transaction = shippo_request(
@@ -1667,10 +2148,7 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
                 (transaction_id, label_url, tracking_number, tracking_url, session_id),
             )
             connection.commit()
-            return connection.execute(
-                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
-                (session_id,),
-            ).fetchone()
+        return send_seller_shipping_label_email_for_order(session_id)
     except (RuntimeError, ValueError) as error:
         with closing(connect_db()) as connection:
             connection.execute(
@@ -1878,6 +2356,9 @@ def init_database() -> None:
               buyer_confirmation_status TEXT NOT NULL DEFAULT 'pending',
               buyer_confirmation_sent_at TEXT,
               buyer_confirmation_error TEXT NOT NULL DEFAULT '',
+              seller_label_email_status TEXT NOT NULL DEFAULT 'pending',
+              seller_label_email_sent_at TEXT,
+              seller_label_email_error TEXT NOT NULL DEFAULT '',
               platform_fee_cents INTEGER NOT NULL,
               stripe_payment_status TEXT NOT NULL DEFAULT 'unpaid',
               stripe_session_status TEXT NOT NULL DEFAULT 'open',
@@ -1970,6 +2451,9 @@ def init_database() -> None:
         add_column_if_missing(connection, "orders", "buyer_confirmation_status", "TEXT NOT NULL DEFAULT 'pending'")
         add_column_if_missing(connection, "orders", "buyer_confirmation_sent_at", "TEXT")
         add_column_if_missing(connection, "orders", "buyer_confirmation_error", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "seller_label_email_status", "TEXT NOT NULL DEFAULT 'pending'")
+        add_column_if_missing(connection, "orders", "seller_label_email_sent_at", "TEXT")
+        add_column_if_missing(connection, "orders", "seller_label_email_error", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
@@ -4066,6 +4550,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         if order_row["shippo_label_url"]:
+            order_row = send_seller_shipping_label_email_for_order(session_id) or order_row
             self.send_json(
                 {
                     "ok": True,
@@ -4074,6 +4559,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "labelUrl": order_row["shippo_label_url"],
                     "trackingNumber": order_row["tracking_number"],
                     "trackingUrl": order_row["tracking_url"],
+                    "sellerLabelEmailStatus": row_value(
+                        order_row, "seller_label_email_status", "pending"
+                    ),
                 }
             )
             return
