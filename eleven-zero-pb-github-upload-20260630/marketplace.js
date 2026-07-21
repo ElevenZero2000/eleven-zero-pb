@@ -60,7 +60,7 @@ const sellerLivePreview = document.querySelector("[data-seller-live-preview]");
 const sellerNotesCounter = document.querySelector("[data-seller-notes-counter]");
 const sellerDraftStatus = document.querySelector("[data-seller-draft-status]");
 const clearSellerDraftButton = document.querySelector("[data-clear-seller-draft]");
-const shippingModeInput = listingForm?.querySelector('select[name="shippingMode"]');
+const shippingModeInput = listingForm?.querySelector('[name="shippingMode"]');
 const shippingFlatField = listingForm?.querySelector("[data-shipping-flat-field]");
 
 const MARKETPLACE_BROWSE_STORAGE_KEY = "elevenZeroPbMarketplaceBrowseState";
@@ -675,7 +675,7 @@ function getDraftShippingConfig() {
   }
 
   return {
-    mode: listingForm.querySelector('select[name="shippingMode"]')?.value || "calculated",
+    mode: listingForm.querySelector('[name="shippingMode"]')?.value || "calculated",
     flat: listingForm.querySelector('input[name="shippingFlat"]')?.value?.trim() || "",
     originZip: listingForm.querySelector('input[name="shippingOriginZip"]')?.value?.trim() || "",
     originStreet1: listingForm.querySelector('input[name="shippingOriginStreet1"]')?.value?.trim() || "",
@@ -712,8 +712,8 @@ function shippingModeHelp(config = getDraftShippingConfig()) {
 
   if (ElevenZeroApp.config?.shippoConfigured) {
     return config.originZip
-      ? "Buyer address will be used to estimate shipping at checkout. Exact carrier details can be refined later."
-      : "Add the shipping ZIP code so buyers can see a better delivery estimate.";
+      ? "Eleven Zero will calculate the buyer’s live rate and create your prepaid label after payment."
+      : "Add the private ship-from address so Eleven Zero can calculate the rate and create your label.";
   }
 
   return config.originZip
@@ -1910,7 +1910,16 @@ async function handleListingSubmit(event) {
   if (payload.shippingMode === "calculated" && !String(payload.shippingOriginZip || "").trim()) {
     ElevenZeroApp.setStatus(
       listingStatus,
-      "Add the ZIP code your paddle ships from, or choose free shipping / flat shipping.",
+      "Add the ZIP code your paddle ships from.",
+      "warning"
+    );
+    return;
+  }
+
+  if (payload.shippingMode === "calculated" && !String(payload.shippingOriginStreet1 || "").trim()) {
+    ElevenZeroApp.setStatus(
+      listingStatus,
+      "Add the private street address the paddle will ship from so we can create the prepaid label.",
       "warning"
     );
     return;

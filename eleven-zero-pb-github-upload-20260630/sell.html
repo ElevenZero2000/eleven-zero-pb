@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260717sell1" />
+    <link rel="stylesheet" href="./styles.css?v=20260721shipping1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260717sell1" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -126,23 +126,40 @@
 
                 <div class="seller-photo-preview seller-photo-preview-compact" data-photo-preview></div>
 
-                <div class="seller-shipping-compact-grid">
-                  <label>
-                    Delivery
-                    <select name="shippingMode" data-shipping-mode>
-                      <option value="calculated">Calculated at checkout</option>
-                      <option value="flat">Flat shipping fee</option>
-                      <option value="free">Free shipping</option>
-                    </select>
-                  </label>
-                  <label>
-                    ZIP code
-                    <input type="text" name="shippingOriginZip" placeholder="33101" />
-                  </label>
-                  <label data-shipping-flat-field class="seller-conditional-field is-hidden seller-field-wide">
-                    Flat shipping amount
-                    <input type="text" name="shippingFlat" placeholder="$12" />
-                  </label>
+                <div class="seller-managed-shipping">
+                  <input type="hidden" name="shippingMode" value="calculated" data-shipping-mode />
+                  <div class="seller-managed-shipping-copy">
+                    <span class="seller-managed-shipping-icon" aria-hidden="true">↗</span>
+                    <div>
+                      <strong>Prepaid shipping handled by Eleven Zero</strong>
+                      <p>We calculate the buyer’s rate and create your label after the paddle sells.</p>
+                    </div>
+                  </div>
+                  <div class="seller-shipping-compact-grid">
+                    <label class="seller-field-wide">
+                      Ship-from street address
+                      <input
+                        type="text"
+                        name="shippingOriginStreet1"
+                        placeholder="123 Main Street"
+                        autocomplete="shipping address-line1"
+                      />
+                      <small>Private—used only for the prepaid label and return address.</small>
+                    </label>
+                    <label>
+                      Ship-from ZIP code
+                      <input
+                        type="text"
+                        name="shippingOriginZip"
+                        placeholder="33101"
+                        inputmode="numeric"
+                        autocomplete="shipping postal-code"
+                      />
+                    </label>
+                  </div>
+                  <p class="seller-managed-shipping-note">
+                    Standard paddle packaging is selected automatically. You will never need to shop for a rate or buy a label yourself.
+                  </p>
                 </div>
               </article>
 
@@ -190,7 +207,7 @@
     </div>
 
     <script src="./app.js?v=20260703f"></script>
-    <script src="./marketplace.js?v=20260717sell1"></script>
+    <script src="./marketplace.js?v=20260721shipping1"></script>
     <script src="./header-tweaks.js?v=20260717sell1"></script>
   </body>
 </html>

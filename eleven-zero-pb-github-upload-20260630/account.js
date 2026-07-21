@@ -7,6 +7,7 @@ const statTrainers = document.querySelector("[data-account-stat-trainers]");
 const statReviews = document.querySelector("[data-account-stat-reviews]");
 const accountListings = document.querySelector("[data-account-listings]");
 const accountTrainers = document.querySelector("[data-account-trainers]");
+const accountSales = document.querySelector("[data-account-sales]");
 const sellerPill = document.querySelector("[data-seller-pill]");
 const sellerSummary = document.querySelector("[data-seller-summary]");
 const sellerProgress = document.querySelector("[data-seller-progress]");
@@ -84,6 +85,60 @@ function renderTrainerItem(item) {
       <span>${ElevenZeroApp.escapeHtml(item.level)} · ${ElevenZeroApp.escapeHtml(
         item.format
       )} · ${ElevenZeroApp.escapeHtml(item.rate)}</span>
+    </article>
+  `;
+}
+
+function formatCents(value) {
+  const amount = Number(value || 0) / 100;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount);
+}
+
+function renderSaleItem(item) {
+  const title = [item.brand, item.model].filter(Boolean).join(" ") || "Paddle order";
+  const isLabelReady = item.shipping_status === "label_ready" && item.shippo_label_url;
+  const statusLabel = isLabelReady
+    ? "Label ready"
+    : item.status === "paid" && ["error", "attention_needed"].includes(item.shipping_status)
+      ? "Shipping help needed"
+      : item.status === "paid"
+        ? "Preparing label"
+        : item.status === "expired"
+          ? "Checkout expired"
+          : "Awaiting payment";
+  const shippingLine = [item.shipping_carrier, item.shipping_service].filter(Boolean).join(" · ");
+  const actions = [];
+
+  if (isLabelReady) {
+    actions.push(
+      `<a href="${ElevenZeroApp.escapeHtml(item.shippo_label_url)}" target="_blank" rel="noopener noreferrer">Print prepaid label</a>`
+    );
+  }
+  if (item.tracking_url) {
+    actions.push(
+      `<a href="${ElevenZeroApp.escapeHtml(item.tracking_url)}" target="_blank" rel="noopener noreferrer">Track package</a>`
+    );
+  }
+
+  return `
+    <article class="list-item">
+      <strong>${ElevenZeroApp.escapeHtml(title)}</strong>
+      <span>${ElevenZeroApp.escapeHtml(formatCents(item.amount_total_cents))} total · ${ElevenZeroApp.escapeHtml(
+        formatCents(item.shipping_amount_cents)
+      )} shipping</span>
+      ${shippingLine ? `<span>${ElevenZeroApp.escapeHtml(shippingLine)}</span>` : ""}
+      <span class="list-item-status ${isLabelReady ? "list-item-status-ready" : "list-item-status-pending"}">
+        ${ElevenZeroApp.escapeHtml(statusLabel)}
+      </span>
+      ${
+        item.tracking_number
+          ? `<span>Tracking · ${ElevenZeroApp.escapeHtml(item.tracking_number)}</span>`
+          : ""
+      }
+      ${actions.length ? `<div class="seller-sale-actions">${actions.join("")}</div>` : ""}
     </article>
   `;
 }
@@ -761,6 +816,13 @@ async function loadDashboard() {
       renderTrainerItem,
       "No trainer profiles yet",
       "Publish your first trainer profile from the trainers page."
+    );
+    renderDashboardList(
+      accountSales,
+      response.recentSales || [],
+      renderSaleItem,
+      "No sales yet",
+      "Paid orders and prepaid Shippo labels will appear here."
     );
     renderSellerProfile(response.sellerProfile || response.user?.sellerProfile);
 
