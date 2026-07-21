@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260721photo1" />
+    <link rel="stylesheet" href="./styles.css?v=20260721stripegate1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260717sell1" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -163,8 +163,17 @@
                 </div>
               </article>
 
+              <div class="seller-payout-gate is-hidden" data-seller-payout-gate>
+                <span class="seller-payout-gate-icon" aria-hidden="true">$</span>
+                <div>
+                  <strong>Stripe payouts are required before review</strong>
+                  <p>Connect the bank account where you want to receive paddle-sale payouts. Your listing draft stays saved while you complete setup.</p>
+                </div>
+                <a class="button button-secondary" href="./account.html#seller-payouts">Set up Stripe payouts</a>
+              </div>
+
               <div class="seller-submit-strip seller-submit-strip-focused">
-                <button class="button button-dark seller-submit-button" type="submit">
+                <button class="button button-dark seller-submit-button" type="submit" data-seller-submit>
                   Submit listing for review
                 </button>
 
@@ -207,7 +216,7 @@
     </div>
 
     <script src="./app.js?v=20260703f"></script>
-    <script src="./marketplace.js?v=20260721photo1"></script>
+    <script src="./marketplace.js?v=20260721stripegate1"></script>
     <script src="./header-tweaks.js?v=20260717sell1"></script>
   </body>
 </html>

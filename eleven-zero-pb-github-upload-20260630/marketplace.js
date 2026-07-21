@@ -60,6 +60,8 @@ const sellerLivePreview = document.querySelector("[data-seller-live-preview]");
 const sellerNotesCounter = document.querySelector("[data-seller-notes-counter]");
 const sellerDraftStatus = document.querySelector("[data-seller-draft-status]");
 const clearSellerDraftButton = document.querySelector("[data-clear-seller-draft]");
+const sellerSubmitButton = listingForm?.querySelector("[data-seller-submit]");
+const sellerPayoutGate = document.querySelector("[data-seller-payout-gate]");
 const shippingModeInput = listingForm?.querySelector('[name="shippingMode"]');
 const shippingFlatField = listingForm?.querySelector("[data-shipping-flat-field]");
 
@@ -802,7 +804,7 @@ function renderSellerLivePreview() {
   const theme = listingThemes[category] || listingThemes.control;
   const coverImage = listingState.draftImages[0] || "";
   const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
-  const statusLabel = sellerProfile?.readyForPayouts ? "Seller setup ready" : "Listing ready · payout setup later";
+  const statusLabel = sellerProfile?.readyForPayouts ? "Seller setup ready" : "Stripe payouts required";
 
   const specs = [
     color ? `<span>${ElevenZeroApp.escapeHtml(color)}</span>` : "",
@@ -1358,10 +1360,6 @@ function renderBrandPills() {
 }
 
 function renderSellerReadiness() {
-  if (!sellerReadinessTitle || !sellerReadinessPill || !sellerReadinessCopy || !sellerReadinessGrid) {
-    return;
-  }
-
   const basicsReady = Boolean(
     listingForm?.querySelector('input[name="brand"]')?.value?.trim() &&
       listingForm?.querySelector('input[name="model"]')?.value?.trim() &&
@@ -1372,7 +1370,7 @@ function renderSellerReadiness() {
   );
   const shippingConfig = getDraftShippingConfig();
   const flatShippingAmount = Number((shippingConfig.flat || "").replace(/[^\d]/g, ""));
-  const calculatedShippingReady = Boolean(shippingConfig.originZip);
+  const calculatedShippingReady = Boolean(shippingConfig.originZip && shippingConfig.originStreet1);
   const shippingReady =
     shippingConfig.mode === "free" ||
     (shippingConfig.mode === "flat" && flatShippingAmount > 0) ||
@@ -1382,27 +1380,42 @@ function renderSellerReadiness() {
   const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
   const payoutsReady = Boolean(sellerProfile?.readyForPayouts);
 
-  const completedSteps = [signedIn, basicsReady, buyerClarityReady, shippingReady, photosReady].filter(Boolean).length;
-  sellerReadinessPill.textContent = `${completedSteps}/5 ready`;
+  const completedSteps = [signedIn, basicsReady, buyerClarityReady, shippingReady, photosReady, payoutsReady].filter(Boolean).length;
+
+  if (sellerSubmitButton) {
+    sellerSubmitButton.textContent = signedIn && !payoutsReady
+      ? "Set up Stripe to submit"
+      : "Submit listing for review";
+  }
+
+  if (sellerPayoutGate) {
+    sellerPayoutGate.classList.toggle("is-hidden", !signedIn || payoutsReady);
+  }
+
+  if (!sellerReadinessTitle || !sellerReadinessPill || !sellerReadinessCopy || !sellerReadinessGrid) {
+    return;
+  }
+
+  sellerReadinessPill.textContent = `${completedSteps}/6 ready`;
 
   if (!signedIn) {
     sellerReadinessTitle.textContent = "Sign in to start selling";
     sellerReadinessCopy.textContent =
       "Create or sign in to your account so you can save your listing and submit it for Eleven Zero PB review.";
-  } else if (completedSteps < 5) {
+  } else if (completedSteps < 6) {
     sellerReadinessTitle.textContent = "You are building a strong listing";
     sellerReadinessCopy.textContent =
       payoutsReady
         ? "Finish the remaining listing and shipping details below and this paddle will be ready to submit for review."
-        : "Finish the remaining listing and shipping details below. You can submit first and finish payout setup later from the Account page.";
+        : "Finish the listing details below and connect Stripe payouts before submitting it for review.";
   } else if (payoutsReady) {
     sellerReadinessTitle.textContent = "Ready to submit";
     sellerReadinessCopy.textContent =
       "Your listing, shipping setup, and seller account all look complete. Submit it when you are ready and we’ll review it before it goes live.";
   } else {
-    sellerReadinessTitle.textContent = "Ready for review";
+    sellerReadinessTitle.textContent = "Stripe setup required";
     sellerReadinessCopy.textContent =
-      "Your listing can be submitted now. Finish payout setup later in Account before online checkout is enabled.";
+      "Your paddle details are ready. Finish Stripe payout setup before submitting the listing for review.";
   }
 
   sellerReadinessGrid.innerHTML = [
@@ -1424,9 +1437,9 @@ function renderSellerReadiness() {
       photosReady ? `${listingState.draftImages.length} photo${listingState.draftImages.length === 1 ? "" : "s"} ready.` : "Add at least one photo."
     ),
     sellerChecklistItem(
-      "Payouts later",
+      "Stripe payouts",
       payoutsReady,
-      payoutsReady ? "Seller payments already look ready." : "Finish payout setup later in Account for checkout."
+      payoutsReady ? "Seller payments are ready." : "Required before this listing can be submitted for review."
     ),
   ].join("");
 }
@@ -1894,6 +1907,17 @@ async function handleListingSubmit(event) {
     return;
   }
 
+  const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
+  if (!sellerProfile?.readyForPayouts) {
+    const payoutMessage =
+      "Finish Stripe payout setup before submitting this paddle for review. Your draft will stay saved here.";
+    ElevenZeroApp.setStatus(listingStatus, payoutMessage, "warning");
+    sellerPayoutGate?.classList.remove("is-hidden");
+    sellerPayoutGate?.scrollIntoView({ behavior: "smooth", block: "center" });
+    sellerPayoutGate?.querySelector("a")?.focus();
+    return;
+  }
+
   if (listingState.imageProcessing) {
     ElevenZeroApp.setStatus(
       listingStatus,
@@ -1972,12 +1996,9 @@ async function handleListingSubmit(event) {
     renderPhotoPreview();
     renderSellerDraftStatus();
 
-    const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
     ElevenZeroApp.setStatus(
       listingStatus,
-      sellerProfile?.readyForPayouts
-        ? `${payload.brand} ${payload.model} was submitted for review. Once approved, it will go live with its own detail page.`
-        : `${payload.brand} ${payload.model} was submitted for review. Next step: finish payout setup in Account before online checkout is enabled after approval.`,
+      `${payload.brand} ${payload.model} was submitted for review. Once approved, it will go live with its own detail page.`,
       "success"
     );
     await loadListings();

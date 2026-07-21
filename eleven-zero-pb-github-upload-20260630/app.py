@@ -4335,6 +4335,28 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
 
     def handle_create_listing(self, user: dict, body: dict):
+        try:
+            seller_profile = self.fetch_seller_profile(user["id"], force_refresh=True)["sellerProfile"]
+        except (RuntimeError, ValueError):
+            try:
+                seller_profile = self.fetch_seller_profile(user["id"])["sellerProfile"]
+            except ValueError:
+                seller_profile = stripe_profile_from_row({})
+
+        if not seller_profile["readyForPayouts"] or not seller_profile["connectedAccountId"]:
+            self.send_json(
+                {
+                    "error": (
+                        "Finish Stripe payout setup before submitting this paddle for review. "
+                        "Your draft is still saved on this device."
+                    ),
+                    "code": "seller_payouts_required",
+                    "actionUrl": "./account.html#seller-payouts",
+                },
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
         brand = str(body.get("brand", "")).strip()
         model = str(body.get("model", "")).strip()
         color = str(body.get("color", "")).strip()
