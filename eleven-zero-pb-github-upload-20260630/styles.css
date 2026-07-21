@@ -22,6 +22,558 @@
   --body: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
 }
 
+/* Simplified trainers directory */
+.trainers-page .trainer-simple-main {
+  display: grid;
+  gap: 18px;
+  margin-top: 30px;
+}
+
+.trainers-page .trainer-simple-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+  gap: 18px;
+}
+
+.trainers-page .trainer-simple-intro,
+.trainers-page .trainer-simple-search-card,
+.trainers-page .trainer-simple-directory,
+.trainers-page .trainer-simple-accordion {
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  border-radius: 34px;
+  box-shadow: 0 22px 54px rgba(3, 26, 14, 0.08);
+}
+
+.trainers-page .trainer-simple-intro {
+  display: flex;
+  min-height: 420px;
+  padding: 48px;
+  flex-direction: column;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 90% 10%, rgba(8, 233, 90, 0.2), transparent 26%),
+    linear-gradient(145deg, #06351d, #031d10);
+  color: #fff;
+}
+
+.trainers-page .trainer-simple-intro .eyebrow {
+  color: var(--acid);
+}
+
+.trainers-page .trainer-simple-intro h1 {
+  max-width: 8ch;
+  margin: 18px 0 0;
+  font-family: var(--display);
+  font-size: clamp(4rem, 6vw, 6.5rem);
+  line-height: 0.86;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-intro > p:not(.eyebrow) {
+  max-width: 35rem;
+  margin: 24px 0 0;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 1.04rem;
+  line-height: 1.65;
+}
+
+.trainers-page .trainer-simple-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.trainers-page .trainer-simple-intro .button-secondary {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.trainers-page .trainer-simple-search-card {
+  display: flex;
+  padding: 38px;
+  flex-direction: column;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.trainers-page .trainer-simple-search-heading {
+  margin-bottom: 28px;
+}
+
+.trainers-page .trainer-simple-search-heading h2 {
+  max-width: 10ch;
+  margin: 12px 0 0;
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: clamp(3rem, 4.7vw, 4.8rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-search-heading > p:last-child {
+  max-width: 31rem;
+  margin: 16px 0 0;
+  color: rgba(18, 18, 18, 0.62);
+  line-height: 1.55;
+}
+
+.trainers-page .trainer-simple-search {
+  grid-template-columns: minmax(220px, 1fr) 150px 170px;
+  gap: 12px;
+}
+
+.trainers-page .trainer-simple-search .finder-submit {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.trainers-page .trainer-simple-search-card .finder-status {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(3, 45, 23, 0.05);
+  color: rgba(18, 18, 18, 0.68);
+  font-size: 0.9rem;
+}
+
+.trainers-page .trainer-simple-stats {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.trainers-page .trainer-simple-stats article {
+  display: grid;
+  gap: 5px;
+  min-height: 108px;
+  padding: 22px 26px;
+  align-content: center;
+}
+
+.trainers-page .trainer-simple-stats article + article {
+  border-left: 1px solid rgba(3, 45, 23, 0.08);
+}
+
+.trainers-page .trainer-simple-stats strong {
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.trainers-page .trainer-simple-stats span {
+  color: rgba(18, 18, 18, 0.6);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-directory {
+  padding: 38px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.trainers-page .trainer-simple-results-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+  align-items: end;
+}
+
+.trainers-page .trainer-simple-results-head h2 {
+  margin: 10px 0 0;
+  font-family: var(--display);
+  font-size: clamp(3rem, 5vw, 5rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-results-head > p {
+  max-width: 31rem;
+  margin: 0;
+  color: rgba(18, 18, 18, 0.64);
+  line-height: 1.6;
+}
+
+.trainers-page .trainer-simple-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 30px;
+}
+
+.trainers-page .trainer-simple-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.trainers-page .trainer-simple-load-more [hidden] {
+  display: none;
+}
+
+.trainers-page .trainer-simple-card {
+  display: flex;
+  min-width: 0;
+  min-height: 430px;
+  padding: 24px;
+  flex-direction: column;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(3, 26, 14, 0.06);
+}
+
+.trainers-page .trainer-simple-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.trainers-page .trainer-simple-card .trainer-avatar {
+  min-width: 56px;
+  min-height: 56px;
+  border-radius: 18px;
+}
+
+.trainers-page .trainer-simple-card .trainer-heading h3 {
+  margin: 0;
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: 1.85rem;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-card .trainer-heading p {
+  margin: 7px 0 0;
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 0.9rem;
+}
+
+.trainers-page .trainer-simple-card .trainer-rate {
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.trainers-page .trainer-simple-trust,
+.trainers-page .trainer-simple-tags,
+.trainers-page .trainer-simple-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.trainers-page .trainer-simple-trust {
+  margin-top: 22px;
+}
+
+.trainers-page .trainer-simple-trust .trainer-rating-pill,
+.trainers-page .trainer-simple-trust .trainer-tenure-pill {
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 0.78rem;
+}
+
+.trainers-page .trainer-simple-tags {
+  margin-top: 14px;
+}
+
+.trainers-page .trainer-simple-tags span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(3, 45, 23, 0.055);
+  color: rgba(3, 45, 23, 0.78);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.trainers-page .trainer-simple-bio {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 20px 0 0;
+  color: rgba(18, 18, 18, 0.7);
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.trainers-page .trainer-simple-card-foot {
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: auto;
+  padding-top: 22px;
+  align-items: end;
+}
+
+.trainers-page .trainer-simple-card-foot > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.trainers-page .trainer-simple-card-foot strong,
+.trainers-page .trainer-simple-card-foot span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trainers-page .trainer-simple-card-foot strong {
+  color: var(--forest);
+  font-size: 0.88rem;
+}
+
+.trainers-page .trainer-simple-card-foot span {
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.78rem;
+}
+
+.trainers-page .trainer-simple-card-foot .button {
+  min-height: 42px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.trainers-page .trainer-simple-secondary {
+  display: grid;
+  gap: 12px;
+}
+
+.trainers-page .trainer-simple-accordion {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.trainers-page .trainer-simple-accordion summary {
+  display: flex;
+  min-height: 112px;
+  padding: 26px 32px;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.trainers-page .trainer-simple-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.trainers-page .trainer-simple-accordion summary span {
+  display: grid;
+  gap: 7px;
+}
+
+.trainers-page .trainer-simple-accordion summary small {
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-accordion summary strong {
+  color: var(--forest);
+  font-size: 1.18rem;
+}
+
+.trainers-page .trainer-simple-accordion summary b {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--forest);
+  color: #fff;
+  font-size: 1.5rem;
+  transition: transform 160ms ease;
+}
+
+.trainers-page .trainer-simple-accordion[open] summary b {
+  transform: rotate(45deg);
+}
+
+.trainers-page .trainer-simple-accordion-body {
+  margin-top: 0;
+  padding: 30px 32px 32px;
+  border-top: 1px solid rgba(3, 45, 23, 0.08);
+}
+
+.trainers-page .trainer-simple-join-body {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  gap: 32px;
+}
+
+.trainers-page .trainer-simple-join-copy h2 {
+  margin: 14px 0 0;
+  font-family: var(--display);
+  font-size: clamp(2.8rem, 4vw, 4.2rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-simple-join-copy > p:last-child {
+  max-width: 32rem;
+  margin: 18px 0 0;
+  color: rgba(18, 18, 18, 0.68);
+  line-height: 1.65;
+}
+
+.trainers-page .trainer-simple-accordion .seller-form {
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  background: rgba(247, 250, 247, 0.86);
+}
+
+@media (max-width: 1100px) {
+  .trainers-page .trainer-simple-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .trainers-page .trainer-simple-intro {
+    min-height: 360px;
+  }
+
+  .trainers-page .trainer-simple-intro h1 {
+    max-width: 10ch;
+  }
+
+  .trainers-page .trainer-simple-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .trainers-page .trainer-simple-main {
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .trainers-page .trainer-simple-intro,
+  .trainers-page .trainer-simple-search-card,
+  .trainers-page .trainer-simple-directory,
+  .trainers-page .trainer-simple-accordion {
+    border-radius: 26px;
+  }
+
+  .trainers-page .trainer-simple-intro,
+  .trainers-page .trainer-simple-search-card,
+  .trainers-page .trainer-simple-directory {
+    padding: 26px 22px;
+  }
+
+  .trainers-page .trainer-simple-intro {
+    min-height: 390px;
+  }
+
+  .trainers-page .trainer-simple-intro h1 {
+    font-size: clamp(3.4rem, 17vw, 5rem);
+  }
+
+  .trainers-page .trainer-simple-actions,
+  .trainers-page .trainer-simple-actions .button {
+    width: 100%;
+  }
+
+  .trainers-page .trainer-simple-search {
+    grid-template-columns: 1fr;
+  }
+
+  .trainers-page .trainer-simple-search .finder-submit {
+    grid-column: auto;
+  }
+
+  .trainers-page .trainer-simple-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-radius: 24px;
+  }
+
+  .trainers-page .trainer-simple-stats article {
+    min-height: 96px;
+    padding: 18px;
+  }
+
+  .trainers-page .trainer-simple-stats article + article {
+    border-left: 0;
+  }
+
+  .trainers-page .trainer-simple-stats article:nth-child(even) {
+    border-left: 1px solid rgba(3, 45, 23, 0.08);
+  }
+
+  .trainers-page .trainer-simple-stats article:nth-child(n + 3) {
+    border-top: 1px solid rgba(3, 45, 23, 0.08);
+  }
+
+  .trainers-page .trainer-simple-results-head {
+    display: grid;
+    gap: 14px;
+    align-items: start;
+  }
+
+  .trainers-page .trainer-simple-results-head h2 {
+    font-size: clamp(2.8rem, 14vw, 4.1rem);
+  }
+
+  .trainers-page .trainer-simple-grid {
+    grid-template-columns: 1fr;
+    margin-top: 22px;
+  }
+
+  .trainers-page .trainer-simple-card {
+    min-height: 410px;
+  }
+
+  .trainers-page .trainer-simple-card-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .trainers-page .trainer-simple-card .trainer-rate {
+    grid-column: 2;
+    width: fit-content;
+  }
+
+  .trainers-page .trainer-simple-card-foot {
+    display: grid;
+    align-items: stretch;
+  }
+
+  .trainers-page .trainer-simple-card-foot .button {
+    width: 100%;
+  }
+
+  .trainers-page .trainer-simple-accordion summary {
+    min-height: 96px;
+    padding: 22px;
+  }
+
+  .trainers-page .trainer-simple-accordion summary strong {
+    font-size: 1rem;
+  }
+
+  .trainers-page .trainer-simple-accordion-body {
+    padding: 22px;
+  }
+
+  .trainers-page .trainer-review-layout,
+  .trainers-page .trainer-simple-join-body {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* SELL PAGE — SIMPLE LISTING FLOW */
 .sell-simple-page .seller-simple-section {
   width: min(100%, 1120px);
