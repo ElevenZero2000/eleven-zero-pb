@@ -318,6 +318,33 @@
   min-width: 210px;
 }
 
+/* Shipping feedback appears inside a light checkout card. Keep every state
+   high contrast instead of inheriting the dark seller-dashboard colors. */
+.cart-checkout-panel .seller-status {
+  border-color: rgba(3, 45, 23, 0.1);
+  background: rgba(3, 45, 23, 0.045);
+  color: rgba(18, 18, 18, 0.76);
+  font-weight: 700;
+}
+
+.cart-checkout-panel .seller-status.is-success {
+  border-color: rgba(13, 107, 50, 0.22);
+  background: #eaf9ee;
+  color: #0b5b2c;
+}
+
+.cart-checkout-panel .seller-status.is-warning {
+  border-color: rgba(154, 119, 0, 0.24);
+  background: #fff8d6;
+  color: #695400;
+}
+
+.cart-checkout-panel .seller-status.is-error {
+  border-color: rgba(196, 55, 0, 0.24);
+  background: #fff0e9;
+  color: #8d2f00;
+}
+
 @media (max-width: 1080px) {
   .cart-hero,
   .cart-layout {
