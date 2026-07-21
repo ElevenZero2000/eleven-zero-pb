@@ -947,6 +947,24 @@
   text-transform: none;
 }
 
+.sell-simple-page .seller-photo-meta.is-success {
+  color: #0d6b32;
+}
+
+.sell-simple-page .seller-photo-meta.is-warning {
+  color: #735b00;
+}
+
+.sell-simple-page .seller-photo-meta.is-error {
+  color: #a53000;
+}
+
+.sell-simple-page .seller-file-dropzone.has-photo-error {
+  border-color: rgba(196, 55, 0, 0.68);
+  background: #fff4ef;
+  box-shadow: 0 0 0 3px rgba(196, 55, 0, 0.1);
+}
+
 .sell-simple-page .seller-photo-placeholder {
   padding: 11px 12px;
   border-color: rgba(3, 45, 23, 0.12);
@@ -993,6 +1011,18 @@
 
 .sell-simple-page .seller-status.is-success {
   color: #0d5a2a;
+}
+
+.sell-simple-page .seller-status.is-warning {
+  border: 1px solid rgba(154, 119, 0, 0.22);
+  background: #fff9d8;
+  color: #6e5700;
+}
+
+.sell-simple-page .seller-status.is-error {
+  border: 1px solid rgba(196, 55, 0, 0.22);
+  background: #fff0e9;
+  color: #9c2f00;
 }
 
 .sell-simple-page .seller-draft-status-inline {

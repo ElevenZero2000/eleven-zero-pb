@@ -732,12 +732,26 @@ function updatePhotoMeta() {
   const total = listingState.draftImages.length;
   const remaining = Math.max(0, 4 - total);
 
+  photoMeta.classList.remove("is-success", "is-warning", "is-error");
+  photoDropzone?.classList.remove("has-photo-error");
+
   photoMeta.textContent =
     total === 0
       ? "0 of 4 photos selected."
       : total >= 4
         ? "4 of 4 photos selected · upload limit reached."
         : `${total} of 4 photos selected · ${remaining} more available.`;
+}
+
+function setPhotoMetaStatus(message, tone = "warning") {
+  if (!photoMeta) return;
+
+  photoMeta.textContent = message;
+  photoMeta.classList.remove("is-success", "is-warning", "is-error");
+  photoMeta.classList.add(
+    tone === "error" ? "is-error" : tone === "success" ? "is-success" : "is-warning"
+  );
+  photoDropzone?.classList.toggle("has-photo-error", tone === "error");
 }
 
 function searchTokens(query) {
@@ -1783,7 +1797,13 @@ async function prepareListingPhotos(fileList, remainingSlots = MAX_LISTING_PHOTO
   };
 }
 
-async function handlePhotoSelection(fileList = photoInput?.files) {
+async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
+  const fileList =
+    fileListOrEvent?.currentTarget?.files ||
+    fileListOrEvent?.target?.files ||
+    fileListOrEvent ||
+    photoInput?.files;
+
   if (!fileList?.length) {
     renderPhotoPreview();
     return;
@@ -1802,6 +1822,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
 
   listingState.imageProcessing = true;
   renderPhotoPreview();
+  setPhotoMetaStatus("Preparing your photo previews…", "warning");
   ElevenZeroApp.setStatus(
     listingStatus,
     "Preparing your listing photos for upload...",
@@ -1819,6 +1840,12 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
     }
     listingState.draftImages = [...listingState.draftImages, ...prepared.images];
     renderPhotoPreview();
+    setPhotoMetaStatus(
+      `${listingState.draftImages.length} photo${
+        listingState.draftImages.length === 1 ? " is" : "s are"
+      } ready to submit.`,
+      "success"
+    );
 
     const messageBits = [
       `${listingState.draftImages.length} photo${
@@ -1848,6 +1875,7 @@ async function handlePhotoSelection(fileList = photoInput?.files) {
     );
   } catch (error) {
     renderPhotoPreview();
+    setPhotoMetaStatus(error.message, "error");
     ElevenZeroApp.setStatus(listingStatus, error.message, "error");
   } finally {
     listingState.imageProcessing = false;
@@ -1876,12 +1904,16 @@ async function handleListingSubmit(event) {
   }
 
   if (!listingState.draftImages.length) {
+    const photoMessage =
+      "Please add at least one paddle photo before submitting the listing for review.";
     ElevenZeroApp.setStatus(
       listingStatus,
-      "Please add at least one paddle photo before submitting the listing for review.",
+      photoMessage,
       "warning"
     );
-    photoInput?.focus();
+    setPhotoMetaStatus(photoMessage, "error");
+    photoDropzone?.scrollIntoView({ behavior: "smooth", block: "center" });
+    photoDropzone?.focus();
     return;
   }
 
@@ -2088,7 +2120,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     setMobileFiltersOpen(!isOpen);
   });
   searchForm?.addEventListener("submit", (event) => event.preventDefault());
-  photoInput?.addEventListener("change", handlePhotoSelection);
+  photoInput?.addEventListener("change", (event) => {
+    handlePhotoSelection(event.currentTarget?.files);
+  });
   listingForm?.addEventListener("submit", handleListingSubmit);
   listingForm?.addEventListener("input", () => {
     updateSellerNotesCounter();
