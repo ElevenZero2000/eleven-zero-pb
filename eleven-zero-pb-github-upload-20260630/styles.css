@@ -5935,6 +5935,242 @@ body[data-nav="sell"] .seller-file-dropzone {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.admin-commerce-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.86fr) minmax(0, 1.5fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+.admin-commerce-grid > *,
+.admin-notification > div {
+  min-width: 0;
+}
+
+.admin-commerce-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(8, 233, 90, 0.12);
+  color: var(--forest);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-live-badge span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(8, 233, 90, 0.12);
+}
+
+.admin-notification-list {
+  display: grid;
+  gap: 10px;
+  max-height: 430px;
+  margin-top: 20px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.admin-notification {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.admin-notification-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(247, 241, 80, 0.32);
+  color: var(--forest);
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.admin-notification-purchase .admin-notification-icon {
+  background: var(--forest);
+  color: var(--green);
+}
+
+.admin-notification strong,
+.admin-notification span {
+  display: block;
+}
+
+.admin-notification p {
+  margin: 3px 0 0;
+  color: rgba(18, 18, 18, 0.74);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.admin-notification div > span {
+  margin-top: 5px;
+  color: rgba(18, 18, 18, 0.5);
+  font-size: 0.75rem;
+}
+
+.admin-notification > a {
+  color: var(--forest);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.admin-period-switcher {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(3, 45, 23, 0.07);
+}
+
+.admin-period-switcher button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(3, 45, 23, 0.64);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-period-switcher button.is-active {
+  background: var(--forest);
+  color: white;
+  box-shadow: 0 6px 14px rgba(3, 45, 23, 0.18);
+}
+
+.admin-sales-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.admin-sales-summary div {
+  padding: 14px;
+  border: 1px solid rgba(3, 45, 23, 0.07);
+  border-radius: 16px;
+  background: rgba(8, 233, 90, 0.07);
+}
+
+.admin-sales-summary strong,
+.admin-sales-summary span {
+  display: block;
+}
+
+.admin-sales-summary strong {
+  font-family: var(--display);
+  font-size: clamp(1.4rem, 2.2vw, 2rem);
+  line-height: 1;
+}
+
+.admin-sales-summary span {
+  margin-top: 5px;
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 0.78rem;
+}
+
+.admin-sales-chart-wrap {
+  margin-top: 24px;
+  overflow-x: auto;
+}
+
+.admin-sales-chart {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(36px, 1fr));
+  align-items: end;
+  gap: 8px;
+  min-width: 620px;
+  height: 250px;
+  padding: 12px 4px 0;
+  border-bottom: 1px solid rgba(3, 45, 23, 0.12);
+}
+
+.admin-chart-column {
+  display: grid;
+  grid-template-rows: 20px 1fr 34px;
+  align-items: end;
+  gap: 6px;
+  height: 100%;
+  text-align: center;
+}
+
+.admin-chart-value,
+.admin-chart-label {
+  color: rgba(18, 18, 18, 0.56);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.admin-chart-track {
+  position: relative;
+  width: min(30px, 80%);
+  height: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 9px 9px 3px 3px;
+  background: rgba(3, 45, 23, 0.06);
+}
+
+.admin-chart-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-height: 3px;
+  border-radius: 9px 9px 3px 3px;
+  background: linear-gradient(180deg, var(--green), var(--forest));
+}
+
+.admin-chart-label {
+  align-self: start;
+  white-space: nowrap;
+}
+
+.admin-chart-note {
+  margin: 12px 0 0;
+  color: rgba(18, 18, 18, 0.56);
+  font-size: 0.78rem;
+}
+
+.admin-chart-empty {
+  grid-column: 1 / -1;
+  align-self: center;
+  padding: 28px;
+  color: rgba(18, 18, 18, 0.62);
+  text-align: center;
+}
+
 .admin-record-list {
   display: grid;
   gap: 12px;
@@ -8106,6 +8342,7 @@ body.has-modal-open {
   }
 
   .admin-grid,
+  .admin-commerce-grid,
   .admin-review-columns {
     grid-template-columns: 1fr;
   }
@@ -8623,6 +8860,31 @@ body.has-modal-open {
 
   .dashboard-card-head {
     flex-direction: column;
+  }
+
+  .admin-commerce-head,
+  .admin-analytics-head {
+    flex-direction: column;
+  }
+
+  .admin-period-switcher {
+    width: 100%;
+  }
+
+  .admin-period-switcher button {
+    flex: 1;
+  }
+
+  .admin-sales-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-notification {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-notification > a {
+    grid-column: 2;
   }
 
   .admin-record summary {

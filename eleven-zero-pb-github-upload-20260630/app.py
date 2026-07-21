@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import time
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -209,6 +209,134 @@ def build_content_security_policy() -> str:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_activity_datetime(value) -> datetime | None:
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(clean_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def build_sales_analytics(order_rows, now: datetime | None = None) -> dict:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+
+    def row_value(row, key, default=None):
+        try:
+            value = row[key]
+        except (KeyError, IndexError, TypeError):
+            value = default
+        return default if value is None else value
+
+    def month_at_offset(offset: int) -> tuple[int, int]:
+        absolute_month = current.year * 12 + current.month - 1 + offset
+        return absolute_month // 12, absolute_month % 12 + 1
+
+    current_quarter_index = current.year * 4 + (current.month - 1) // 3
+
+    period_specs = {
+        "day": [
+            {
+                "key": (current.date() - timedelta(days=offset)).isoformat(),
+                "label": f"{(current - timedelta(days=offset)).strftime('%b')} {(current - timedelta(days=offset)).day}",
+            }
+            for offset in range(13, -1, -1)
+        ],
+        "month": [
+            {
+                "key": f"{year:04d}-{month:02d}",
+                "label": datetime(year, month, 1).strftime("%b %Y"),
+            }
+            for year, month in (month_at_offset(offset) for offset in range(-11, 1))
+        ],
+        "quarter": [
+            {
+                "key": f"{quarter_index // 4:04d}-Q{quarter_index % 4 + 1}",
+                "label": f"Q{quarter_index % 4 + 1} {quarter_index // 4}",
+            }
+            for quarter_index in range(current_quarter_index - 7, current_quarter_index + 1)
+        ],
+        "year": [
+            {"key": str(year), "label": str(year)}
+            for year in range(current.year - 4, current.year + 1)
+        ],
+    }
+
+    analytics = {}
+    for period, specs in period_specs.items():
+        buckets = {
+            spec["key"]: {
+                "label": spec["label"],
+                "orders": 0,
+                "buyers": set(),
+                "revenueCents": 0,
+            }
+            for spec in specs
+        }
+
+        for order in order_rows:
+            activity_at = parse_activity_datetime(
+                row_value(order, "completed_at") or row_value(order, "created_at")
+            )
+            if not activity_at:
+                continue
+
+            quarter_number = (activity_at.month - 1) // 3 + 1
+            key_by_period = {
+                "day": activity_at.date().isoformat(),
+                "month": f"{activity_at.year:04d}-{activity_at.month:02d}",
+                "quarter": f"{activity_at.year:04d}-Q{quarter_number}",
+                "year": str(activity_at.year),
+            }
+            bucket = buckets.get(key_by_period[period])
+            if not bucket:
+                continue
+
+            bucket["orders"] += 1
+            buyer_id = row_value(order, "buyer_user_id")
+            if buyer_id:
+                bucket["buyers"].add(str(buyer_id))
+            bucket["revenueCents"] += int(row_value(order, "amount_total_cents", 0) or 0)
+
+        visible_buckets = []
+        summary_buyers = set()
+        summary_orders = 0
+        summary_revenue = 0
+        for spec in specs:
+            bucket = buckets[spec["key"]]
+            summary_orders += bucket["orders"]
+            summary_revenue += bucket["revenueCents"]
+            summary_buyers.update(bucket["buyers"])
+            visible_buckets.append(
+                {
+                    "label": bucket["label"],
+                    "orders": bucket["orders"],
+                    "buyers": len(bucket["buyers"]),
+                    "revenueCents": bucket["revenueCents"],
+                }
+            )
+
+        analytics[period] = {
+            "buckets": visible_buckets,
+            "summary": {
+                "orders": summary_orders,
+                "buyers": len(summary_buyers),
+                "revenueCents": summary_revenue,
+            },
+        }
+
+    return analytics
 
 
 def connect_db() -> sqlite3.Connection:
@@ -3662,6 +3790,61 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             trainer_review_count = connection.execute("SELECT COUNT(*) FROM trainer_reviews").fetchone()[0]
             court_report_count = connection.execute("SELECT COUNT(*) FROM court_reports").fetchone()[0]
 
+            paid_orders = connection.execute(
+                """
+                SELECT
+                  id,
+                  buyer_user_id,
+                  amount_total_cents,
+                  created_at,
+                  completed_at
+                FROM orders
+                WHERE status = 'paid' OR stripe_payment_status = 'paid'
+                ORDER BY COALESCE(completed_at, created_at) ASC, id ASC
+                """
+            ).fetchall()
+
+            purchase_activity = connection.execute(
+                """
+                SELECT
+                  orders.id,
+                  orders.listing_id,
+                  orders.amount_total_cents,
+                  COALESCE(orders.completed_at, orders.created_at) AS activity_at,
+                  listings.brand,
+                  listings.model,
+                  buyers.name AS buyer_name,
+                  buyers.email AS buyer_email,
+                  sellers.name AS seller_name,
+                  sellers.email AS seller_email
+                FROM orders
+                LEFT JOIN listings ON listings.id = orders.listing_id
+                LEFT JOIN users AS buyers ON buyers.id = orders.buyer_user_id
+                LEFT JOIN users AS sellers ON sellers.id = orders.seller_user_id
+                WHERE orders.status = 'paid' OR orders.stripe_payment_status = 'paid'
+                ORDER BY COALESCE(orders.completed_at, orders.created_at) DESC, orders.id DESC
+                LIMIT 20
+                """
+            ).fetchall()
+
+            listing_activity = connection.execute(
+                """
+                SELECT
+                  listings.id,
+                  listings.brand,
+                  listings.model,
+                  listings.price_usd,
+                  listings.approval_status,
+                  listings.created_at AS activity_at,
+                  users.name AS seller_name,
+                  users.email AS seller_email
+                FROM listings
+                JOIN users ON users.id = listings.user_id
+                ORDER BY listings.created_at DESC, listings.id DESC
+                LIMIT 20
+                """
+            ).fetchall()
+
             listings = connection.execute(
                 """
                 SELECT
@@ -3806,6 +3989,22 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """
             ).fetchall()
 
+        commerce_notifications = []
+        for row in purchase_activity:
+            item = row_to_dict(row)
+            item.update({"id": f"purchase-{row['id']}", "type": "purchase"})
+            commerce_notifications.append(item)
+        for row in listing_activity:
+            item = row_to_dict(row)
+            item.update({"id": f"listing-{row['id']}", "listing_id": row["id"], "type": "listing"})
+            commerce_notifications.append(item)
+
+        commerce_notifications.sort(
+            key=lambda item: parse_activity_datetime(item.get("activity_at"))
+            or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+
         return {
             "stats": {
                 "users": user_count,
@@ -3826,6 +4025,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "trainers": [serialize_admin_trainer_row(row) for row in trainers],
             "trainerReviews": [serialize_admin_trainer_review_row(row) for row in trainer_reviews],
             "courtReports": [serialize_admin_court_report_row(row) for row in court_reports],
+            "commerceNotifications": commerce_notifications[:20],
+            "salesAnalytics": build_sales_analytics(paid_orders),
         }
 
     def handle_admin_listing_update(self, body: dict):

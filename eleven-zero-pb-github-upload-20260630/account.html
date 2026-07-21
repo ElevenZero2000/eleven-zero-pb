@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260721shipping1" />
+    <link rel="stylesheet" href="./styles.css?v=20260721admin1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
   </head>
   <body data-nav="account">
@@ -193,6 +193,50 @@
                 </div>
               </div>
 
+              <div class="admin-commerce-grid">
+                <article class="dashboard-card admin-notifications-card">
+                  <div class="admin-commerce-head">
+                    <div>
+                      <p class="eyebrow">Live activity</p>
+                      <h3>Buyer and seller notifications</h3>
+                    </div>
+                    <span class="admin-live-badge"><span></span> Live</span>
+                  </div>
+                  <p class="dashboard-copy">
+                    New paddle submissions and completed purchases appear here.
+                  </p>
+                  <div class="admin-notification-list" data-admin-commerce-notifications></div>
+                </article>
+
+                <article class="dashboard-card admin-analytics-card">
+                  <div class="admin-commerce-head admin-analytics-head">
+                    <div>
+                      <p class="eyebrow">Sales analytics</p>
+                      <h3>How many people are buying</h3>
+                    </div>
+                    <div class="admin-period-switcher" aria-label="Sales chart period">
+                      <button class="is-active" type="button" data-admin-sales-period="day">Day</button>
+                      <button type="button" data-admin-sales-period="month">Month</button>
+                      <button type="button" data-admin-sales-period="quarter">Quarter</button>
+                      <button type="button" data-admin-sales-period="year">Year</button>
+                    </div>
+                  </div>
+
+                  <div class="admin-sales-summary" data-admin-sales-summary></div>
+                  <div class="admin-sales-chart-wrap">
+                    <div
+                      class="admin-sales-chart"
+                      role="img"
+                      aria-label="Unique buyers over time"
+                      data-admin-sales-chart
+                    ></div>
+                  </div>
+                  <p class="admin-chart-note" data-admin-chart-note>
+                    Each bar shows unique buyers per day for the last 14 days.
+                  </p>
+                </article>
+              </div>
+
               <div class="admin-grid">
                 <article class="dashboard-card">
                   <p class="eyebrow">Marketplace listings</p>
@@ -257,7 +301,7 @@
     </div>
 
     <script src="./app.js?v=20260703f"></script>
-    <script src="./account.js?v=20260721shipping1"></script>
+    <script src="./account.js?v=20260721admin1"></script>
     <script src="./header-tweaks.js?v=20260705f"></script>
   </body>
 </html>
