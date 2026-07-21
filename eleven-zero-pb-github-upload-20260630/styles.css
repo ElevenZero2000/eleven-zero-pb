@@ -82,6 +82,48 @@
   font-size: 0.86rem;
 }
 
+.seller-payout-gate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid rgba(154, 119, 0, 0.24);
+  border-radius: 22px;
+  background: #fff8d6;
+  color: var(--ink);
+}
+
+.seller-payout-gate.is-hidden {
+  display: none;
+}
+
+.seller-payout-gate-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--sun);
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.seller-payout-gate strong,
+.seller-payout-gate p {
+  display: block;
+}
+
+.seller-payout-gate p {
+  margin: 4px 0 0;
+  color: rgba(18, 18, 18, 0.68);
+  line-height: 1.5;
+}
+
+.seller-payout-gate .button {
+  white-space: nowrap;
+}
+
 .account-sales-details summary {
   display: flex;
   align-items: center;
@@ -134,6 +176,16 @@
   .seller-managed-shipping {
     padding: 18px;
     border-radius: 20px;
+  }
+
+  .seller-payout-gate {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .seller-payout-gate .button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }
 
