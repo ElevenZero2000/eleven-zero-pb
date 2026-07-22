@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -9,6 +11,7 @@ import re
 import secrets
 import smtplib
 import sqlite3
+import threading
 import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -41,7 +44,7 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(DATA_DIR / "eleven_zero_pb.db"))).
 SESSION_COOKIE = os.getenv("SESSION_COOKIE_NAME", "eleven_zero_session")
 SESSION_COOKIE_SECURE = env_flag("SESSION_COOKIE_SECURE", APP_ENV == "production")
 ENABLE_DEMO_DATA = env_flag("ENABLE_DEMO_DATA", APP_ENV != "production")
-ENABLE_STARTER_LISTINGS = env_flag("ENABLE_STARTER_LISTINGS", True)
+ENABLE_STARTER_LISTINGS = env_flag("ENABLE_STARTER_LISTINGS", APP_ENV != "production")
 SITE_URL = os.getenv("SITE_URL", "").strip()
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "").strip()
 PRIMARY_OWNER_EMAIL = os.getenv("PRIMARY_OWNER_EMAIL", "11zeropb@gmail.com").strip()
@@ -65,6 +68,9 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 STRIPE_COUNTRY = os.getenv("STRIPE_COUNTRY", "US").strip().upper() or "US"
 STRIPE_PLATFORM_FEE_PERCENT = float(os.getenv("PLATFORM_FEE_PERCENT", "8.5"))
 STRIPE_API_BASE = "https://api.stripe.com/v1"
+SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+RATE_LIMIT_LOCK = threading.Lock()
+RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 
 DEFAULT_PADDLE_PACKAGE = {
     "weight_oz": 24.0,
@@ -189,6 +195,9 @@ ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
 
 
 def cache_control_for_path(path: str) -> str:
+    if re.fullmatch(r"/api/listings/\d+/images/\d+", path):
+        return "public, max-age=86400"
+
     if path.startswith("/api/"):
         return "no-store"
 
@@ -219,6 +228,20 @@ def build_content_security_policy() -> str:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def rate_limit_allows(key: str, limit: int, window_seconds: int) -> bool:
+    """Small in-process guard for abuse-prone account endpoints."""
+    now = time.monotonic()
+    cutoff = now - window_seconds
+    with RATE_LIMIT_LOCK:
+        attempts = [stamp for stamp in RATE_LIMIT_BUCKETS.get(key, []) if stamp > cutoff]
+        if len(attempts) >= limit:
+            RATE_LIMIT_BUCKETS[key] = attempts
+            return False
+        attempts.append(now)
+        RATE_LIMIT_BUCKETS[key] = attempts
+    return True
 
 
 def parse_activity_datetime(value) -> datetime | None:
@@ -1114,6 +1137,9 @@ def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
     if not row:
         return None
 
+    approval_status = normalize_listing_approval_status(
+        row_value(row, "approval_status", "approved"), default="approved"
+    )
     return {
         "id": row["id"],
         "user_id": row["user_id"],
@@ -1132,6 +1158,9 @@ def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
         "review_count": row["review_count"],
         "owner_name": row["owner_name"],
         "owner_email": row["owner_email"],
+        "approval_status": approval_status,
+        "approval_label": LISTING_APPROVAL_LABELS.get(approval_status, "Pending review"),
+        "reviewed_at": row_value(row, "reviewed_at"),
     }
 
 
@@ -1223,6 +1252,7 @@ def serialize_user(row: sqlite3.Row | None) -> dict | None:
         "name": row["name"],
         "email": row["email"],
         "isAdmin": email_is_admin(row["email"]),
+        "emailVerified": bool(row_value(row, "email_verified", 1)),
     }
 
     if "created_at" in row.keys():
@@ -1325,6 +1355,93 @@ def shippo_transaction_error(transaction: dict) -> str:
 
 def transactional_email_is_configured() -> bool:
     return bool(SMTP_HOST and SMTP_PORT and SMTP_USERNAME and SMTP_PASSWORD and EMAIL_FROM)
+
+
+def create_auth_token(user_id: int, purpose: str, lifetime_minutes: int = 60) -> str:
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=lifetime_minutes)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    with closing(connect_db()) as connection:
+        connection.execute(
+            "UPDATE auth_tokens SET used_at = ? WHERE user_id = ? AND purpose = ? AND used_at IS NULL",
+            (utc_now(), user_id, purpose),
+        )
+        connection.execute(
+            """
+            INSERT INTO auth_tokens (user_id, purpose, token_hash, expires_at, used_at, created_at)
+            VALUES (?, ?, ?, ?, NULL, ?)
+            """,
+            (user_id, purpose, token_hash, expires_at, utc_now()),
+        )
+        connection.commit()
+    return token
+
+
+def send_account_action_email(
+    recipient: str,
+    subject: str,
+    heading: str,
+    copy: str,
+    button_label: str,
+    action_url: str,
+) -> None:
+    if not transactional_email_is_configured():
+        raise RuntimeError("Transactional email is not configured.")
+
+    safe_heading = escape(heading)
+    safe_copy = escape(copy)
+    safe_label = escape(button_label)
+    safe_url = escape(action_url, quote=True)
+    safe_support = escape(SUPPORT_EMAIL or EMAIL_FROM)
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"Eleven Zero PB <{EMAIL_FROM}>"
+    message["To"] = recipient
+    message.set_content(f"{heading}\n\n{copy}\n\n{action_url}\n\nQuestions? {SUPPORT_EMAIL or EMAIL_FROM}")
+    message.add_alternative(
+        f"""<!doctype html><html><body style="margin:0;background:#f6f2e8;font-family:Arial,sans-serif;color:#042814;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 14px;">
+        <table role="presentation" width="560" style="width:100%;max-width:560px;background:#fff;border-radius:24px;overflow:hidden;">
+        <tr><td style="padding:24px 30px;background:#032d17;color:#00ed64;font-size:24px;font-weight:800;">Eleven Zero PB</td></tr>
+        <tr><td style="padding:34px 30px;"><h1 style="margin:0 0 14px;font-size:30px;">{safe_heading}</h1>
+        <p style="margin:0 0 24px;color:#5d6f64;line-height:1.65;">{safe_copy}</p>
+        <a href="{safe_url}" style="display:inline-block;padding:14px 22px;border-radius:999px;background:#00ed64;color:#032d17;font-weight:800;text-decoration:none;">{safe_label}</a>
+        <p style="margin:24px 0 0;color:#7b8b82;font-size:12px;line-height:1.6;">If you did not request this, you can ignore this email. Questions? {safe_support}</p>
+        </td></tr></table></td></tr></table></body></html>""",
+        subtype="html",
+    )
+
+    if SMTP_USE_SSL:
+        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+    else:
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+    with server:
+        if SMTP_USE_TLS and not SMTP_USE_SSL:
+            server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.send_message(message)
+
+
+def send_verification_email(user_id: int, email: str) -> bool:
+    if not transactional_email_is_configured():
+        return False
+    token = create_auth_token(user_id, "verify_email", lifetime_minutes=24 * 60)
+    site_url = (SITE_URL or "http://127.0.0.1:8000").rstrip("/")
+    action_url = f"{site_url}/auth.html?mode=verify&token={urlencode({'token': token})[6:]}"
+    try:
+        send_account_action_email(
+            email,
+            "Verify your Eleven Zero PB email",
+            "Verify your email",
+            "Confirm this email address so your account and marketplace activity stay protected.",
+            "Verify email",
+            action_url,
+        )
+    except (OSError, RuntimeError, smtplib.SMTPException):
+        return False
+    return True
 
 
 def order_email_row(session_id: str) -> sqlite3.Row | None:
@@ -2216,6 +2333,7 @@ def google_places_search_courts(query: str, page_size: int = 20) -> list[dict]:
         "places.shortFormattedAddress,"
         "places.location,"
         "places.googleMapsUri,"
+        "places.websiteUri,"
         "places.primaryType,"
         "places.primaryTypeDisplayName,"
         "places.types,"
@@ -2267,12 +2385,25 @@ def init_database() -> None:
               email TEXT NOT NULL UNIQUE,
               password_salt TEXT NOT NULL,
               password_hash TEXT NOT NULL,
+              email_verified INTEGER NOT NULL DEFAULT 0,
+              email_verified_at TEXT,
               created_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
               token TEXT PRIMARY KEY,
               user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              csrf_token TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              purpose TEXT NOT NULL,
+              token_hash TEXT NOT NULL UNIQUE,
+              expires_at TEXT NOT NULL,
+              used_at TEXT,
               created_at TEXT NOT NULL
             );
 
@@ -2319,7 +2450,9 @@ def init_database() -> None:
               availability TEXT NOT NULL,
               joined_at TEXT NOT NULL,
               rating REAL NOT NULL DEFAULT 0,
-              review_count INTEGER NOT NULL DEFAULT 0
+              review_count INTEGER NOT NULL DEFAULT 0,
+              approval_status TEXT NOT NULL DEFAULT 'approved',
+              reviewed_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS trainer_reviews (
@@ -2412,14 +2545,20 @@ def init_database() -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_courts_directory_created_at ON courts_directory(created_at)"
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_tokens_lookup ON auth_tokens(purpose, token_hash, expires_at)"
+        )
 
         add_column_if_missing(connection, "users", "stripe_account_id", "TEXT")
+        add_column_if_missing(connection, "users", "email_verified", "INTEGER NOT NULL DEFAULT 1")
+        add_column_if_missing(connection, "users", "email_verified_at", "TEXT")
         add_column_if_missing(connection, "users", "stripe_details_submitted", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_charges_enabled", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_payouts_enabled", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_onboarding_complete", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_requirements_due_count", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "users", "stripe_account_status_updated_at", "TEXT")
+        add_column_if_missing(connection, "sessions", "csrf_token", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "listings", "color", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "listings", "thickness_mm", "REAL")
         add_column_if_missing(connection, "listings", "shipping_mode", "TEXT NOT NULL DEFAULT 'calculated'")
@@ -2435,6 +2574,8 @@ def init_database() -> None:
         add_column_if_missing(connection, "listings", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "listings", "sale_status", "TEXT NOT NULL DEFAULT 'available'")
         add_column_if_missing(connection, "listings", "reviewed_at", "TEXT")
+        add_column_if_missing(connection, "trainers", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
+        add_column_if_missing(connection, "trainers", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -2476,6 +2617,46 @@ def init_database() -> None:
               )
             """
         )
+
+        # Production never publishes anonymous starter content or known checkout tests.
+        # Preserve the rows for audit purposes while removing them from the public catalog.
+        if APP_ENV == "production":
+            connection.execute(
+                """
+                UPDATE listings
+                SET approval_status = 'rejected', reviewed_at = COALESCE(reviewed_at, ?)
+                WHERE user_id IS NULL AND approval_status = 'approved'
+                """,
+                (utc_now(),),
+            )
+            connection.execute(
+                """
+                UPDATE trainers
+                SET approval_status = 'rejected', reviewed_at = COALESCE(reviewed_at, ?)
+                WHERE user_id IS NULL AND approval_status = 'approved'
+                """,
+                (utc_now(),),
+            )
+            connection.execute(
+                """
+                UPDATE courts_directory
+                SET approval_status = 'rejected', reviewed_at = COALESCE(reviewed_at, ?)
+                WHERE user_id IS NULL AND approval_status = 'approved'
+                """,
+                (utc_now(),),
+            )
+            connection.execute(
+                """
+                UPDATE listings
+                SET approval_status = 'rejected', reviewed_at = COALESCE(reviewed_at, ?)
+                WHERE approval_status = 'approved'
+                  AND (
+                    lower(model) LIKE '%checkout test%'
+                    OR (lower(brand) = 'pen' AND lower(model) = 'sharpie')
+                  )
+                """,
+                (utc_now(),),
+            )
 
         listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
         trainer_count = connection.execute("SELECT COUNT(*) FROM trainers").fetchone()[0]
@@ -2922,6 +3103,17 @@ def normalize_listing_image_payload(raw_images) -> list[str]:
     return images
 
 
+def public_listing_images(row: sqlite3.Row | dict) -> list[str]:
+    """Return lightweight image URLs instead of embedding megabytes in JSON responses."""
+    images = normalize_listing_image_payload(row_value(row, "image_data_json", "[]"))
+    if images:
+        listing_id = int(row_value(row, "id", 0) or 0)
+        return [f"/api/listings/{listing_id}/images/{index}" for index in range(len(images))]
+    if APP_ENV != "production":
+        return demo_listing_images_for_row(row)
+    return []
+
+
 def parse_thickness_mm(raw_value) -> float | None:
     raw = str(raw_value or "").strip()
     cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == ".")
@@ -3033,9 +3225,7 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
     checkout_state = listing_checkout_state_from_row(row)
     color = compact_whitespace(row_value(row, "color", ""))
     thickness_mm = row_value(row, "thickness_mm")
-    images = normalize_listing_image_payload(row_value(row, "image_data_json", "[]"))
-    if not images:
-        images = demo_listing_images_for_row(row)
+    images = public_listing_images(row)
     shipping_policy = shipping_policy_from_row(row)
     approval_status = normalize_listing_approval_status(
         row_value(row, "approval_status", "approved"), default="approved"
@@ -3064,6 +3254,7 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         "sale_label": LISTING_SALE_LABELS.get(sale_status, "Available"),
         "reviewed_at": row_value(row, "reviewed_at"),
         "seller_name": row["seller_name"],
+        "seller_joined_at": row_value(row, "seller_joined_at"),
         "shipping": shipping_policy,
         "shipping_policy_label": shipping_policy["label"],
         "seller_user_id": checkout_state["sellerUserId"],
@@ -3131,6 +3322,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         self.send_header("Content-Security-Policy", build_content_security_policy())
+        if SESSION_COOKIE_SECURE:
+            self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         super().end_headers()
 
     def json_body(self) -> dict:
@@ -3155,6 +3348,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_bytes(self, body: bytes, content_type: str, status: int = HTTPStatus.OK):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def parse_cookies(self) -> SimpleCookie:
         cookie = SimpleCookie()
         cookie.load(self.headers.get("Cookie", ""))
@@ -3174,6 +3374,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.id,
                   users.name,
                   users.email,
+                  users.email_verified,
                   users.created_at,
                   users.stripe_account_id,
                   users.stripe_details_submitted,
@@ -3183,13 +3384,24 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.stripe_requirements_due_count,
                   users.stripe_account_status_updated_at,
                   sessions.token,
-                  sessions.created_at
+                  sessions.csrf_token,
+                  sessions.created_at AS session_created_at
                 FROM sessions
                 JOIN users ON users.id = sessions.user_id
                 WHERE sessions.token = ?
                 """,
                 (token,),
             ).fetchone()
+
+        if not row:
+            return None
+
+        created_at = parse_activity_datetime(row["session_created_at"])
+        if not created_at or (datetime.now(timezone.utc) - created_at).total_seconds() > SESSION_MAX_AGE_SECONDS:
+            with closing(connect_db()) as connection:
+                connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                connection.commit()
+            return None
 
         return serialize_user(row)
 
@@ -3217,6 +3429,23 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
         return False
 
+    def require_verified_user(self, user: dict | None) -> bool:
+        if not user:
+            return False
+
+        if user.get("emailVerified"):
+            return True
+
+        self.send_json(
+            {
+                "error": "Verify your email from the link we sent before posting marketplace content.",
+                "code": "email_verification_required",
+                "actionUrl": "./account.html",
+            },
+            status=HTTPStatus.FORBIDDEN,
+        )
+        return False
+
     def session_cookie(self, token: str) -> str:
         secure_flag = "; Secure" if SESSION_COOKIE_SECURE else ""
         return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; Max-Age=2592000; SameSite=Lax{secure_flag}"
@@ -3225,16 +3454,62 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         secure_flag = "; Secure" if SESSION_COOKIE_SECURE else ""
         return f"{SESSION_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax{secure_flag}"
 
-    def create_session(self, user_id: int) -> str:
-        token = secrets.token_urlsafe(32)
+    def current_csrf_token(self, create: bool = True) -> str:
+        morsel = self.parse_cookies().get(SESSION_COOKIE)
+        if not morsel:
+            return ""
         with closing(connect_db()) as connection:
-            connection.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            row = connection.execute(
+                "SELECT csrf_token FROM sessions WHERE token = ?", (morsel.value,)
+            ).fetchone()
+            if not row:
+                return ""
+            csrf_token = str(row["csrf_token"] or "")
+            if not csrf_token and create:
+                csrf_token = secrets.token_urlsafe(24)
+                connection.execute(
+                    "UPDATE sessions SET csrf_token = ? WHERE token = ?",
+                    (csrf_token, morsel.value),
+                )
+                connection.commit()
+        return csrf_token
+
+    def validate_csrf(self) -> bool:
+        expected = self.current_csrf_token(create=False)
+        received = self.headers.get("X-CSRF-Token", "").strip()
+        if expected and received and hmac.compare_digest(expected, received):
+            return True
+        self.send_json(
+            {"error": "Your secure session expired. Refresh the page and try again."},
+            status=HTTPStatus.FORBIDDEN,
+        )
+        return False
+
+    def validate_request_origin(self) -> bool:
+        origin = self.headers.get("Origin", "").strip()
+        if not origin:
+            return True
+        expected = urlparse(self.current_origin())
+        received = urlparse(origin)
+        if expected.scheme == received.scheme and expected.netloc == received.netloc:
+            return True
+        self.send_json({"error": "This request came from an untrusted page."}, status=HTTPStatus.FORBIDDEN)
+        return False
+
+    def create_session(self, user_id: int) -> tuple[str, str]:
+        token = secrets.token_urlsafe(32)
+        csrf_token = secrets.token_urlsafe(24)
+        with closing(connect_db()) as connection:
+            expiration = (datetime.now(timezone.utc) - timedelta(seconds=SESSION_MAX_AGE_SECONDS)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            connection.execute("DELETE FROM sessions WHERE created_at < ?", (expiration,))
             connection.execute(
-                "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
-                (token, user_id, utc_now()),
+                "INSERT INTO sessions (token, user_id, csrf_token, created_at) VALUES (?, ?, ?, ?)",
+                (token, user_id, csrf_token, utc_now()),
             )
             connection.commit()
-        return token
+        return token, csrf_token
 
     def destroy_session(self):
         cookies = self.parse_cookies()
@@ -3282,7 +3557,20 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/auth/session":
             user = self.current_user()
-            self.send_json({"authenticated": bool(user), "user": user})
+            self.send_json(
+                {
+                    "authenticated": bool(user),
+                    "user": user,
+                    "csrfToken": self.current_csrf_token() if user else "",
+                }
+            )
+            return
+
+        image_match = re.fullmatch(r"/api/listings/(\d+)/images/(\d+)", parsed.path)
+        if image_match:
+            self.handle_listing_image(
+                int(image_match.group(1)), int(image_match.group(2)), self.current_user()
+            )
             return
 
         if parsed.path.startswith("/api/listings/"):
@@ -3386,6 +3674,19 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_stripe_webhook()
             return
 
+        if not self.validate_request_origin():
+            return
+
+        public_posts = {
+            "/api/auth/signup",
+            "/api/auth/signin",
+            "/api/auth/password-reset/request",
+            "/api/auth/password-reset/confirm",
+            "/api/auth/verify-email",
+        }
+        if parsed.path not in public_posts and self.current_user() and not self.validate_csrf():
+            return
+
         try:
             body = self.json_body()
         except ValueError:
@@ -3399,6 +3700,25 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_signin(body)
             return
 
+        if parsed.path == "/api/auth/password-reset/request":
+            self.handle_password_reset_request(body)
+            return
+
+        if parsed.path == "/api/auth/password-reset/confirm":
+            self.handle_password_reset_confirm(body)
+            return
+
+        if parsed.path == "/api/auth/verify-email":
+            self.handle_verify_email(body)
+            return
+
+        if parsed.path == "/api/auth/resend-verification":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_resend_verification(user)
+            return
+
         if parsed.path == "/api/auth/signout":
             self.destroy_session()
             self.send_json({"ok": True}, cookie=self.clear_session_cookie())
@@ -3406,21 +3726,21 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/listings":
             user = self.require_user()
-            if not user:
+            if not self.require_verified_user(user):
                 return
             self.handle_create_listing(user, body)
             return
 
         if parsed.path == "/api/trainers":
             user = self.require_user()
-            if not user:
+            if not self.require_verified_user(user):
                 return
             self.handle_create_trainer(user, body)
             return
 
         if parsed.path == "/api/courts-directory":
             user = self.require_user()
-            if not user:
+            if not self.require_verified_user(user):
                 return
             self.handle_create_directory_court(user, body)
             return
@@ -3495,6 +3815,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_admin_trainer_update(body)
             return
 
+        if parsed.path == "/api/admin/trainers/review":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_trainer_review(body)
+            return
+
         if parsed.path == "/api/admin/trainers/delete":
             user = self.require_user()
             if not self.require_admin(user):
@@ -3546,14 +3873,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/trainer-reviews":
             user = self.require_user()
-            if not user:
+            if not self.require_verified_user(user):
                 return
             self.handle_create_review(user, body)
             return
 
         if parsed.path == "/api/court-reports":
             user = self.require_user()
-            if not user:
+            if not self.require_verified_user(user):
                 return
             self.handle_create_court_report(user, body)
             return
@@ -3696,6 +4023,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
+                  users.created_at AS seller_joined_at,
                   users.stripe_account_id,
                   users.stripe_details_submitted,
                   users.stripe_charges_enabled,
@@ -3706,11 +4034,56 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 FROM listings
                 LEFT JOIN users ON users.id = listings.user_id
                 WHERE listings.approval_status = 'approved'
-                ORDER BY listings.created_at DESC
+                  AND listings.user_id IS NOT NULL
+                ORDER BY
+                  CASE listings.sale_status WHEN 'available' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+                  listings.created_at DESC
                 """
             ).fetchall()
 
         return [serialize_listing_row(row) for row in rows]
+
+    def handle_listing_image(self, listing_id: int, image_index: int, viewer: dict | None):
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, approval_status, image_data_json
+                FROM listings
+                WHERE id = ?
+                """,
+                (listing_id,),
+            ).fetchone()
+
+        if not row:
+            self.send_json({"error": "That image could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        viewer_id = int(viewer.get("id") or 0) if viewer else 0
+        viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
+        owner_id = int(row["user_id"] or 0)
+        is_public = row["approval_status"] == "approved" and owner_id > 0
+        if not is_public and not viewer_is_admin and viewer_id != owner_id:
+            self.send_json({"error": "That image could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        images = normalize_listing_image_payload(row["image_data_json"])
+        if image_index < 0 or image_index >= len(images):
+            self.send_json({"error": "That image could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        data_url = images[image_index]
+        match = re.fullmatch(r"data:(image/[a-zA-Z0-9.+-]+);base64,(.+)", data_url, re.DOTALL)
+        if not match:
+            self.send_json({"error": "That image could not be read."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        try:
+            payload = base64.b64decode(match.group(2), validate=True)
+        except (binascii.Error, ValueError):
+            self.send_json({"error": "That image could not be read."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_bytes(payload, match.group(1))
 
     def fetch_listing_by_id(self, listing_id: int, viewer: dict | None = None) -> dict | None:
         with closing(connect_db()) as connection:
@@ -3743,6 +4116,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
+                  users.created_at AS seller_joined_at,
                   users.stripe_account_id,
                   users.stripe_details_submitted,
                   users.stripe_charges_enabled,
@@ -3767,6 +4141,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         listing_owner_id = int(row["user_id"] or 0)
 
+        if not listing_owner_id and not viewer_is_admin:
+            return None
+
         if approval_status != "approved" and not viewer_is_admin and viewer_id != listing_owner_id:
             return None
 
@@ -3790,8 +4167,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   availability,
                   joined_at,
                   rating,
-                  review_count
+                  review_count,
+                  approval_status,
+                  reviewed_at
                 FROM trainers
+                WHERE approval_status = 'approved'
+                  AND user_id IS NOT NULL
                 ORDER BY verified DESC, joined_at DESC, id DESC
                 """
             ).fetchall()
@@ -3822,6 +4203,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   created_at
                 FROM courts_directory
                 WHERE approval_status = 'approved'
+                  AND user_id IS NOT NULL
                 ORDER BY created_at DESC, id DESC
                 """
             ).fetchall()
@@ -3840,11 +4222,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
               trainer_reviews.created_at
             FROM trainer_reviews
             JOIN trainers ON trainers.id = trainer_reviews.trainer_id
+            WHERE trainers.approval_status = 'approved'
+              AND trainers.user_id IS NOT NULL
         """
         params: tuple = ()
 
         if trainer_id:
-            query += " WHERE trainer_reviews.trainer_id = ?"
+            query += " AND trainer_reviews.trainer_id = ?"
             params = (trainer_id,)
 
         query += " ORDER BY trainer_reviews.created_at DESC LIMIT 24"
@@ -4887,6 +5271,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   trainers.joined_at,
                   trainers.rating,
                   trainers.review_count,
+                  trainers.approval_status,
+                  trainers.reviewed_at,
                   users.name AS owner_name,
                   users.email AS owner_email
                 FROM trainers
@@ -5403,6 +5789,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         self.send_json({"ok": True, "message": f"{name} was updated."})
 
+    def handle_admin_trainer_review(self, body: dict):
+        trainer_id = int(body.get("id") or 0)
+        requested_status = normalize_listing_approval_status(str(body.get("status", "")), default="")
+        if trainer_id <= 0 or requested_status not in LISTING_APPROVAL_LABELS:
+            self.send_json(
+                {"error": "Choose a valid trainer and review status."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        reviewed_at = utc_now() if requested_status in {"approved", "rejected"} else None
+        with closing(connect_db()) as connection:
+            row = connection.execute("SELECT name FROM trainers WHERE id = ?", (trainer_id,)).fetchone()
+            if not row:
+                self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+            connection.execute(
+                "UPDATE trainers SET approval_status = ?, reviewed_at = ? WHERE id = ?",
+                (requested_status, reviewed_at, trainer_id),
+            )
+            connection.commit()
+
+        label = LISTING_APPROVAL_LABELS.get(requested_status, "Pending review")
+        self.send_json({"ok": True, "message": f"{row['name']} is now marked {label.lower()}."})
+
     def handle_admin_trainer_delete(self, body: dict):
         trainer_id = int(body.get("id") or 0)
         if trainer_id <= 0:
@@ -5483,6 +5894,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         email = normalize_email(str(body.get("email", "")))
         password = str(body.get("password", ""))
 
+        client_key = f"signup:{self.client_address[0]}"
+        if not rate_limit_allows(client_key, 5, 3600):
+            self.send_json(
+                {"error": "Too many account attempts. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
         if len(name) < 2 or "@" not in email or len(password) < 8:
             self.send_json(
                 {"error": "Use a real name, a valid email, and a password with at least 8 characters."},
@@ -5496,8 +5915,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             with closing(connect_db()) as connection:
                 cursor = connection.execute(
                     """
-                    INSERT INTO users (name, email, password_salt, password_hash, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO users (
+                      name, email, password_salt, password_hash, email_verified, email_verified_at, created_at
+                    ) VALUES (?, ?, ?, ?, 0, NULL, ?)
                     """,
                     (name, email, salt_hex, digest_hex, utc_now()),
                 )
@@ -5507,6 +5927,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                       id,
                       name,
                       email,
+                      email_verified,
                       created_at,
                       stripe_account_id,
                       stripe_details_submitted,
@@ -5529,9 +5950,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        token = self.create_session(user_id)
+        token, csrf_token = self.create_session(user_id)
+        verification_sent = send_verification_email(user_id, email)
         self.send_json(
-            {"ok": True, "user": serialize_user(user_row)},
+            {
+                "ok": True,
+                "user": serialize_user(user_row),
+                "csrfToken": csrf_token,
+                "verificationSent": verification_sent,
+            },
             status=HTTPStatus.CREATED,
             cookie=self.session_cookie(token),
         )
@@ -5540,6 +5967,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         email = normalize_email(str(body.get("email", "")))
         password = str(body.get("password", ""))
 
+        client_key = f"signin:{self.client_address[0]}:{email}"
+        if not rate_limit_allows(client_key, 8, 900):
+            self.send_json(
+                {"error": "Too many sign-in attempts. Please wait 15 minutes and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
         with closing(connect_db()) as connection:
             user_row = connection.execute(
                 """
@@ -5547,6 +5982,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   id,
                   name,
                   email,
+                  email_verified,
                   password_salt,
                   password_hash,
                   created_at,
@@ -5572,14 +6008,127 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        token = self.create_session(user_row["id"])
+        token, csrf_token = self.create_session(user_row["id"])
         self.send_json(
             {
                 "ok": True,
                 "user": serialize_user(user_row),
+                "csrfToken": csrf_token,
             },
             cookie=self.session_cookie(token),
         )
+
+    def handle_password_reset_request(self, body: dict):
+        email = normalize_email(str(body.get("email", "")))
+        client_key = f"password-reset:{self.client_address[0]}:{email}"
+        if not rate_limit_allows(client_key, 5, 3600):
+            self.send_json(
+                {"error": "Too many reset requests. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            user = connection.execute(
+                "SELECT id, email FROM users WHERE email = ?", (email,)
+            ).fetchone()
+
+        if user and transactional_email_is_configured():
+            token = create_auth_token(user["id"], "password_reset", lifetime_minutes=60)
+            site_url = (SITE_URL or self.current_origin()).rstrip("/")
+            action_url = f"{site_url}/auth.html?mode=reset&token={token}"
+            try:
+                send_account_action_email(
+                    user["email"],
+                    "Reset your Eleven Zero PB password",
+                    "Reset your password",
+                    "Use this secure link within one hour to choose a new password for your account.",
+                    "Choose a new password",
+                    action_url,
+                )
+            except (OSError, RuntimeError, smtplib.SMTPException):
+                pass
+
+        self.send_json(
+            {
+                "ok": True,
+                "message": "If that email has an account, a reset link is on the way.",
+            }
+        )
+
+    def handle_password_reset_confirm(self, body: dict):
+        token = str(body.get("token", "")).strip()
+        password = str(body.get("password", ""))
+        if len(token) < 24 or len(password) < 8:
+            self.send_json(
+                {"error": "Use the complete reset link and a password with at least 8 characters."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        salt_hex, digest_hex = hash_password(password)
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id FROM auth_tokens
+                WHERE purpose = 'password_reset' AND token_hash = ? AND used_at IS NULL AND expires_at > ?
+                """,
+                (token_hash, utc_now()),
+            ).fetchone()
+            if not row:
+                self.send_json(
+                    {"error": "That reset link is invalid or expired. Request a new one."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            connection.execute(
+                "UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?",
+                (salt_hex, digest_hex, row["user_id"]),
+            )
+            connection.execute("DELETE FROM sessions WHERE user_id = ?", (row["user_id"],))
+            connection.execute("UPDATE auth_tokens SET used_at = ? WHERE id = ?", (utc_now(), row["id"]))
+            connection.commit()
+
+        self.send_json({"ok": True, "message": "Password updated. You can sign in now."})
+
+    def handle_verify_email(self, body: dict):
+        token = str(body.get("token", "")).strip()
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id FROM auth_tokens
+                WHERE purpose = 'verify_email' AND token_hash = ? AND used_at IS NULL AND expires_at > ?
+                """,
+                (token_hash, utc_now()),
+            ).fetchone()
+            if not row:
+                self.send_json(
+                    {"error": "That verification link is invalid or expired."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            connection.execute(
+                "UPDATE users SET email_verified = 1, email_verified_at = ? WHERE id = ?",
+                (utc_now(), row["user_id"]),
+            )
+            connection.execute("UPDATE auth_tokens SET used_at = ? WHERE id = ?", (utc_now(), row["id"]))
+            connection.commit()
+        self.send_json({"ok": True, "message": "Email verified. Your account is ready."})
+
+    def handle_resend_verification(self, user: dict):
+        if user.get("emailVerified"):
+            self.send_json({"ok": True, "message": "Your email is already verified."})
+            return
+        sent = send_verification_email(user["id"], user["email"])
+        if not sent:
+            self.send_json(
+                {"error": "Verification email could not be sent right now. Please try again later."},
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+        self.send_json({"ok": True, "message": "A new verification email is on the way."})
 
     def handle_create_listing(self, user: dict, body: dict):
         try:
@@ -5601,6 +6150,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "actionUrl": "./account.html#seller-payouts",
                 },
                 status=HTTPStatus.CONFLICT,
+            )
+            return
+
+        if str(body.get("photoAttestation", "")).strip().lower() not in {"1", "true", "yes", "on"}:
+            self.send_json(
+                {"error": "Confirm that the photos show the actual paddle you are selling."},
+                status=HTTPStatus.BAD_REQUEST,
             )
             return
 
@@ -5831,7 +6387,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not all([name, location, format_value, level, rate, email]):
             self.send_json(
-                {"error": "Please complete every trainer field before publishing the profile."},
+                {"error": "Please complete every trainer field before submitting the profile."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -5861,8 +6417,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """
                 INSERT INTO trainers (
                   user_id, name, location, format, level, rate, email,
-                  verified, experience, bio, availability, joined_at, rating, review_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0)
+                  verified, experience, bio, availability, joined_at, rating, review_count,
+                  approval_status, reviewed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, 'pending', NULL)
                 """,
                 (
                     user["id"],
@@ -5884,7 +6441,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 (cursor.lastrowid,),
             ).fetchone()
 
-        self.send_json({"ok": True, "item": row_to_dict(row)}, status=HTTPStatus.CREATED)
+        self.send_json(
+            {
+                "ok": True,
+                "item": row_to_dict(row),
+                "message": "Trainer profile submitted for Eleven Zero PB review.",
+            },
+            status=HTTPStatus.CREATED,
+        )
 
     def handle_create_directory_court(self, user: dict, body: dict):
         name = str(body.get("name", "")).strip()
@@ -6041,12 +6605,30 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         with closing(connect_db()) as connection:
             trainer = connection.execute(
-                "SELECT id, name, rating, review_count FROM trainers WHERE id = ?",
+                "SELECT id, name, rating, review_count, approval_status FROM trainers WHERE id = ?",
                 (trainer_id,),
             ).fetchone()
 
             if not trainer:
                 self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            if trainer["approval_status"] != "approved":
+                self.send_json(
+                    {"error": "That trainer profile is still under review."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            existing_review = connection.execute(
+                "SELECT id FROM trainer_reviews WHERE trainer_id = ? AND user_id = ?",
+                (trainer_id, user["id"]),
+            ).fetchone()
+            if existing_review:
+                self.send_json(
+                    {"error": "You already reviewed this trainer."},
+                    status=HTTPStatus.CONFLICT,
+                )
                 return
 
             new_review_count = trainer["review_count"] + 1

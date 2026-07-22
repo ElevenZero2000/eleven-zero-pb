@@ -8,8 +8,8 @@
       name="description"
       content="Find pickleball trainers, leave reviews, and join the Eleven Zero PB coaching network."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260721c" />
-    <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
+    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="trainers-page" data-nav="trainers">
     <div class="page-shell">
@@ -67,7 +67,7 @@
               </label>
               <label class="finder-field">
                 <span>Level</span>
-                <select name="level">
+                <select name="level" aria-label="Filter by player level">
                   <option value="all">All levels</option>
                   <option value="beginner">Beginner</option>
                   <option value="intermediate">Intermediate</option>
@@ -76,7 +76,7 @@
               </label>
               <label class="finder-field">
                 <span>Lesson type</span>
-                <select name="format">
+                <select name="format" aria-label="Filter by lesson type">
                   <option value="all">All lesson types</option>
                   <option value="private">Private</option>
                   <option value="group">Group</option>
@@ -149,11 +149,11 @@
               <form class="seller-form trainer-review-form" data-trainer-review-form>
                 <label>
                   Trainer
-                  <select name="trainerId" data-review-trainer-select></select>
+                  <select name="trainerId" data-review-trainer-select aria-label="Choose a trainer"></select>
                 </label>
                 <label>
                   Rating
-                  <select name="rating">
+                  <select name="rating" aria-label="Trainer rating">
                     <option value="5">5 stars</option>
                     <option value="4">4 stars</option>
                     <option value="3">3 stars</option>
@@ -208,7 +208,7 @@
                 </label>
                 <label>
                   Main lesson type
-                  <select name="format">
+                  <select name="format" aria-label="Main lesson type">
                     <option value="private">Private lessons</option>
                     <option value="group">Group clinics</option>
                     <option value="clinic">Drill sessions</option>
@@ -217,7 +217,7 @@
                 </label>
                 <label>
                   Player level focus
-                  <select name="level">
+                  <select name="level" aria-label="Player level focus">
                     <option value="beginner">Beginner</option>
                     <option value="intermediate">Intermediate</option>
                     <option value="advanced">Advanced</option>
@@ -231,7 +231,7 @@
                   Contact email
                   <input type="email" name="email" placeholder="coach@example.com" />
                 </label>
-                <button class="button button-dark" type="submit">Create trainer profile</button>
+                <button class="button button-dark" type="submit">Submit profile for review</button>
                 <div class="seller-status" aria-live="polite" data-trainer-join-status>
                   Sign in to create a trainer profile.
                 </div>
@@ -266,8 +266,8 @@
       </footer>
     </div>
 
-    <script src="./app.js?v=20260703f"></script>
-    <script src="./trainers.js?v=20260721c"></script>
-    <script src="./header-tweaks.js?v=20260705f"></script>
+    <script src="./app.js?v=20260722audit1"></script>
+    <script src="./trainers.js?v=20260722audit1"></script>
+    <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

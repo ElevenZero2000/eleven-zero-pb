@@ -30,6 +30,8 @@ const adminSalesSummary = document.querySelector("[data-admin-sales-summary]");
 const adminSalesChart = document.querySelector("[data-admin-sales-chart]");
 const adminChartNote = document.querySelector("[data-admin-chart-note]");
 const ownerHelpCopy = document.querySelector("[data-owner-help-copy]");
+const verificationBanner = document.querySelector("[data-email-verification-banner]");
+const verificationBannerStatus = document.querySelector("[data-verification-banner-status]");
 
 let latestSellerProfile = null;
 let latestSalesAnalytics = {};
@@ -542,13 +544,16 @@ function renderAdminTrainers(items) {
   }
 
   adminTrainers.innerHTML = items
-    .map(
-      (item) => `
+    .map((item) => {
+      const statusTone = getListingStatusTone(item.approval_status);
+      const statusLabel = getListingStatusLabel(item);
+      return `
         <details class="admin-record">
           <summary>
             <div>
               <strong>${escapeAttr(item.name)}</strong>
               <span>${escapeAttr(item.location)} · ${escapeAttr(item.level)} · ${escapeAttr(item.rate)}</span>
+              <span class="admin-record-badge admin-record-badge-${escapeAttr(statusTone)}">${escapeAttr(statusLabel)}</span>
             </div>
             <span class="admin-record-meta">${escapeAttr(item.owner_email || item.email)}</span>
           </summary>
@@ -579,14 +584,20 @@ function renderAdminTrainers(items) {
               <textarea name="bio" rows="4">${escapeAttr(item.bio)}</textarea>
             </label>
 
+            <div class="admin-review-actions">
+              <button class="button button-dark" type="button" data-admin-review="approved" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Approve + publish</button>
+              <button class="button button-secondary" type="button" data-admin-review="pending" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Move back to review</button>
+              <button class="button button-secondary" type="button" data-admin-review="rejected" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Mark needs changes</button>
+            </div>
+
             <div class="admin-actions">
               <button class="button button-dark" type="submit">Save trainer</button>
               <button class="button button-secondary admin-delete-button" type="button" data-admin-delete="trainer" data-record-id="${escapeAttr(item.id)}">Remove trainer</button>
             </div>
           </form>
         </details>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
@@ -875,10 +886,12 @@ async function reviewAdminRecord(type, recordId, status) {
   const routeByType = {
     listing: "/api/admin/listings/review",
     court: "/api/admin/courts/review",
+    trainer: "/api/admin/trainers/review",
   };
   const labelByType = {
     listing: "listing",
     court: "court",
+    trainer: "trainer",
   };
 
   const route = routeByType[type];
@@ -1113,6 +1126,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       ElevenZeroApp.redirectToAuth("./account.html");
     }, 700);
     return;
+  }
+
+  if (verificationBanner && ElevenZeroApp.session.user?.emailVerified === false) {
+    verificationBanner.hidden = false;
+    verificationBanner.querySelector("[data-resend-verification]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const response = await ElevenZeroApp.request("/api/auth/resend-verification", {
+          method: "POST",
+          body: {},
+        });
+        ElevenZeroApp.setStatus(verificationBannerStatus, response.message, "success");
+      } catch (error) {
+        ElevenZeroApp.setStatus(verificationBannerStatus, error.message, "error");
+        button.disabled = false;
+      }
+    });
   }
 
   bindAdminPanel();

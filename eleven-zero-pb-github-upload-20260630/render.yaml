@@ -15,9 +15,13 @@ services:
         value: true
       - key: ENABLE_DEMO_DATA
         value: false
+      - key: ENABLE_STARTER_LISTINGS
+        value: false
       - key: SITE_URL
         value: https://11zeropb.com
       - key: SUPPORT_EMAIL
+        value: 11zeropb@gmail.com
+      - key: PRIMARY_OWNER_EMAIL
         value: 11zeropb@gmail.com
       - key: GA_MEASUREMENT_ID
         value: G-SH18CJ4XZD

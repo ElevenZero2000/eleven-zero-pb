@@ -8,8 +8,8 @@
       name="description"
       content="Create an Eleven Zero PB account or sign in to manage listings and trainer activity."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260718account1" />
-    <link rel="stylesheet" href="./header-tweaks.css?v=20260718account1" />
+    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="auth-simple-page" data-nav="auth">
     <div class="page-shell">
@@ -89,11 +89,51 @@
                   Password
                   <input type="password" name="password" placeholder="Your password" autocomplete="current-password" required />
                 </label>
+                <button class="auth-forgot-link" type="button" data-forgot-password>Forgot password?</button>
                 <button class="button button-dark" type="submit">Sign In</button>
                 <div class="seller-status auth-simple-status" aria-live="polite" data-signin-status>
                   Sign in to continue to your account.
                 </div>
               </form>
+            </div>
+
+            <div class="auth-simple-panel" data-auth-panel="forgot" hidden>
+              <div class="auth-panel-heading">
+                <h2>Reset your password</h2>
+                <p>Enter your account email and we’ll send a secure reset link.</p>
+              </div>
+              <form class="seller-form auth-form auth-form-simple" data-reset-request-form>
+                <label>
+                  Email
+                  <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required />
+                </label>
+                <button class="button button-dark" type="submit">Send reset link</button>
+                <button class="auth-forgot-link" type="button" data-back-signin>Back to sign in</button>
+                <div class="seller-status auth-simple-status" aria-live="polite" data-reset-request-status></div>
+              </form>
+            </div>
+
+            <div class="auth-simple-panel" data-auth-panel="reset" hidden>
+              <div class="auth-panel-heading">
+                <h2>Choose a new password</h2>
+                <p>Use at least 8 characters.</p>
+              </div>
+              <form class="seller-form auth-form auth-form-simple" data-reset-confirm-form>
+                <label>
+                  New password
+                  <input type="password" name="password" autocomplete="new-password" minlength="8" required />
+                </label>
+                <button class="button button-dark" type="submit">Update password</button>
+                <div class="seller-status auth-simple-status" aria-live="polite" data-reset-confirm-status></div>
+              </form>
+            </div>
+
+            <div class="auth-simple-panel" data-auth-panel="verify" hidden>
+              <div class="auth-panel-heading">
+                <h2>Verifying your email</h2>
+                <p data-verification-status aria-live="polite">Checking your secure link…</p>
+              </div>
+              <button class="button button-dark" type="button" data-back-signin hidden>Continue to sign in</button>
             </div>
 
             <div
@@ -158,8 +198,8 @@
       </footer>
     </div>
 
-    <script src="./app.js?v=20260703f"></script>
-    <script src="./auth.js?v=20260718account1"></script>
-    <script src="./header-tweaks.js?v=20260718account1"></script>
+    <script src="./app.js?v=20260722audit1"></script>
+    <script src="./auth.js?v=20260722audit1"></script>
+    <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

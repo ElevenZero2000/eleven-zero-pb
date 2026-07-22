@@ -261,12 +261,26 @@ function renderTrainerResults() {
     if (trainerLoadMore) trainerLoadMore.hidden = true;
     trainerResults.innerHTML = `
       <article class="empty-state reveal is-visible">
-        <p class="eyebrow">No matches</p>
-        <h3>No trainers match that search yet.</h3>
-        <p>Try a broader city search or switch back to All.</p>
+        <p class="eyebrow">${trainerPageState.trainers.length ? "No matches" : "Directory opening"}</p>
+        <h3>${
+          trainerPageState.trainers.length
+            ? "No trainers match that search yet."
+            : "Trainer applications are open."
+        }</h3>
+        <p>${
+          trainerPageState.trainers.length
+            ? "Try a broader city search or switch back to All."
+            : 'We are reviewing the first trainer profiles now. <a class="text-link" href="#join">Apply to join the directory</a>.'
+        }</p>
       </article>
     `;
-    ElevenZeroApp.setStatus(trainerStatus, "No trainers matched that filter.", "warning");
+    ElevenZeroApp.setStatus(
+      trainerStatus,
+      trainerPageState.trainers.length
+        ? "No trainers matched that filter."
+        : "The reviewed trainer directory is opening soon.",
+      "warning"
+    );
     return;
   }
 
@@ -338,6 +352,7 @@ function populateTrainerSelect() {
     .join("");
 
   trainerReviewSelect.innerHTML = options;
+  trainerReviewSelect.disabled = !trainerPageState.trainers.length;
 
   if (previousValue && trainerPageState.trainers.some((trainer) => String(trainer.id) === previousValue)) {
     trainerReviewSelect.value = previousValue;
@@ -387,14 +402,14 @@ async function handleTrainerJoin(event) {
   const payload = Object.fromEntries(new FormData(trainerJoinForm).entries());
 
   try {
-    await ElevenZeroApp.request("/api/trainers", {
+    const response = await ElevenZeroApp.request("/api/trainers", {
       method: "POST",
       body: payload,
     });
     trainerJoinForm.reset();
     ElevenZeroApp.setStatus(
       trainerJoinStatus,
-      `${payload.name} is now live in the trainer directory.`,
+      response.message || `${payload.name} was submitted for Eleven Zero PB review.`,
       "success"
     );
     await loadTrainerData();
