@@ -136,6 +136,46 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(captured["status"], app.HTTPStatus.FORBIDDEN)
         self.assertEqual(captured["payload"]["code"], "email_verification_required")
 
+    def test_paddle_catalog_has_broad_brand_and_model_coverage(self):
+        payload = app.paddle_catalog_payload()
+
+        self.assertGreaterEqual(payload["brandCount"], 60)
+        self.assertGreaterEqual(payload["modelCount"], 700)
+        self.assertIn("JOOLA", [entry["name"] for entry in payload["brands"]])
+        self.assertEqual(
+            app.resolve_paddle_selection("joola", "Pro V Perseus"),
+            ("JOOLA", "Pro V Perseus"),
+        )
+
+    def test_listing_submission_rejects_invented_brand_and_model(self):
+        captured = {}
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": 7},
+            {
+                "photoAttestation": "1",
+                "brand": "Totally Invented Paddles",
+                "model": "Random Words 9000",
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "invalid_paddle_catalog_selection")
+
 
 if __name__ == "__main__":
     unittest.main()

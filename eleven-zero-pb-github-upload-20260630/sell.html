@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./styles.css?v=20260722catalog1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -59,12 +59,20 @@
                 <div class="seller-basics-grid">
                   <label>
                     Brand
-                    <input type="text" name="brand" placeholder="Ex: Six Zero" />
+                    <select name="brand" required aria-describedby="paddle-catalog-help">
+                      <option value="">Choose a brand</option>
+                    </select>
                   </label>
                   <label>
                     Model
-                    <input type="text" name="model" placeholder="Ex: Double Black Diamond" />
+                    <select name="model" required disabled aria-describedby="paddle-catalog-help">
+                      <option value="">Choose a brand first</option>
+                    </select>
                   </label>
+                  <p class="seller-field-wide seller-catalog-help" id="paddle-catalog-help">
+                    Brand and model must match our paddle catalog. Can’t find yours?
+                    <a href="mailto:11zeropb@gmail.com?subject=Missing%20paddle%20model">Tell us what’s missing.</a>
+                  </p>
                   <label>
                     Condition
                     <select name="condition">
@@ -235,7 +243,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./marketplace.js?v=20260722audit1"></script>
+    <script src="./marketplace.js?v=20260722catalog1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

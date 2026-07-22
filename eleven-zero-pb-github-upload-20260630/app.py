@@ -27,6 +27,71 @@ from urllib.request import Request, urlopen
 
 
 APP_ROOT = Path(__file__).resolve().parent
+PADDLE_CATALOG_PATH = APP_ROOT / "paddle-catalog.json"
+
+
+def paddle_catalog_key(value) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def load_paddle_catalog() -> dict:
+    try:
+        payload = json.loads(PADDLE_CATALOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+
+    raw_brands = payload.get("brands", {}) if isinstance(payload, dict) else {}
+    brands = []
+    for brand_name, raw_models in raw_brands.items():
+        clean_brand = re.sub(r"\s+", " ", str(brand_name or "").strip())
+        if not clean_brand or not isinstance(raw_models, list):
+            continue
+        models = sorted(
+            {
+                re.sub(r"\s+", " ", str(model or "").strip())
+                for model in raw_models
+                if str(model or "").strip()
+            },
+            key=str.casefold,
+        )
+        if models:
+            brands.append({"name": clean_brand, "models": models})
+
+    brands.sort(key=lambda item: item["name"].casefold())
+    return {
+        "version": str(payload.get("version", "")).strip(),
+        "brands": brands,
+    }
+
+
+PADDLE_CATALOG = load_paddle_catalog()
+PADDLE_CATALOG_INDEX = {
+    paddle_catalog_key(entry["name"]): {
+        "name": entry["name"],
+        "models": {paddle_catalog_key(model): model for model in entry["models"]},
+    }
+    for entry in PADDLE_CATALOG["brands"]
+}
+
+
+def resolve_paddle_selection(brand, model) -> tuple[str, str] | None:
+    brand_entry = PADDLE_CATALOG_INDEX.get(paddle_catalog_key(brand))
+    if not brand_entry:
+        return None
+    canonical_model = brand_entry["models"].get(paddle_catalog_key(model))
+    if not canonical_model:
+        return None
+    return brand_entry["name"], canonical_model
+
+
+def paddle_catalog_payload() -> dict:
+    brands = PADDLE_CATALOG["brands"]
+    return {
+        "version": PADDLE_CATALOG["version"],
+        "brandCount": len(brands),
+        "modelCount": sum(len(entry["models"]) for entry in brands),
+        "brands": brands,
+    }
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -3555,6 +3620,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json(site_config_payload())
             return
 
+        if parsed.path == "/api/paddle-catalog":
+            self.send_json(paddle_catalog_payload())
+            return
+
         if parsed.path == "/api/auth/session":
             user = self.current_user()
             self.send_json(
@@ -6201,6 +6270,20 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             else DEFAULT_PADDLE_PACKAGE["height_in"]
         )
         shipping_note = str(body.get("shippingNote", "")).strip()
+
+        if brand and model:
+            paddle_selection = resolve_paddle_selection(brand, model)
+            if not paddle_selection:
+                if paddle_catalog_key(brand) not in PADDLE_CATALOG_INDEX:
+                    catalog_error = "Choose a paddle brand from the Eleven Zero PB catalog."
+                else:
+                    catalog_error = f"Choose a listed {brand} model from the paddle catalog."
+                self.send_json(
+                    {"error": catalog_error, "code": "invalid_paddle_catalog_selection"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            brand, model = paddle_selection
 
         if not all([brand, model, category, condition, location]) or price_usd <= 0:
             self.send_json(
