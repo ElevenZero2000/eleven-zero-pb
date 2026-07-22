@@ -90,7 +90,7 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(dashboard["stats"]["listingPending"], 1)
         self.assertEqual(len(dashboard["listings"]), 3)
 
-    def test_account_profile_settings_update_name_and_photo(self):
+    def test_account_profile_settings_queue_name_and_photo_for_review(self):
         user_id = self.create_user()
         captured = {}
         png_payload = b"\x89PNG\r\n\x1a\n" + b"profile-photo"
@@ -108,16 +108,135 @@ class MarketplaceSafetyTests(unittest.TestCase):
         )
 
         self.assertEqual(captured["status"], 200)
-        self.assertEqual(captured["payload"]["user"]["name"], "Santiago Player")
-        self.assertTrue(captured["payload"]["user"]["profileImageUrl"].startswith("/api/account/profile-image?v="))
+        self.assertEqual(captured["payload"]["user"]["name"], "Real Seller")
+        self.assertEqual(captured["payload"]["user"]["profileReviewStatus"], "pending")
+        self.assertEqual(captured["payload"]["user"]["profilePendingName"], "Santiago Player")
+        self.assertTrue(
+            captured["payload"]["user"]["profilePendingImageUrl"].startswith(
+                "/api/account/profile-pending-image?v="
+            )
+        )
         with sqlite3.connect(app.DB_PATH) as connection:
             row = connection.execute(
-                "SELECT name, profile_image_data, profile_image_updated_at FROM users WHERE id = ?",
+                """
+                SELECT
+                  name,
+                  profile_image_data,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status
+                FROM users
+                WHERE id = ?
+                """,
                 (user_id,),
             ).fetchone()
-        self.assertEqual(row[0], "Santiago Player")
+        self.assertEqual(row[0], "Real Seller")
+        self.assertEqual(row[1], "")
+        self.assertEqual(row[2], "Santiago Player")
+        self.assertEqual(row[3], profile_image)
+        self.assertEqual(row[4], "replace")
+        self.assertEqual(row[5], "pending")
+
+    def test_admin_can_approve_pending_profile_without_exposing_it_early(self):
+        user_id = self.create_user("review@example.com")
+        captured = {}
+        png_payload = b"\x89PNG\r\n\x1a\n" + b"review-photo"
+        profile_image = "data:image/png;base64," + base64.b64encode(png_payload).decode("ascii")
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        handler = StubHandler()
+        app.ElevenZeroHandler.handle_update_profile(
+            handler,
+            {"id": user_id},
+            {"name": "Approved Player", "profileImage": profile_image},
+        )
+        app.ElevenZeroHandler.handle_admin_profile_review(
+            handler,
+            {"id": 999},
+            {"id": user_id, "action": "approve"},
+        )
+
+        self.assertEqual(captured["status"], 200)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                  name,
+                  profile_image_data,
+                  profile_pending_name,
+                  profile_review_status,
+                  profile_image_updated_at
+                FROM users
+                WHERE id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        self.assertEqual(row[0], "Approved Player")
         self.assertEqual(row[1], profile_image)
-        self.assertTrue(row[2])
+        self.assertIsNone(row[2])
+        self.assertEqual(row[3], "approved")
+        self.assertTrue(row[4])
+
+    def test_profile_name_profanity_is_rejected_before_review(self):
+        user_id = self.create_user("clean@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_update_profile(
+            StubHandler(),
+            {"id": user_id},
+            {"name": "Sh1t Player"},
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("Profanity", captured["payload"]["error"])
+
+    def test_admin_suspension_invalidates_member_sessions(self):
+        user_id = self.create_user("suspend@example.com")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "INSERT INTO sessions (token, user_id, csrf_token, created_at) VALUES ('session-token', ?, 'csrf', ?)",
+                (user_id, app.utc_now()),
+            )
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_admin_profile_review(
+            StubHandler(),
+            {"id": 999},
+            {"id": user_id, "action": "suspend"},
+        )
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            status = connection.execute(
+                "SELECT account_status FROM users WHERE id = ?", (user_id,)
+            ).fetchone()[0]
+            session_count = connection.execute(
+                "SELECT COUNT(*) FROM sessions WHERE user_id = ?", (user_id,)
+            ).fetchone()[0]
+        self.assertEqual(status, "suspended")
+        self.assertEqual(session_count, 0)
+
+    def test_court_report_form_has_an_explicit_court_picker(self):
+        html = (Path(__file__).parent / "courts.html").read_text(encoding="utf-8")
+        javascript = (Path(__file__).parent / "courts.js").read_text(encoding="utf-8")
+        self.assertIn("data-court-report-court", html)
+        self.assertIn("syncCourtReportCourtOptions", javascript)
 
     def test_account_profile_settings_reject_unsupported_image(self):
         user_id = self.create_user("second@example.com")

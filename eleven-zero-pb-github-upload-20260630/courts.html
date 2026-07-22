@@ -188,6 +188,13 @@
                     <p class="eyebrow">Share a report</p>
                     <h3 data-court-report-target>Choose a court above first.</h3>
                     <form class="court-report-form" data-court-report-form>
+                      <label class="court-report-field court-report-field-wide">
+                        <span>Choose a court</span>
+                        <select name="courtId" required data-court-report-court>
+                          <option value="">Select a court…</option>
+                        </select>
+                      </label>
+
                       <label class="court-report-field">
                         <span>Court condition</span>
                         <select name="conditionRating" aria-label="Court condition rating">
@@ -359,7 +366,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./courts.js?v=20260722audit1"></script>
+    <script src="./courts.js?v=20260722review1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

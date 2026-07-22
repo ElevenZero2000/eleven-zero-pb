@@ -20,6 +20,7 @@ const adminPill = document.querySelector("[data-admin-pill]");
 const adminSummary = document.querySelector("[data-admin-summary]");
 const adminStats = document.querySelector("[data-admin-stats]");
 const adminStatus = document.querySelector("[data-admin-status]");
+const adminProfiles = document.querySelector("[data-admin-profiles]");
 const adminListings = document.querySelector("[data-admin-listings]");
 const adminCourts = document.querySelector("[data-admin-courts]");
 const adminTrainers = document.querySelector("[data-admin-trainers]");
@@ -51,6 +52,7 @@ const profilePreviewImage = document.querySelector("[data-profile-preview-image]
 const profilePreviewFallback = document.querySelector("[data-profile-preview-fallback]");
 const profileStatus = document.querySelector("[data-profile-status]");
 const profileSaveButton = document.querySelector("[data-profile-save]");
+const profileReviewBanner = document.querySelector("[data-profile-review-banner]");
 
 let latestSellerProfile = null;
 let latestSalesAnalytics = {};
@@ -96,6 +98,33 @@ function renderAccountProfile(user = {}) {
   if (accountProfileName) accountProfileName.textContent = user.name || "Your profile";
   if (accountEmail) accountEmail.textContent = user.email || "";
   renderAvatar(accountAvatar, accountAvatarFallback, user.name, user.profileImageUrl || "");
+  renderProfileReviewStatus(user);
+}
+
+function renderProfileReviewStatus(user = {}) {
+  if (!profileReviewBanner) return;
+  const status = user.profileReviewStatus || "approved";
+  if (status === "pending") {
+    profileReviewBanner.hidden = false;
+    profileReviewBanner.className = "profile-review-banner is-pending";
+    profileReviewBanner.innerHTML = `
+      <strong>Profile changes are waiting for review</strong>
+      <span>Your current approved name and photo stay visible until Eleven Zero PB approves the update.</span>
+    `;
+    return;
+  }
+  if (status === "rejected") {
+    profileReviewBanner.hidden = false;
+    profileReviewBanner.className = "profile-review-banner is-rejected";
+    profileReviewBanner.innerHTML = `
+      <strong>Your last profile update was not approved</strong>
+      <span>${escapeAttr(user.profileReviewNote || "Your current approved profile is still visible. You can submit a different name or photo.")}</span>
+    `;
+    return;
+  }
+  profileReviewBanner.hidden = true;
+  profileReviewBanner.className = "profile-review-banner";
+  profileReviewBanner.innerHTML = "";
 }
 
 function renderProfilePreview(imageSource = "") {
@@ -106,11 +135,22 @@ function renderProfilePreview(imageSource = "") {
 function openProfileSettings() {
   if (!profileDialog || !latestAccountUser) return;
   profileImageDraft = undefined;
-  if (profileNameInput) profileNameInput.value = latestAccountUser.name || "";
+  if (profileNameInput) {
+    profileNameInput.value =
+      latestAccountUser.profileReviewStatus === "pending" && latestAccountUser.profilePendingName
+        ? latestAccountUser.profilePendingName
+        : latestAccountUser.name || "";
+  }
   if (profileEmail) profileEmail.textContent = latestAccountUser.email || "";
   if (profileImageInput) profileImageInput.value = "";
   ElevenZeroApp.setStatus(profileStatus, "");
-  renderProfilePreview(latestAccountUser.profileImageUrl || "");
+  const previewSource =
+    latestAccountUser.profileReviewStatus === "pending"
+      ? latestAccountUser.profilePendingImageAction === "remove"
+        ? ""
+        : latestAccountUser.profilePendingImageUrl || latestAccountUser.profileImageUrl || ""
+      : latestAccountUser.profileImageUrl || "";
+  renderProfilePreview(previewSource);
   profileDialog.showModal();
   document.body.classList.add("has-modal-open");
   window.setTimeout(() => profileNameInput?.focus(), 40);
@@ -211,7 +251,7 @@ async function saveProfileSettings(event) {
     profileSaveButton.textContent = "Saving…";
   }
   try {
-    ElevenZeroApp.setStatus(profileStatus, "Saving your profile…", "warning");
+    ElevenZeroApp.setStatus(profileStatus, "Submitting your profile for review…", "warning");
     const response = await ElevenZeroApp.request("/api/account/profile", {
       method: "POST",
       body,
@@ -225,7 +265,11 @@ async function saveProfileSettings(event) {
         ? "Eleven Zero Account Manager"
         : `Welcome back, ${response.user.name}.`;
     }
-    ElevenZeroApp.setStatus(profileStatus, "Your profile is updated.", "success");
+    ElevenZeroApp.setStatus(
+      profileStatus,
+      response.message || "Profile changes submitted for review.",
+      "success"
+    );
     window.setTimeout(closeProfileSettings, 550);
   } catch (error) {
     ElevenZeroApp.setStatus(profileStatus, error.message, "error");
@@ -680,6 +724,76 @@ function renderAdminListings(items) {
     .join("");
 }
 
+function renderAdminProfiles(items) {
+  if (!adminProfiles) return;
+  if (!items.length) {
+    renderAdminEmpty(
+      adminProfiles,
+      "No member alerts",
+      "Pending profile changes and suspended accounts will appear here."
+    );
+    return;
+  }
+
+  adminProfiles.innerHTML = items
+    .map((item) => {
+      const isPending = item.profileReviewStatus === "pending";
+      const isSuspended = item.accountStatus === "suspended";
+      const proposedName = item.pendingName || item.name;
+      const photoCopy =
+        item.pendingImageAction === "replace"
+          ? "New profile photo"
+          : item.pendingImageAction === "remove"
+            ? "Remove current photo"
+            : "Keep current photo";
+      const badge = isSuspended ? "Suspended" : "Needs review";
+      const badgeTone = isSuspended ? "neutral" : "pending";
+
+      return `
+        <article class="admin-record admin-profile-review-card">
+          <div class="admin-profile-review-head">
+            <div class="admin-profile-review-photo">
+              ${
+                item.pendingImageUrl
+                  ? `<img src="${escapeAttr(item.pendingImageUrl)}" alt="Proposed profile photo for ${escapeAttr(proposedName)}" />`
+                  : `<span aria-hidden="true">${escapeAttr(profileInitials(proposedName))}</span>`
+              }
+            </div>
+            <div>
+              <strong>${escapeAttr(item.name)}</strong>
+              <span>${escapeAttr(item.email)}</span>
+              <span class="admin-record-badge admin-record-badge-${badgeTone}">${badge}</span>
+            </div>
+          </div>
+          ${
+            isPending
+              ? `<div class="admin-profile-change-summary">
+                  <span>Proposed name</span>
+                  <strong>${escapeAttr(proposedName)}</strong>
+                  <span>${escapeAttr(photoCopy)}</span>
+                </div>`
+              : ""
+          }
+          ${item.accountStatusNote ? `<p class="admin-profile-note">${escapeAttr(item.accountStatusNote)}</p>` : ""}
+          <div class="admin-review-actions">
+            ${
+              isPending
+                ? `<button class="button button-dark" type="button" data-admin-profile-action="approve" data-record-id="${escapeAttr(item.id)}">Approve profile</button>
+                   <button class="button button-secondary" type="button" data-admin-profile-action="reject" data-record-id="${escapeAttr(item.id)}">Reject changes</button>`
+                : ""
+            }
+            ${
+              isSuspended
+                ? `<button class="button button-dark" type="button" data-admin-profile-action="restore" data-record-id="${escapeAttr(item.id)}">Restore account</button>`
+                : `<button class="button button-secondary admin-delete-button" type="button" data-admin-profile-action="suspend" data-record-id="${escapeAttr(item.id)}">Suspend account</button>`
+            }
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function renderAdminCourts(items) {
   if (!adminCourts) return;
   if (!items.length) {
@@ -1029,6 +1143,7 @@ async function loadAdminDashboard() {
       adminStats.innerHTML = [
         adminStatCard("Paddles to review", stats.listingPending || 0, "pending"),
         adminStatCard("Live paddles", stats.listingApproved || 0, "ready"),
+        adminStatCard("Profiles to review", stats.profilePending || 0, "pending"),
         adminStatCard("Members", stats.users || 0, "neutral"),
         adminStatCard("Courts to review", stats.courtPending || 0, "pending"),
         adminStatCard("Trainers", stats.trainers || 0, "ready"),
@@ -1041,6 +1156,7 @@ async function loadAdminDashboard() {
     }
 
     renderAdminListings(response.listings || []);
+    renderAdminProfiles(response.profileReviews || []);
     renderAdminCourts(response.courts || []);
     renderAdminTrainers(response.trainers || []);
     renderAdminReviews(adminTrainerReviews, response.trainerReviews || [], "trainerReview");
@@ -1121,6 +1237,27 @@ async function reviewAdminRecord(type, recordId, status) {
     });
     await loadAdminDashboard();
     setAdminStatus(`${labelByType[type][0].toUpperCase()}${labelByType[type].slice(1)} updated: ${statusLabel}.`, "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+  }
+}
+
+async function reviewAdminProfile(recordId, action) {
+  if (action === "suspend") {
+    const confirmed = window.confirm(
+      "Suspend this account? The member will be signed out and unable to sign in until you restore it."
+    );
+    if (!confirmed) return;
+  }
+
+  try {
+    setAdminStatus("Updating member profile status…", "warning");
+    const response = await ElevenZeroApp.request("/api/admin/profiles/review", {
+      method: "POST",
+      body: { id: Number(recordId || 0), action },
+    });
+    await loadAdminDashboard();
+    setAdminStatus(response.message || "Member profile updated.", "success");
   } catch (error) {
     setAdminStatus(error.message, "error");
   }
@@ -1229,6 +1366,15 @@ function bindAdminPanel() {
   });
 
   adminPanel?.addEventListener("click", async (event) => {
+    const profileButton = event.target.closest("[data-admin-profile-action]");
+    if (profileButton) {
+      await reviewAdminProfile(
+        profileButton.dataset.recordId,
+        profileButton.dataset.adminProfileAction
+      );
+      return;
+    }
+
     const periodButton = event.target.closest("[data-admin-sales-period]");
     if (periodButton) {
       renderAdminSalesChart(periodButton.dataset.adminSalesPeriod || "day");

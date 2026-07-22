@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722profile1" />
+    <link rel="stylesheet" href="./styles.css?v=20260722profile3" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -68,6 +68,7 @@
                 Settings
               </button>
             </div>
+            <div class="profile-review-banner" data-profile-review-banner hidden></div>
 
             <div class="admin-mode-banner is-hidden" data-admin-mode-banner>
               <span class="admin-mode-icon" aria-hidden="true">EZ</span>
@@ -259,6 +260,17 @@
                 <details class="dashboard-card admin-manager-section" open>
                   <summary>
                     <div>
+                      <p class="eyebrow">Members</p>
+                      <h3>Profile reviews</h3>
+                    </div>
+                    <span>Approve &amp; protect</span>
+                  </summary>
+                  <div class="admin-record-list" data-admin-profiles></div>
+                </details>
+
+                <details class="dashboard-card admin-manager-section" open>
+                  <summary>
+                    <div>
                       <p class="eyebrow">Marketplace</p>
                       <h3>Paddle listings</h3>
                     </div>
@@ -400,7 +412,7 @@
     </dialog>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./account.js?v=20260722profile2"></script>
+    <script src="./account.js?v=20260722profile3"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

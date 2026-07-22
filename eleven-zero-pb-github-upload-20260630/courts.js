@@ -162,6 +162,7 @@ const courtReportList = document.querySelector("[data-court-report-list]");
 const courtReportForm = document.querySelector("[data-court-report-form]");
 const courtReportStatus = document.querySelector("[data-court-report-status]");
 const courtReportTarget = document.querySelector("[data-court-report-target]");
+const courtReportCourtSelect = document.querySelector("[data-court-report-court]");
 const courtDirectoryForm = document.querySelector("[data-court-directory-form]");
 const courtDirectoryStatus = document.querySelector("[data-court-directory-status]");
 const courtDirectoryAuthLink = document.querySelector("[data-court-directory-auth]");
@@ -750,6 +751,38 @@ function getActiveCourt() {
     state.visibleCourts[0] ||
     null
   );
+}
+
+function syncCourtReportCourtOptions(courts = state.courts) {
+  if (!courtReportCourtSelect) return;
+
+  const preferredId = courtReportCourtSelect.value || state.activeCourtId || "";
+  const uniqueCourts = [];
+  const seenIds = new Set();
+  courts.forEach((court) => {
+    if (!court?.id || seenIds.has(court.id)) return;
+    seenIds.add(court.id);
+    uniqueCourts.push(court);
+  });
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = uniqueCourts.length ? "Select a court…" : "Search for courts first";
+  courtReportCourtSelect.replaceChildren(placeholder);
+
+  uniqueCourts
+    .slice()
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .forEach((court) => {
+      const option = document.createElement("option");
+      option.value = court.id;
+      option.textContent = `${court.name} — ${court.location}`;
+      courtReportCourtSelect.append(option);
+    });
+
+  if (preferredId && seenIds.has(preferredId)) {
+    courtReportCourtSelect.value = preferredId;
+  }
 }
 
 function buildCourtReportQuickMarkup(court) {
@@ -1530,6 +1563,7 @@ function setActiveCourt(courtId, { centerMap = false, scrollMap = false, scrollR
 
   state.activeCourtId = court.id;
   mapState.activeCourtId = court.id;
+  if (courtReportCourtSelect) courtReportCourtSelect.value = court.id;
   highlightCourtCard(court.id);
   buildMapSelection(court);
   renderCourtCommunity(court);
@@ -2072,6 +2106,7 @@ function renderResults({ fitMap = false } = {}) {
     )
   );
   state.visibleCourts = visibleCourts;
+  syncCourtReportCourtOptions(state.courts);
 
   if (state.detailCourtId && !visibleCourts.some((court) => court.id === state.detailCourtId)) {
     closeCourtDetail();
@@ -2806,7 +2841,9 @@ async function handleCourtReportSubmit(event) {
     return;
   }
 
-  const activeCourt = getActiveCourt();
+  const selectedCourtId = String(courtReportCourtSelect?.value || "").trim();
+  const activeCourt =
+    state.courts.find((court) => court.id === selectedCourtId) || getActiveCourt();
   if (!activeCourt) {
     setCourtReportStatus("Choose a court first so we know where to post your report.", "warning");
     return;
@@ -2833,6 +2870,7 @@ async function handleCourtReportSubmit(event) {
     courtReportForm.querySelector('select[name="conditionRating"]').value = "3";
     courtReportForm.querySelector('select[name="busynessRating"]').value = "2";
     courtReportForm.querySelector('select[name="playerLevel"]').value = "intermediate";
+    if (courtReportCourtSelect) courtReportCourtSelect.value = activeCourt.id;
     state.courtSummaries[activeCourt.id] = response.summary || state.courtSummaries[activeCourt.id];
     state.courtReportsByCourt[activeCourt.id] = response.items || [];
     renderResults({ fitMap: false });
@@ -2935,6 +2973,15 @@ async function initializeFinder() {
   mapSelection?.addEventListener("click", handleResultInteraction);
   courtDetailBody?.addEventListener("click", handleResultInteraction);
   courtReportForm?.addEventListener("submit", handleCourtReportSubmit);
+  courtReportCourtSelect?.addEventListener("change", () => {
+    const courtId = String(courtReportCourtSelect.value || "");
+    if (!courtId) {
+      state.activeCourtId = "";
+      renderCourtCommunity(null);
+      return;
+    }
+    setActiveCourt(courtId, { centerMap: true, scrollMap: false, scrollReport: false });
+  });
   courtDirectoryForm?.addEventListener("submit", handleCourtDirectorySubmit);
 
   const initialQuery = searchInput?.value?.trim() || "";
