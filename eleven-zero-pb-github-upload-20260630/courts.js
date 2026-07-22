@@ -681,9 +681,9 @@ function normalizeGooglePlace(place, fallbackLabel, query) {
     tags: [access.kind, ...(surface.kind !== "unknown" ? [surface.kind] : [])],
     source: "live",
     provider: "google",
-    website: String(place?.websiteUri || "").trim(),
+    website: String(place?.websiteURI || place?.websiteUri || "").trim(),
     osmUrl: "",
-    googleMapsUrl: String(place?.googleMapsUri || "").trim(),
+    googleMapsUrl: String(place?.googleMapsURI || place?.googleMapsUri || "").trim(),
     query,
   };
 }
@@ -2506,8 +2506,8 @@ async function fetchGoogleLiveCourts(query, geo, radiusMiles) {
       "primaryType",
       "primaryTypeDisplayName",
       "types",
-      "googleMapsUri",
-      "websiteUri",
+      "googleMapsURI",
+      "websiteURI",
     ],
     language: "en-US",
     maxResultCount: searchPlan.regional ? 18 : 20,
