@@ -526,6 +526,32 @@ def compact_whitespace(value: str) -> str:
     return " ".join(str(value or "").split())
 
 
+PROFILE_BLOCKED_TERMS = {
+    "asshole",
+    "bitch",
+    "cunt",
+    "dickhead",
+    "fag",
+    "faggot",
+    "fuck",
+    "motherfucker",
+    "nigger",
+    "shit",
+    "slut",
+    "whore",
+}
+
+
+def profile_name_contains_profanity(value: str) -> bool:
+    """Conservatively screen obvious profanity while avoiding substring false positives."""
+    normalized = compact_whitespace(value).casefold().translate(
+        str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t"})
+    )
+    tokens = re.findall(r"[a-z]+", normalized)
+    compact_name = "".join(tokens)
+    return any(token in PROFILE_BLOCKED_TERMS for token in tokens) or compact_name in PROFILE_BLOCKED_TERMS
+
+
 def row_value(row: sqlite3.Row | dict | None, key: str, default=None):
     if row is None:
         return default
@@ -1309,6 +1335,35 @@ def serialize_admin_court_report_row(row: sqlite3.Row | dict | None) -> dict | N
     }
 
 
+def serialize_admin_profile_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    pending_action = str(row_value(row, "profile_pending_image_action", "keep") or "keep")
+    submitted_at = str(row_value(row, "profile_submitted_at", "") or "")
+    pending_image_data = str(row_value(row, "profile_pending_image_data", "") or "").strip()
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "email": row["email"],
+        "currentImagePresent": bool(str(row_value(row, "profile_image_data", "") or "").strip()),
+        "pendingName": str(row_value(row, "profile_pending_name", "") or ""),
+        "pendingImageAction": pending_action,
+        "pendingImageUrl": (
+            f"/api/admin/profiles/{row['id']}/pending-image?v={submitted_at or 'pending'}"
+            if pending_action == "replace" and pending_image_data
+            else ""
+        ),
+        "profileReviewStatus": str(row_value(row, "profile_review_status", "approved") or "approved"),
+        "profileReviewNote": str(row_value(row, "profile_review_note", "") or ""),
+        "profileSubmittedAt": submitted_at,
+        "profileReviewedAt": str(row_value(row, "profile_reviewed_at", "") or ""),
+        "accountStatus": str(row_value(row, "account_status", "active") or "active"),
+        "accountStatusNote": str(row_value(row, "account_status_note", "") or ""),
+        "accountStatusUpdatedAt": str(row_value(row, "account_status_updated_at", "") or ""),
+    }
+
+
 def stripe_profile_from_row(row: sqlite3.Row | dict | None) -> dict:
     row = row or {}
     account_id = row.get("stripe_account_id") if isinstance(row, dict) else row["stripe_account_id"]
@@ -1373,6 +1428,26 @@ def serialize_user(row: sqlite3.Row | None) -> dict | None:
         f"/api/account/profile-image?v={profile_image_updated_at or 'current'}"
         if profile_image_data
         else ""
+    )
+    profile_review_status = str(row_value(row, "profile_review_status", "approved") or "approved")
+    pending_image_action = str(row_value(row, "profile_pending_image_action", "keep") or "keep")
+    pending_image_data = str(row_value(row, "profile_pending_image_data", "") or "").strip()
+    submitted_at = str(row_value(row, "profile_submitted_at", "") or "")
+    payload.update(
+        {
+            "profileReviewStatus": profile_review_status,
+            "profileReviewNote": str(row_value(row, "profile_review_note", "") or ""),
+            "profilePendingName": str(row_value(row, "profile_pending_name", "") or ""),
+            "profilePendingImageAction": pending_image_action,
+            "profilePendingImageUrl": (
+                f"/api/account/profile-pending-image?v={submitted_at or 'pending'}"
+                if profile_review_status == "pending"
+                and pending_image_action == "replace"
+                and pending_image_data
+                else ""
+            ),
+            "accountStatus": str(row_value(row, "account_status", "active") or "active"),
+        }
     )
 
     if "created_at" in row.keys():
@@ -2507,6 +2582,16 @@ def init_database() -> None:
               password_hash TEXT NOT NULL,
               profile_image_data TEXT NOT NULL DEFAULT '',
               profile_image_updated_at TEXT,
+              profile_pending_name TEXT,
+              profile_pending_image_data TEXT,
+              profile_pending_image_action TEXT NOT NULL DEFAULT 'keep',
+              profile_review_status TEXT NOT NULL DEFAULT 'approved',
+              profile_review_note TEXT,
+              profile_submitted_at TEXT,
+              profile_reviewed_at TEXT,
+              account_status TEXT NOT NULL DEFAULT 'active',
+              account_status_note TEXT,
+              account_status_updated_at TEXT,
               email_verified INTEGER NOT NULL DEFAULT 0,
               email_verified_at TEXT,
               created_at TEXT NOT NULL
@@ -2674,6 +2759,16 @@ def init_database() -> None:
         add_column_if_missing(connection, "users", "stripe_account_id", "TEXT")
         add_column_if_missing(connection, "users", "profile_image_data", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "users", "profile_image_updated_at", "TEXT")
+        add_column_if_missing(connection, "users", "profile_pending_name", "TEXT")
+        add_column_if_missing(connection, "users", "profile_pending_image_data", "TEXT")
+        add_column_if_missing(connection, "users", "profile_pending_image_action", "TEXT NOT NULL DEFAULT 'keep'")
+        add_column_if_missing(connection, "users", "profile_review_status", "TEXT NOT NULL DEFAULT 'approved'")
+        add_column_if_missing(connection, "users", "profile_review_note", "TEXT")
+        add_column_if_missing(connection, "users", "profile_submitted_at", "TEXT")
+        add_column_if_missing(connection, "users", "profile_reviewed_at", "TEXT")
+        add_column_if_missing(connection, "users", "account_status", "TEXT NOT NULL DEFAULT 'active'")
+        add_column_if_missing(connection, "users", "account_status_note", "TEXT")
+        add_column_if_missing(connection, "users", "account_status_updated_at", "TEXT")
         add_column_if_missing(connection, "users", "email_verified", "INTEGER NOT NULL DEFAULT 1")
         add_column_if_missing(connection, "users", "email_verified_at", "TEXT")
         add_column_if_missing(connection, "users", "stripe_details_submitted", "INTEGER NOT NULL DEFAULT 0")
@@ -3549,6 +3644,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.email_verified,
                   users.profile_image_data,
                   users.profile_image_updated_at,
+                  users.profile_pending_name,
+                  users.profile_pending_image_data,
+                  users.profile_pending_image_action,
+                  users.profile_review_status,
+                  users.profile_review_note,
+                  users.profile_submitted_at,
+                  users.profile_reviewed_at,
+                  users.account_status,
+                  users.account_status_note,
+                  users.account_status_updated_at,
                   users.created_at,
                   users.stripe_account_id,
                   users.stripe_details_submitted,
@@ -3568,6 +3673,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchone()
 
         if not row:
+            return None
+
+        if str(row_value(row, "account_status", "active") or "active") == "suspended":
+            with closing(connect_db()) as connection:
+                connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                connection.commit()
             return None
 
         created_at = parse_activity_datetime(row["session_created_at"])
@@ -3749,6 +3860,23 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not user:
                 return
             self.handle_profile_image(user)
+            return
+
+        if parsed.path == "/api/account/profile-pending-image":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_profile_pending_image(user)
+            return
+
+        pending_profile_image_match = re.fullmatch(
+            r"/api/admin/profiles/(\d+)/pending-image", parsed.path
+        )
+        if pending_profile_image_match:
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_profile_pending_image(int(pending_profile_image_match.group(1)))
             return
 
         image_match = re.fullmatch(r"/api/listings/(\d+)/images/(\d+)", parsed.path)
@@ -3949,6 +4077,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not self.require_admin(user):
                 return
             self.handle_admin_listing_update(body)
+            return
+
+        if parsed.path == "/api/admin/profiles/review":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_profile_review(user, body)
             return
 
         if parsed.path == "/api/admin/listings/review":
@@ -4278,18 +4413,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_bytes(payload, match.group(1))
 
     def handle_profile_image(self, user: dict):
+        self.handle_stored_profile_image(int(user["id"]), "profile_image_data")
+
+    def handle_profile_pending_image(self, user: dict):
+        self.handle_stored_profile_image(int(user["id"]), "profile_pending_image_data")
+
+    def handle_admin_profile_pending_image(self, user_id: int):
+        self.handle_stored_profile_image(user_id, "profile_pending_image_data")
+
+    def handle_stored_profile_image(self, user_id: int, column: str):
+        if column not in {"profile_image_data", "profile_pending_image_data"}:
+            self.send_json({"error": "Profile photo not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
         with closing(connect_db()) as connection:
             row = connection.execute(
-                "SELECT profile_image_data FROM users WHERE id = ?",
-                (int(user["id"]),),
+                f"SELECT {column} AS image_data FROM users WHERE id = ?",
+                (user_id,),
             ).fetchone()
 
-        if not row or not str(row["profile_image_data"] or "").strip():
+        if not row or not str(row["image_data"] or "").strip():
             self.send_json({"error": "Profile photo not found."}, status=HTTPStatus.NOT_FOUND)
             return
 
         try:
-            mime_type, payload = decode_profile_image_data(row["profile_image_data"])
+            mime_type, payload = decode_profile_image_data(row["image_data"])
         except ValueError:
             self.send_json({"error": "Profile photo not found."}, status=HTTPStatus.NOT_FOUND)
             return
@@ -4501,6 +4649,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   email,
                   profile_image_data,
                   profile_image_updated_at,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status,
+                  profile_review_note,
+                  profile_submitted_at,
+                  profile_reviewed_at,
+                  account_status,
+                  account_status_note,
+                  account_status_updated_at,
                   created_at,
                   stripe_account_id,
                   stripe_details_submitted,
@@ -5202,6 +5360,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   email,
                   profile_image_data,
                   profile_image_updated_at,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status,
+                  profile_review_note,
+                  profile_submitted_at,
+                  profile_reviewed_at,
+                  account_status,
+                  account_status_note,
+                  account_status_updated_at,
                   created_at,
                   stripe_account_id,
                   stripe_details_submitted,
@@ -5313,6 +5481,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if profile_name_contains_profanity(name):
+            self.send_json(
+                {"error": "Choose a different display name. Profanity is not allowed."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         client_key = f"account-profile:{int(user['id'])}"
         if not rate_limit_allows(client_key, 20, 3600):
             self.send_json(
@@ -5322,33 +5497,38 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         image_was_provided = "profileImage" in body
-        profile_image_data = None
+        profile_image_data = ""
+        pending_image_action = "keep"
         if image_was_provided:
             raw_profile_image = str(body.get("profileImage", "") or "").strip()
             if raw_profile_image:
                 try:
                     profile_image_data = normalize_profile_image_data(raw_profile_image)
+                    pending_image_action = "replace"
                 except ValueError as error:
                     self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
                     return
             else:
                 profile_image_data = ""
+                pending_image_action = "remove"
 
         with closing(connect_db()) as connection:
-            if image_was_provided:
-                connection.execute(
-                    """
-                    UPDATE users
-                    SET name = ?, profile_image_data = ?, profile_image_updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (name, profile_image_data, utc_now(), int(user["id"])),
-                )
-            else:
-                connection.execute(
-                    "UPDATE users SET name = ? WHERE id = ?",
-                    (name, int(user["id"])),
-                )
+            submitted_at = utc_now()
+            connection.execute(
+                """
+                UPDATE users
+                SET
+                  profile_pending_name = ?,
+                  profile_pending_image_data = ?,
+                  profile_pending_image_action = ?,
+                  profile_review_status = 'pending',
+                  profile_review_note = NULL,
+                  profile_submitted_at = ?,
+                  profile_reviewed_at = NULL
+                WHERE id = ?
+                """,
+                (name, profile_image_data, pending_image_action, submitted_at, int(user["id"])),
+            )
 
             updated_user = connection.execute(
                 """
@@ -5359,6 +5539,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   email_verified,
                   profile_image_data,
                   profile_image_updated_at,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status,
+                  profile_review_note,
+                  profile_submitted_at,
+                  profile_reviewed_at,
+                  account_status,
+                  account_status_note,
+                  account_status_updated_at,
                   created_at,
                   stripe_account_id,
                   stripe_details_submitted,
@@ -5377,7 +5567,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_json(
             {
                 "ok": True,
-                "message": "Profile updated.",
+                "message": "Profile changes submitted for review.",
                 "user": serialize_user(updated_user),
             }
         )
@@ -5385,6 +5575,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
     def build_admin_dashboard(self) -> dict:
         with closing(connect_db()) as connection:
             user_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            profile_pending_count = connection.execute(
+                "SELECT COUNT(*) FROM users WHERE profile_review_status = 'pending'"
+            ).fetchone()[0]
+            account_suspended_count = connection.execute(
+                "SELECT COUNT(*) FROM users WHERE account_status = 'suspended'"
+            ).fetchone()[0]
             listing_count = connection.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
             listing_pending_count = connection.execute(
                 "SELECT COUNT(*) FROM listings WHERE approval_status = 'pending'"
@@ -5623,6 +5819,34 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """
             ).fetchall()
 
+            profile_reviews = connection.execute(
+                """
+                SELECT
+                  id,
+                  name,
+                  email,
+                  profile_image_data,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status,
+                  profile_review_note,
+                  profile_submitted_at,
+                  profile_reviewed_at,
+                  account_status,
+                  account_status_note,
+                  account_status_updated_at
+                FROM users
+                WHERE profile_review_status = 'pending'
+                   OR account_status = 'suspended'
+                ORDER BY
+                  CASE profile_review_status WHEN 'pending' THEN 0 ELSE 1 END,
+                  COALESCE(profile_submitted_at, account_status_updated_at, created_at) DESC,
+                  id DESC
+                LIMIT 30
+                """
+            ).fetchall()
+
         commerce_notifications = []
         for row in purchase_activity:
             item = row_to_dict(row)
@@ -5642,6 +5866,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         return {
             "stats": {
                 "users": user_count,
+                "profilePending": profile_pending_count,
+                "accountSuspended": account_suspended_count,
                 "listings": listing_count,
                 "listingPending": listing_pending_count,
                 "listingApproved": listing_approved_count,
@@ -5659,9 +5885,147 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "trainers": [serialize_admin_trainer_row(row) for row in trainers],
             "trainerReviews": [serialize_admin_trainer_review_row(row) for row in trainer_reviews],
             "courtReports": [serialize_admin_court_report_row(row) for row in court_reports],
+            "profileReviews": [serialize_admin_profile_row(row) for row in profile_reviews],
             "commerceNotifications": commerce_notifications[:20],
             "salesAnalytics": build_sales_analytics(paid_orders),
         }
+
+    def handle_admin_profile_review(self, admin_user: dict, body: dict):
+        user_id = int(body.get("id") or 0)
+        action = str(body.get("action") or "").strip().lower()
+        note = compact_whitespace(body.get("note", ""))[:240]
+        if user_id <= 0 or action not in {"approve", "reject", "suspend", "restore"}:
+            self.send_json(
+                {"error": "Choose a valid member and moderation action."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if action == "suspend" and user_id == int(admin_user.get("id") or 0):
+            self.send_json(
+                {"error": "The active owner account cannot suspend itself."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                  id,
+                  name,
+                  profile_image_data,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status,
+                  account_status
+                FROM users
+                WHERE id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            if not row:
+                self.send_json({"error": "Member not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            now = utc_now()
+            if action == "approve":
+                if str(row["profile_review_status"] or "approved") != "pending":
+                    self.send_json(
+                        {"error": "This member has no pending profile changes."},
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+
+                approved_name = compact_whitespace(row["profile_pending_name"] or row["name"])
+                pending_image_action = str(row["profile_pending_image_action"] or "keep")
+                approved_image = str(row["profile_image_data"] or "")
+                image_changed = pending_image_action in {"replace", "remove"}
+                if pending_image_action == "replace":
+                    approved_image = str(row["profile_pending_image_data"] or "")
+                elif pending_image_action == "remove":
+                    approved_image = ""
+
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET
+                      name = ?,
+                      profile_image_data = ?,
+                      profile_image_updated_at = CASE WHEN ? THEN ? ELSE profile_image_updated_at END,
+                      profile_pending_name = NULL,
+                      profile_pending_image_data = NULL,
+                      profile_pending_image_action = 'keep',
+                      profile_review_status = 'approved',
+                      profile_review_note = ?,
+                      profile_reviewed_at = ?
+                    WHERE id = ?
+                    """,
+                    (approved_name, approved_image, image_changed, now, note, now, user_id),
+                )
+                message = f"{approved_name}'s profile changes are approved."
+            elif action == "reject":
+                rejection_note = note or "The proposed profile did not meet the community guidelines."
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET
+                      profile_pending_name = NULL,
+                      profile_pending_image_data = NULL,
+                      profile_pending_image_action = 'keep',
+                      profile_review_status = 'rejected',
+                      profile_review_note = ?,
+                      profile_reviewed_at = ?
+                    WHERE id = ?
+                    """,
+                    (rejection_note, now, user_id),
+                )
+                message = f"{row['name']}'s proposed profile was rejected."
+            elif action == "suspend":
+                suspension_note = note or "Account suspended by the Eleven Zero PB moderator."
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET
+                      account_status = 'suspended',
+                      account_status_note = ?,
+                      account_status_updated_at = ?,
+                      profile_pending_name = NULL,
+                      profile_pending_image_data = NULL,
+                      profile_pending_image_action = 'keep',
+                      profile_review_status = CASE
+                        WHEN profile_review_status = 'pending' THEN 'rejected'
+                        ELSE profile_review_status
+                      END,
+                      profile_review_note = CASE
+                        WHEN profile_review_status = 'pending' THEN ?
+                        ELSE profile_review_note
+                      END,
+                      profile_reviewed_at = CASE
+                        WHEN profile_review_status = 'pending' THEN ?
+                        ELSE profile_reviewed_at
+                      END
+                    WHERE id = ?
+                    """,
+                    (suspension_note, now, suspension_note, now, user_id),
+                )
+                connection.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+                message = f"{row['name']}'s account is suspended."
+            else:
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET account_status = 'active', account_status_note = NULL, account_status_updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, user_id),
+                )
+                message = f"{row['name']}'s account is active again."
+
+            connection.commit()
+
+        self.send_json({"ok": True, "message": message})
 
     def handle_admin_listing_update(self, body: dict):
         listing_id = int(body.get("id") or 0)
@@ -6214,6 +6578,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if profile_name_contains_profanity(name):
+            self.send_json(
+                {"error": "Choose a different display name. Profanity is not allowed."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         salt_hex, digest_hex = hash_password(password)
 
         try:
@@ -6292,6 +6663,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   email_verified,
                   profile_image_data,
                   profile_image_updated_at,
+                  profile_pending_name,
+                  profile_pending_image_data,
+                  profile_pending_image_action,
+                  profile_review_status,
+                  profile_review_note,
+                  profile_submitted_at,
+                  profile_reviewed_at,
+                  account_status,
+                  account_status_note,
+                  account_status_updated_at,
                   password_salt,
                   password_hash,
                   created_at,
@@ -6314,6 +6695,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 {"error": "Email or password is incorrect."},
                 status=HTTPStatus.UNAUTHORIZED,
+            )
+            return
+
+        if str(row_value(user_row, "account_status", "active") or "active") == "suspended":
+            self.send_json(
+                {"error": "This account is suspended. Contact Eleven Zero PB support."},
+                status=HTTPStatus.FORBIDDEN,
             )
             return
 
