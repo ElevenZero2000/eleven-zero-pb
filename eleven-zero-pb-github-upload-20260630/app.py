@@ -7408,9 +7408,23 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         player_level = str(body.get("playerLevel", "")).strip().lower()
         comment = str(body.get("comment", "")).strip()
 
-        if not all([court_id, court_name, court_location, comment]):
+        if not court_id:
             self.send_json(
-                {"error": "Choose a court first, then complete every report field."},
+                {"error": "Choose a court first so we know where to post your report."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if not court_name or not court_location:
+            self.send_json(
+                {"error": "That court's details did not load correctly. Choose the court again."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if not comment:
+            self.send_json(
+                {"error": "Add a short note about the court before posting."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return

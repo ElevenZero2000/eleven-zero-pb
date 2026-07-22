@@ -236,7 +236,35 @@ class MarketplaceSafetyTests(unittest.TestCase):
         html = (Path(__file__).parent / "courts.html").read_text(encoding="utf-8")
         javascript = (Path(__file__).parent / "courts.js").read_text(encoding="utf-8")
         self.assertIn("data-court-report-court", html)
+        self.assertIn('name="comment"', html)
+        self.assertIn('minlength="12"', html)
         self.assertIn("syncCourtReportCourtOptions", javascript)
+
+    def test_court_report_missing_note_does_not_blame_court_selection(self):
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_court_report(
+            StubHandler(),
+            {"id": 1},
+            {
+                "courtId": "directory-1",
+                "courtName": "Wakefield Park",
+                "courtLocation": "Annandale, VA",
+                "conditionRating": 3,
+                "busynessRating": 2,
+                "playerLevel": "intermediate",
+                "comment": "",
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("short note", captured["payload"]["error"])
+        self.assertNotIn("Choose a court", captured["payload"]["error"])
 
     def test_account_profile_settings_reject_unsupported_image(self):
         user_id = self.create_user("second@example.com")
