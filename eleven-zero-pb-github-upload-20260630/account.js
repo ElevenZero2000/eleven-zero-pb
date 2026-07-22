@@ -32,10 +32,33 @@ const adminChartNote = document.querySelector("[data-admin-chart-note]");
 const ownerHelpCopy = document.querySelector("[data-owner-help-copy]");
 const verificationBanner = document.querySelector("[data-email-verification-banner]");
 const verificationBannerStatus = document.querySelector("[data-verification-banner-status]");
+const accountModeTag = document.querySelector("[data-account-mode-tag]");
+const adminModeBanner = document.querySelector("[data-admin-mode-banner]");
+const adminQuickActions = document.querySelector("[data-admin-quick-actions]");
+const customerAccountActions = document.querySelector("[data-account-actions]");
+const customerAccountPoints = document.querySelector("[data-account-points]");
 
 let latestSellerProfile = null;
 let latestSalesAnalytics = {};
 let activeSalesPeriod = "day";
+
+function applyAccountMode(user = {}) {
+  const isAdmin = Boolean(user?.isAdmin);
+  document.body.classList.toggle("account-admin-mode", isAdmin);
+  adminModeBanner?.classList.toggle("is-hidden", !isAdmin);
+  adminQuickActions?.classList.toggle("is-hidden", !isAdmin);
+  customerAccountActions?.classList.toggle("is-hidden", isAdmin);
+  customerAccountPoints?.classList.toggle("is-hidden", isAdmin);
+
+  if (accountModeTag) {
+    accountModeTag.textContent = isAdmin ? "Account Manager" : "Account Dashboard";
+  }
+
+  const bannerEmail = adminModeBanner?.querySelector("span:last-child");
+  if (bannerEmail && isAdmin) {
+    bannerEmail.textContent = user.email || "11zeropb@gmail.com";
+  }
+}
 
 function renderDashboardList(target, items, renderItem, emptyTitle, emptyCopy) {
   if (!target) return;
@@ -804,23 +827,21 @@ async function loadAdminDashboard() {
     if (adminPill) adminPill.textContent = "Moderator active";
     if (adminSummary) {
       adminSummary.textContent =
-        "You are signed in with the owner account, so you can review seller submissions before they go live, plus edit or remove website content here.";
+        "Review new activity first, then open a content section only when you need it.";
     }
 
     if (adminStats) {
       adminStats.innerHTML = [
-        adminStatCard("Users", stats.users || 0, "neutral"),
-        adminStatCard("Listings total", stats.listings || 0, "neutral"),
-        adminStatCard("Pending review", stats.listingPending || 0, "pending"),
-        adminStatCard("Live listings", stats.listingApproved || 0, "ready"),
-        adminStatCard("Needs changes", stats.listingNeedsChanges || 0, "neutral"),
-        adminStatCard("Courts total", stats.courts || 0, "neutral"),
-        adminStatCard("Court review", stats.courtPending || 0, "pending"),
-        adminStatCard("Live courts", stats.courtApproved || 0, "ready"),
-        adminStatCard("Court fixes", stats.courtNeedsChanges || 0, "neutral"),
+        adminStatCard("Paddles to review", stats.listingPending || 0, "pending"),
+        adminStatCard("Live paddles", stats.listingApproved || 0, "ready"),
+        adminStatCard("Members", stats.users || 0, "neutral"),
+        adminStatCard("Courts to review", stats.courtPending || 0, "pending"),
         adminStatCard("Trainers", stats.trainers || 0, "ready"),
-        adminStatCard("Trainer reviews", stats.trainerReviews || 0, "pending"),
-        adminStatCard("Court reports", stats.courtReports || 0, "pending"),
+        adminStatCard(
+          "Community reports",
+          (stats.trainerReviews || 0) + (stats.courtReports || 0),
+          "neutral"
+        ),
       ].join("");
     }
 
@@ -1065,11 +1086,14 @@ async function loadDashboard() {
     const response = await ElevenZeroApp.request("/api/dashboard");
     const user = response.user;
     const stats = response.stats || { listings: 0, trainers: 0, reviews: 0 };
+    applyAccountMode(user);
 
-    if (accountName) accountName.textContent = `Welcome back, ${user.name}.`;
+    if (accountName) {
+      accountName.textContent = user.isAdmin ? "Eleven Zero Account Manager" : `Welcome back, ${user.name}.`;
+    }
     if (accountCopy) {
       accountCopy.textContent = user.isAdmin
-        ? "You’re in the owner account. This dashboard now includes moderator tools for live site content."
+        ? "Review marketplace activity, sales, and website content from your private control center."
         : "This dashboard tracks the live activity tied to your Eleven Zero PB account.";
     }
     if (ownerHelpCopy) {
@@ -1127,6 +1151,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }, 700);
     return;
   }
+
+  applyAccountMode(ElevenZeroApp.session.user);
 
   if (verificationBanner && ElevenZeroApp.session.user?.emailVerified === false) {
     verificationBanner.hidden = false;
