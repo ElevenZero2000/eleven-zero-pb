@@ -5206,7 +5206,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "SELECT COUNT(*) FROM listings WHERE approval_status = 'pending'"
             ).fetchone()[0]
             listing_approved_count = connection.execute(
-                "SELECT COUNT(*) FROM listings WHERE approval_status = 'approved'"
+                """
+                SELECT COUNT(*)
+                FROM listings
+                WHERE approval_status = 'approved'
+                  AND sale_status = 'available'
+                """
             ).fetchone()[0]
             listing_rejected_count = connection.execute(
                 "SELECT COUNT(*) FROM listings WHERE approval_status = 'rejected'"
