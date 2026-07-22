@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./styles.css?v=20260722admin4" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -20,7 +20,7 @@
             src="./assets/logo-primary.png"
             alt="Eleven Zero"
           />
-          <span class="brand-tag">Account Dashboard</span>
+          <span class="brand-tag" data-account-mode-tag>Account Dashboard</span>
         </a>
 
         <nav class="site-nav" aria-label="Primary">
@@ -46,7 +46,7 @@
           </button>
           <p aria-live="polite" data-verification-banner-status></p>
         </section>
-        <section class="hero-section">
+        <section class="hero-section account-hero" data-account-hero>
           <div class="hero-copy reveal">
             <p class="eyebrow">Your account</p>
             <h1 data-account-name>Welcome to Eleven Zero PB.</h1>
@@ -54,7 +54,15 @@
               Sign in to see your listings, trainer profiles, and activity stats.
             </p>
 
-            <div class="hero-actions">
+            <div class="admin-mode-banner is-hidden" data-admin-mode-banner>
+              <span class="admin-mode-icon" aria-hidden="true">EZ</span>
+              <div>
+                <strong>Account Manager</strong>
+                <span>11zeropb@gmail.com</span>
+              </div>
+            </div>
+
+            <div class="hero-actions" data-account-actions>
               <a class="button button-primary" href="./sell.html">Create Listing</a>
               <a class="button button-secondary" href="./trainers.html#join">Join as Trainer</a>
               <a class="button button-secondary" href="#seller-payouts">Set Up Payouts</a>
@@ -63,7 +71,13 @@
               </a>
             </div>
 
-            <div class="hero-points">
+            <div class="hero-actions admin-manager-actions is-hidden" data-admin-quick-actions>
+              <a class="button button-primary" href="#admin-activity">Activity</a>
+              <a class="button button-secondary" href="#admin-sales">Sales</a>
+              <a class="button button-secondary" href="#admin-content">Content</a>
+            </div>
+
+            <div class="hero-points" data-account-points>
               <div>
                 <strong data-account-stat-listings>0</strong>
                 <span>Listings created</span>
@@ -82,8 +96,8 @@
         </section>
 
         <section class="guide-section section-block">
-          <div class="guide-panel reveal">
-            <div class="dashboard-grid">
+          <div class="guide-panel account-dashboard-panel reveal">
+            <div class="dashboard-grid" data-customer-account-section>
               <article class="dashboard-card">
                 <p class="eyebrow">Recent listings</p>
                 <h3>Your latest paddle submissions</h3>
@@ -97,7 +111,7 @@
               </article>
             </div>
 
-            <details class="dashboard-card dashboard-card-wide account-sales-details">
+            <details class="dashboard-card dashboard-card-wide account-sales-details" data-customer-account-section>
               <summary>
                 <div>
                   <p class="eyebrow">Sales &amp; shipping</p>
@@ -111,7 +125,7 @@
               <div class="list-stack" data-account-sales></div>
             </details>
 
-            <article class="dashboard-card dashboard-card-wide" id="seller-payouts">
+            <article class="dashboard-card dashboard-card-wide" id="seller-payouts" data-customer-account-section>
               <div class="dashboard-card-head">
                 <div>
                   <p class="eyebrow">Seller payouts</p>
@@ -141,7 +155,7 @@
               </div>
             </article>
 
-            <article class="dashboard-card dashboard-card-wide owner-help-card">
+            <article class="dashboard-card dashboard-card-wide owner-help-card" data-customer-account-section>
               <div class="dashboard-card-head">
                 <div>
                   <p class="eyebrow">Moderator access</p>
@@ -156,23 +170,23 @@
               </p>
             </article>
 
-            <div class="seller-status dashboard-status" aria-live="polite" data-account-status>
+            <div class="seller-status dashboard-status" aria-live="polite" data-account-status data-customer-account-section>
               Sign in to load your dashboard.
             </div>
 
-            <section class="admin-panel is-hidden" id="owner-tools" data-admin-panel>
-              <div class="dashboard-card dashboard-card-wide">
+            <section class="admin-panel admin-manager-panel is-hidden" id="owner-tools" data-admin-panel>
+              <div class="dashboard-card dashboard-card-wide admin-manager-overview">
                 <div class="dashboard-card-head">
                   <div>
-                    <p class="eyebrow">Owner tools</p>
-                    <h3>Moderator controls for live website content</h3>
+                    <p class="eyebrow">Account Manager</p>
+                    <h3>Your business at a glance</h3>
                   </div>
 
                   <span class="dashboard-pill" data-admin-pill>Owner only</span>
                 </div>
 
                 <p class="dashboard-copy" data-admin-summary>
-                  Sign in with the Eleven Zero PB owner email to manage live listings, courts, trainers, and reviews.
+                  Review activity, sales, and content from one place.
                 </p>
 
                 <div class="admin-stats-grid" data-admin-stats></div>
@@ -183,25 +197,25 @@
               </div>
 
               <div class="admin-commerce-grid">
-                <article class="dashboard-card admin-notifications-card">
+                <article class="dashboard-card admin-notifications-card" id="admin-activity">
                   <div class="admin-commerce-head">
                     <div>
-                      <p class="eyebrow">Live activity</p>
-                      <h3>Buyer and seller notifications</h3>
+                      <p class="eyebrow">Activity</p>
+                      <h3>What needs your attention</h3>
                     </div>
                     <span class="admin-live-badge"><span></span> Live</span>
                   </div>
                   <p class="dashboard-copy">
-                    New paddle submissions and completed purchases appear here.
+                    New listings and purchases appear here.
                   </p>
                   <div class="admin-notification-list" data-admin-commerce-notifications></div>
                 </article>
 
-                <article class="dashboard-card admin-analytics-card">
+                <article class="dashboard-card admin-analytics-card" id="admin-sales">
                   <div class="admin-commerce-head admin-analytics-head">
                     <div>
                       <p class="eyebrow">Sales analytics</p>
-                      <h3>How many people are buying</h3>
+                      <h3>Buyer activity</h3>
                     </div>
                     <div class="admin-period-switcher" aria-label="Sales chart period">
                       <button class="is-active" type="button" data-admin-sales-period="day">Day</button>
@@ -226,28 +240,48 @@
                 </article>
               </div>
 
-              <div class="admin-grid">
-                <article class="dashboard-card">
-                  <p class="eyebrow">Marketplace listings</p>
-                  <h3>Edit or remove listings</h3>
+              <div class="admin-grid" id="admin-content">
+                <details class="dashboard-card admin-manager-section" open>
+                  <summary>
+                    <div>
+                      <p class="eyebrow">Marketplace</p>
+                      <h3>Paddle listings</h3>
+                    </div>
+                    <span>Review &amp; manage</span>
+                  </summary>
                   <div class="admin-record-list" data-admin-listings></div>
-                </article>
+                </details>
 
-                <article class="dashboard-card">
-                  <p class="eyebrow">Courts directory</p>
-                  <h3>Edit or remove courts</h3>
+                <details class="dashboard-card admin-manager-section">
+                  <summary>
+                    <div>
+                      <p class="eyebrow">Directory</p>
+                      <h3>Courts</h3>
+                    </div>
+                    <span>Review &amp; manage</span>
+                  </summary>
                   <div class="admin-record-list" data-admin-courts></div>
-                </article>
+                </details>
 
-                <article class="dashboard-card">
-                  <p class="eyebrow">Trainer profiles</p>
-                  <h3>Edit or remove trainers</h3>
+                <details class="dashboard-card admin-manager-section">
+                  <summary>
+                    <div>
+                      <p class="eyebrow">Directory</p>
+                      <h3>Trainers</h3>
+                    </div>
+                    <span>Review &amp; manage</span>
+                  </summary>
                   <div class="admin-record-list" data-admin-trainers></div>
-                </article>
+                </details>
 
-                <article class="dashboard-card">
-                  <p class="eyebrow">Community reviews</p>
-                  <h3>Remove trainer or court reports</h3>
+                <details class="dashboard-card admin-manager-section">
+                  <summary>
+                    <div>
+                      <p class="eyebrow">Community</p>
+                      <h3>Reviews &amp; reports</h3>
+                    </div>
+                    <span>Moderate</span>
+                  </summary>
                   <div class="admin-review-columns">
                     <div>
                       <strong class="admin-review-title">Trainer reviews</strong>
@@ -258,7 +292,7 @@
                       <div class="admin-record-list" data-admin-court-reports></div>
                     </div>
                   </div>
-                </article>
+                </details>
               </div>
             </section>
           </div>
@@ -290,7 +324,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./account.js?v=20260722audit1"></script>
+    <script src="./account.js?v=20260722admin1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>
