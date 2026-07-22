@@ -1382,7 +1382,7 @@ function initializeSellerCatalogFields() {
     populateSelect(
       sellerThicknessSelect,
       catalogThicknesses(),
-      "Choose thickness",
+      "Not specified",
       sellerThicknessSelect.value || ""
     );
   }
@@ -1502,7 +1502,6 @@ function renderSellerReadiness() {
     listingForm?.querySelector('select[name="brand"]')?.value?.trim() &&
       listingForm?.querySelector('select[name="model"]')?.value?.trim() &&
       listingForm?.querySelector('select[name="color"]')?.value?.trim() &&
-      listingForm?.querySelector('select[name="thickness"]')?.value?.trim() &&
       listingForm?.querySelector('input[name="price"]')?.value?.trim()
   );
   const buyerClarityReady = Boolean(
@@ -1564,8 +1563,8 @@ function renderSellerReadiness() {
       "Paddle details",
       basicsReady,
       basicsReady
-        ? "Brand, model, color, thickness, and price added."
-        : "Add brand, model, color, thickness, and price."
+        ? "Brand, model, color, and price added."
+        : "Add brand, model, color, and price."
     ),
     sellerChecklistItem(
       "Buyer clarity",
@@ -2112,7 +2111,6 @@ async function handleListingSubmit(event) {
   if (!String(payload.brand || "").trim()) missingBasics.push("brand");
   if (!String(payload.model || "").trim()) missingBasics.push("model");
   if (!String(payload.color || "").trim()) missingBasics.push("color");
-  if (!String(payload.thickness || "").trim()) missingBasics.push("thickness");
   if (!String(payload.price || "").trim()) missingBasics.push("price");
   if (!String(payload.location || "").trim()) missingBasics.push("ships from");
 
