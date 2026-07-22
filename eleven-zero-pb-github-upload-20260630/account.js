@@ -131,42 +131,55 @@ function loadImageElement(source) {
   });
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("That photo could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function optimizeProfileImage(file) {
-  const supportedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-  if (!supportedTypes.has(file.type)) {
-    throw new Error("Choose a JPG, PNG, or WebP photo.");
+  const supportedTypes = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+  ]);
+  const fileExtension = String(file.name || "").split(".").pop()?.toLowerCase() || "";
+  const supportedExtensions = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+  if (!supportedTypes.has(file.type) && !supportedExtensions.has(fileExtension)) {
+    throw new Error("Choose a JPG, PNG, WebP, or iPhone photo.");
   }
   if (file.size > 10 * 1024 * 1024) {
     throw new Error("Choose a photo smaller than 10 MB.");
   }
 
-  const objectUrl = URL.createObjectURL(file);
-  try {
-    const image = await loadImageElement(objectUrl);
-    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
-    const sourceX = Math.max((image.naturalWidth - sourceSize) / 2, 0);
-    const sourceY = Math.max((image.naturalHeight - sourceSize) / 2, 0);
+  const fileDataUrl = await readFileAsDataUrl(file);
+  const image = await loadImageElement(fileDataUrl);
+  const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+  const sourceX = Math.max((image.naturalWidth - sourceSize) / 2, 0);
+  const sourceY = Math.max((image.naturalHeight - sourceSize) / 2, 0);
 
-    const createSquare = (size, quality) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const context = canvas.getContext("2d");
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, size, size);
-      context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
-      return canvas.toDataURL("image/jpeg", quality);
-    };
+  const createSquare = (size, quality) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, size, size);
+    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+    return canvas.toDataURL("image/jpeg", quality);
+  };
 
-    let result = createSquare(512, 0.84);
-    if (result.length > 1_000_000) result = createSquare(384, 0.76);
-    if (result.length > 1_000_000) {
-      throw new Error("That photo is still too large. Try a smaller image.");
-    }
-    return result;
-  } finally {
-    URL.revokeObjectURL(objectUrl);
+  let result = createSquare(512, 0.84);
+  if (result.length > 1_000_000) result = createSquare(384, 0.76);
+  if (result.length > 1_000_000) {
+    throw new Error("That photo is still too large. Try a smaller image.");
   }
+  return result;
 }
 
 async function handleProfileImageSelection(event) {
