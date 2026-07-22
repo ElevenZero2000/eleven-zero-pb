@@ -37,10 +37,192 @@ const adminModeBanner = document.querySelector("[data-admin-mode-banner]");
 const adminQuickActions = document.querySelector("[data-admin-quick-actions]");
 const customerAccountActions = document.querySelector("[data-account-actions]");
 const customerAccountPoints = document.querySelector("[data-account-points]");
+const accountProfileName = document.querySelector("[data-account-profile-name]");
+const accountAvatar = document.querySelector("[data-account-avatar]");
+const accountAvatarFallback = document.querySelector("[data-account-avatar-fallback]");
+const profileSettingsOpen = document.querySelector("[data-profile-settings-open]");
+const profileDialog = document.querySelector("[data-profile-dialog]");
+const profileForm = document.querySelector("[data-profile-form]");
+const profileNameInput = document.querySelector("[data-profile-name-input]");
+const profileEmail = document.querySelector("[data-profile-email]");
+const profileImageInput = document.querySelector("[data-profile-image-input]");
+const profileImageRemove = document.querySelector("[data-profile-image-remove]");
+const profilePreviewImage = document.querySelector("[data-profile-preview-image]");
+const profilePreviewFallback = document.querySelector("[data-profile-preview-fallback]");
+const profileStatus = document.querySelector("[data-profile-status]");
+const profileSaveButton = document.querySelector("[data-profile-save]");
 
 let latestSellerProfile = null;
 let latestSalesAnalytics = {};
 let activeSalesPeriod = "day";
+let latestAccountUser = null;
+let profileImageDraft;
+
+function profileInitials(name) {
+  const words = String(name || "Eleven Zero")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() || "")
+    .join("") || "EZ";
+}
+
+function renderAvatar(imageNode, fallbackNode, name, imageSource = "") {
+  if (!imageNode || !fallbackNode) return;
+
+  fallbackNode.textContent = profileInitials(name);
+  if (!imageSource) {
+    imageNode.hidden = true;
+    imageNode.removeAttribute("src");
+    fallbackNode.hidden = false;
+    return;
+  }
+
+  imageNode.onload = () => {
+    imageNode.hidden = false;
+    fallbackNode.hidden = true;
+  };
+  imageNode.onerror = () => {
+    imageNode.hidden = true;
+    fallbackNode.hidden = false;
+  };
+  imageNode.src = imageSource;
+}
+
+function renderAccountProfile(user = {}) {
+  latestAccountUser = user;
+  if (accountProfileName) accountProfileName.textContent = user.name || "Your profile";
+  if (accountEmail) accountEmail.textContent = user.email || "";
+  renderAvatar(accountAvatar, accountAvatarFallback, user.name, user.profileImageUrl || "");
+}
+
+function renderProfilePreview(imageSource = "") {
+  const name = profileNameInput?.value || latestAccountUser?.name || "Eleven Zero";
+  renderAvatar(profilePreviewImage, profilePreviewFallback, name, imageSource);
+}
+
+function openProfileSettings() {
+  if (!profileDialog || !latestAccountUser) return;
+  profileImageDraft = undefined;
+  if (profileNameInput) profileNameInput.value = latestAccountUser.name || "";
+  if (profileEmail) profileEmail.textContent = latestAccountUser.email || "";
+  if (profileImageInput) profileImageInput.value = "";
+  ElevenZeroApp.setStatus(profileStatus, "");
+  renderProfilePreview(latestAccountUser.profileImageUrl || "");
+  profileDialog.showModal();
+  document.body.classList.add("has-modal-open");
+  window.setTimeout(() => profileNameInput?.focus(), 40);
+}
+
+function closeProfileSettings() {
+  if (!profileDialog?.open) return;
+  profileDialog.close();
+  document.body.classList.remove("has-modal-open");
+}
+
+function loadImageElement(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("That photo could not be opened."));
+    image.src = source;
+  });
+}
+
+async function optimizeProfileImage(file) {
+  const supportedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  if (!supportedTypes.has(file.type)) {
+    throw new Error("Choose a JPG, PNG, or WebP photo.");
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("Choose a photo smaller than 10 MB.");
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImageElement(objectUrl);
+    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+    const sourceX = Math.max((image.naturalWidth - sourceSize) / 2, 0);
+    const sourceY = Math.max((image.naturalHeight - sourceSize) / 2, 0);
+
+    const createSquare = (size, quality) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, size, size);
+      context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+      return canvas.toDataURL("image/jpeg", quality);
+    };
+
+    let result = createSquare(512, 0.84);
+    if (result.length > 1_000_000) result = createSquare(384, 0.76);
+    if (result.length > 1_000_000) {
+      throw new Error("That photo is still too large. Try a smaller image.");
+    }
+    return result;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function handleProfileImageSelection(event) {
+  const [file] = Array.from(event.target.files || []);
+  if (!file) return;
+
+  try {
+    ElevenZeroApp.setStatus(profileStatus, "Preparing your photo…", "warning");
+    profileImageDraft = await optimizeProfileImage(file);
+    renderProfilePreview(profileImageDraft);
+    ElevenZeroApp.setStatus(profileStatus, "Photo ready to save.", "success");
+  } catch (error) {
+    profileImageDraft = undefined;
+    event.target.value = "";
+    renderProfilePreview(latestAccountUser?.profileImageUrl || "");
+    ElevenZeroApp.setStatus(profileStatus, error.message, "error");
+  }
+}
+
+async function saveProfileSettings(event) {
+  event.preventDefault();
+  if (!profileNameInput || profileSaveButton?.disabled) return;
+
+  const body = { name: profileNameInput.value.trim() };
+  if (profileImageDraft !== undefined) body.profileImage = profileImageDraft;
+
+  if (profileSaveButton) {
+    profileSaveButton.disabled = true;
+    profileSaveButton.textContent = "Saving…";
+  }
+  try {
+    ElevenZeroApp.setStatus(profileStatus, "Saving your profile…", "warning");
+    const response = await ElevenZeroApp.request("/api/account/profile", {
+      method: "POST",
+      body,
+    });
+    ElevenZeroApp.session.user = response.user;
+    renderAccountProfile(response.user);
+    applyAccountMode(response.user);
+    ElevenZeroApp.renderAuthSlots();
+    if (accountName) {
+      accountName.textContent = response.user.isAdmin
+        ? "Eleven Zero Account Manager"
+        : `Welcome back, ${response.user.name}.`;
+    }
+    ElevenZeroApp.setStatus(profileStatus, "Your profile is updated.", "success");
+    window.setTimeout(closeProfileSettings, 550);
+  } catch (error) {
+    ElevenZeroApp.setStatus(profileStatus, error.message, "error");
+  } finally {
+    if (profileSaveButton) {
+      profileSaveButton.disabled = false;
+      profileSaveButton.textContent = "Save changes";
+    }
+  }
+}
 
 function applyAccountMode(user = {}) {
   const isAdmin = Boolean(user?.isAdmin);
@@ -1087,6 +1269,7 @@ async function loadDashboard() {
     const user = response.user;
     const stats = response.stats || { listings: 0, trainers: 0, reviews: 0 };
     applyAccountMode(user);
+    renderAccountProfile(user);
 
     if (accountName) {
       accountName.textContent = user.isAdmin ? "Eleven Zero Account Manager" : `Welcome back, ${user.name}.`;
@@ -1153,6 +1336,33 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   applyAccountMode(ElevenZeroApp.session.user);
+  renderAccountProfile(ElevenZeroApp.session.user);
+
+  profileSettingsOpen?.addEventListener("click", openProfileSettings);
+  profileForm?.addEventListener("submit", saveProfileSettings);
+  profileImageInput?.addEventListener("change", handleProfileImageSelection);
+  profileImageRemove?.addEventListener("click", () => {
+    profileImageDraft = "";
+    if (profileImageInput) profileImageInput.value = "";
+    renderProfilePreview("");
+    ElevenZeroApp.setStatus(profileStatus, "Photo will be removed when you save.", "warning");
+  });
+  document.querySelectorAll("[data-profile-settings-close], [data-profile-settings-cancel]").forEach((button) => {
+    button.addEventListener("click", closeProfileSettings);
+  });
+  profileDialog?.addEventListener("click", (event) => {
+    if (event.target === profileDialog) closeProfileSettings();
+  });
+  profileDialog?.addEventListener("close", () => {
+    document.body.classList.remove("has-modal-open");
+  });
+  profileNameInput?.addEventListener("input", () => {
+    const imageSource =
+      profileImageDraft === undefined
+        ? latestAccountUser?.profileImageUrl || ""
+        : profileImageDraft;
+    renderProfilePreview(imageSource);
+  });
 
   if (verificationBanner && ElevenZeroApp.session.user?.emailVerified === false) {
     verificationBanner.hidden = false;

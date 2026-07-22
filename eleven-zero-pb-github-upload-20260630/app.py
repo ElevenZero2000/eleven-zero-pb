@@ -1367,6 +1367,14 @@ def serialize_user(row: sqlite3.Row | None) -> dict | None:
         "emailVerified": bool(row_value(row, "email_verified", 1)),
     }
 
+    profile_image_data = str(row_value(row, "profile_image_data", "") or "").strip()
+    profile_image_updated_at = str(row_value(row, "profile_image_updated_at", "") or "").strip()
+    payload["profileImageUrl"] = (
+        f"/api/account/profile-image?v={profile_image_updated_at or 'current'}"
+        if profile_image_data
+        else ""
+    )
+
     if "created_at" in row.keys():
         payload["created_at"] = row["created_at"]
 
@@ -2497,6 +2505,8 @@ def init_database() -> None:
               email TEXT NOT NULL UNIQUE,
               password_salt TEXT NOT NULL,
               password_hash TEXT NOT NULL,
+              profile_image_data TEXT NOT NULL DEFAULT '',
+              profile_image_updated_at TEXT,
               email_verified INTEGER NOT NULL DEFAULT 0,
               email_verified_at TEXT,
               created_at TEXT NOT NULL
@@ -2662,6 +2672,8 @@ def init_database() -> None:
         )
 
         add_column_if_missing(connection, "users", "stripe_account_id", "TEXT")
+        add_column_if_missing(connection, "users", "profile_image_data", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "users", "profile_image_updated_at", "TEXT")
         add_column_if_missing(connection, "users", "email_verified", "INTEGER NOT NULL DEFAULT 1")
         add_column_if_missing(connection, "users", "email_verified_at", "TEXT")
         add_column_if_missing(connection, "users", "stripe_details_submitted", "INTEGER NOT NULL DEFAULT 0")
@@ -3176,6 +3188,54 @@ def row_to_dict(row: sqlite3.Row) -> dict:
 
 
 MAX_LISTING_IMAGE_DATA_URL_LENGTH = 2_000_000
+PROFILE_IMAGE_MAX_BYTES = 750_000
+PROFILE_IMAGE_MAX_DATA_URL_LENGTH = 1_100_000
+
+
+def decode_profile_image_data(value: str) -> tuple[str, bytes]:
+    image = str(value or "").strip()
+    if not image:
+        raise ValueError("Choose a profile photo first.")
+    if len(image) > PROFILE_IMAGE_MAX_DATA_URL_LENGTH:
+        raise ValueError("Profile photo must be smaller than 750 KB.")
+
+    match = re.fullmatch(
+        r"data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)",
+        image,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Choose a JPG, PNG, or WebP profile photo.")
+
+    mime_type = match.group(1).lower()
+    try:
+        payload = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("That profile photo could not be read.") from error
+
+    if not payload or len(payload) > PROFILE_IMAGE_MAX_BYTES:
+        raise ValueError("Profile photo must be smaller than 750 KB.")
+
+    has_valid_signature = (
+        (mime_type == "image/jpeg" and payload.startswith(b"\xff\xd8\xff"))
+        or (mime_type == "image/png" and payload.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (
+            mime_type == "image/webp"
+            and len(payload) >= 12
+            and payload[:4] == b"RIFF"
+            and payload[8:12] == b"WEBP"
+        )
+    )
+    if not has_valid_signature:
+        raise ValueError("That file is not a valid JPG, PNG, or WebP image.")
+
+    return mime_type, payload
+
+
+def normalize_profile_image_data(value: str) -> str:
+    mime_type, payload = decode_profile_image_data(value)
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def normalize_listing_image_payload(raw_images) -> list[str]:
@@ -3487,6 +3547,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.name,
                   users.email,
                   users.email_verified,
+                  users.profile_image_data,
+                  users.profile_image_updated_at,
                   users.created_at,
                   users.stripe_account_id,
                   users.stripe_details_submitted,
@@ -3682,6 +3744,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/api/account/profile-image":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_profile_image(user)
+            return
+
         image_match = re.fullmatch(r"/api/listings/(\d+)/images/(\d+)", parsed.path)
         if image_match:
             self.handle_listing_image(
@@ -3838,6 +3907,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/auth/signout":
             self.destroy_session()
             self.send_json({"ok": True}, cookie=self.clear_session_cookie())
+            return
+
+        if parsed.path == "/api/account/profile":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_update_profile(user, body)
             return
 
         if parsed.path == "/api/listings":
@@ -4201,6 +4277,25 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         self.send_bytes(payload, match.group(1))
 
+    def handle_profile_image(self, user: dict):
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                "SELECT profile_image_data FROM users WHERE id = ?",
+                (int(user["id"]),),
+            ).fetchone()
+
+        if not row or not str(row["profile_image_data"] or "").strip():
+            self.send_json({"error": "Profile photo not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        try:
+            mime_type, payload = decode_profile_image_data(row["profile_image_data"])
+        except ValueError:
+            self.send_json({"error": "Profile photo not found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        self.send_bytes(payload, mime_type)
+
     def fetch_listing_by_id(self, listing_id: int, viewer: dict | None = None) -> dict | None:
         with closing(connect_db()) as connection:
             row = connection.execute(
@@ -4404,6 +4499,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   id,
                   name,
                   email,
+                  profile_image_data,
+                  profile_image_updated_at,
                   created_at,
                   stripe_account_id,
                   stripe_details_submitted,
@@ -5103,6 +5200,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   id,
                   name,
                   email,
+                  profile_image_data,
+                  profile_image_updated_at,
                   created_at,
                   stripe_account_id,
                   stripe_details_submitted,
@@ -5197,6 +5296,91 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "recentTrainers": [row_to_dict(row) for row in recent_trainers],
             "recentSales": [row_to_dict(row) for row in recent_sales],
         }
+
+    def handle_update_profile(self, user: dict, body: dict):
+        name = compact_whitespace(body.get("name", ""))
+        if len(name) < 2 or len(name) > 60:
+            self.send_json(
+                {"error": "Display name must be between 2 and 60 characters."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if any(ord(character) < 32 for character in name):
+            self.send_json(
+                {"error": "Display name contains unsupported characters."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        client_key = f"account-profile:{int(user['id'])}"
+        if not rate_limit_allows(client_key, 20, 3600):
+            self.send_json(
+                {"error": "Too many profile changes. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        image_was_provided = "profileImage" in body
+        profile_image_data = None
+        if image_was_provided:
+            raw_profile_image = str(body.get("profileImage", "") or "").strip()
+            if raw_profile_image:
+                try:
+                    profile_image_data = normalize_profile_image_data(raw_profile_image)
+                except ValueError as error:
+                    self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+            else:
+                profile_image_data = ""
+
+        with closing(connect_db()) as connection:
+            if image_was_provided:
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET name = ?, profile_image_data = ?, profile_image_updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (name, profile_image_data, utc_now(), int(user["id"])),
+                )
+            else:
+                connection.execute(
+                    "UPDATE users SET name = ? WHERE id = ?",
+                    (name, int(user["id"])),
+                )
+
+            updated_user = connection.execute(
+                """
+                SELECT
+                  id,
+                  name,
+                  email,
+                  email_verified,
+                  profile_image_data,
+                  profile_image_updated_at,
+                  created_at,
+                  stripe_account_id,
+                  stripe_details_submitted,
+                  stripe_charges_enabled,
+                  stripe_payouts_enabled,
+                  stripe_onboarding_complete,
+                  stripe_requirements_due_count,
+                  stripe_account_status_updated_at
+                FROM users
+                WHERE id = ?
+                """,
+                (int(user["id"]),),
+            ).fetchone()
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "message": "Profile updated.",
+                "user": serialize_user(updated_user),
+            }
+        )
 
     def build_admin_dashboard(self) -> dict:
         with closing(connect_db()) as connection:
@@ -6049,6 +6233,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                       name,
                       email,
                       email_verified,
+                      profile_image_data,
+                      profile_image_updated_at,
                       created_at,
                       stripe_account_id,
                       stripe_details_submitted,
@@ -6104,6 +6290,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   name,
                   email,
                   email_verified,
+                  profile_image_data,
+                  profile_image_updated_at,
                   password_salt,
                   password_hash,
                   created_at,
