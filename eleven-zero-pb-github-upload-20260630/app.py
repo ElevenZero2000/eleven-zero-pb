@@ -6357,11 +6357,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         thickness_raw = canonical_thickness or ""
         thickness_mm = float(thickness_raw) if thickness_raw else None
 
-        if not all([brand, model, color, thickness_raw, category, condition, location]) or price_usd <= 0:
+        if not all([brand, model, color, category, condition, location]) or price_usd <= 0:
             self.send_json(
                 {
                     "error": (
-                        "Add the brand, model, color, thickness, condition, price, and "
+                        "Add the brand, model, color, condition, price, and "
                         "ships-from city before submitting it for review."
                     )
                 },

@@ -242,6 +242,53 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
         self.assertEqual(captured["payload"]["code"], "invalid_paddle_thickness_selection")
 
+    def test_listing_submission_allows_omitted_thickness(self):
+        captured = {}
+        seller_id = self.create_user()
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": seller_id},
+            {
+                "photoAttestation": "1",
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Black",
+                "thickness": "",
+                "category": "control",
+                "condition": "Excellent",
+                "price": "150",
+                "location": "Arlington, VA",
+                "shippingOriginZip": "22201",
+                "shippingOriginStreet1": "123 Test Street",
+                "images": [
+                    "data:image/png;base64,"
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z4X0AAAAASUVORK5CYII="
+                ],
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            thickness = connection.execute(
+                "SELECT thickness_mm FROM listings WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (seller_id,),
+            ).fetchone()[0]
+        self.assertIsNone(thickness)
+
 
 if __name__ == "__main__":
     unittest.main()
