@@ -77,6 +77,18 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(items[0]["seller_name"], "Real Seller")
         self.assertEqual(items[0]["images"], [f"/api/listings/{visible_id}/images/0"])
 
+    def test_admin_live_paddle_count_excludes_sold_listings(self):
+        seller_id = self.create_user()
+        self.create_listing(seller_id, "Available")
+        self.create_listing(seller_id, "Sold", sale_status="sold")
+        self.create_listing(seller_id, "Pending", approval="pending")
+
+        dashboard = app.ElevenZeroHandler.build_admin_dashboard(object())
+
+        self.assertEqual(dashboard["stats"]["listingApproved"], 1)
+        self.assertEqual(dashboard["stats"]["listingPending"], 1)
+        self.assertEqual(len(dashboard["listings"]), 3)
+
     def test_production_startup_quarantines_anonymous_content(self):
         anonymous_listing_id = self.create_listing(None, "Anonymous")
         with sqlite3.connect(app.DB_PATH) as connection:
