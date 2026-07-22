@@ -34,6 +34,16 @@ def paddle_catalog_key(value) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
 
 
+def paddle_thickness_key(value) -> str:
+    try:
+        numeric_value = float(str(value or "").strip())
+    except (TypeError, ValueError):
+        return ""
+    if not 5 <= numeric_value <= 30:
+        return ""
+    return format(numeric_value, "g")
+
+
 def load_paddle_catalog() -> dict:
     try:
         payload = json.loads(PADDLE_CATALOG_PATH.read_text(encoding="utf-8"))
@@ -57,10 +67,29 @@ def load_paddle_catalog() -> dict:
         if models:
             brands.append({"name": clean_brand, "models": models})
 
+    raw_colors = payload.get("colors", []) if isinstance(payload, dict) else []
+    colors = []
+    seen_colors = set()
+    for raw_color in raw_colors:
+        color = re.sub(r"\s+", " ", str(raw_color or "").strip())
+        color_key = paddle_catalog_key(color)
+        if not color_key or color_key in seen_colors:
+            continue
+        seen_colors.add(color_key)
+        colors.append(color)
+
+    raw_thicknesses = payload.get("thicknesses_mm", []) if isinstance(payload, dict) else []
+    thicknesses = sorted(
+        {paddle_thickness_key(value) for value in raw_thicknesses if paddle_thickness_key(value)},
+        key=float,
+    )
+
     brands.sort(key=lambda item: item["name"].casefold())
     return {
         "version": str(payload.get("version", "")).strip(),
         "brands": brands,
+        "colors": colors,
+        "thicknessesMm": thicknesses,
     }
 
 
@@ -71,6 +100,12 @@ PADDLE_CATALOG_INDEX = {
         "models": {paddle_catalog_key(model): model for model in entry["models"]},
     }
     for entry in PADDLE_CATALOG["brands"]
+}
+PADDLE_COLOR_INDEX = {
+    paddle_catalog_key(color): color for color in PADDLE_CATALOG["colors"]
+}
+PADDLE_THICKNESS_INDEX = {
+    paddle_thickness_key(thickness): thickness for thickness in PADDLE_CATALOG["thicknessesMm"]
 }
 
 
@@ -84,13 +119,25 @@ def resolve_paddle_selection(brand, model) -> tuple[str, str] | None:
     return brand_entry["name"], canonical_model
 
 
+def resolve_paddle_color(color) -> str | None:
+    return PADDLE_COLOR_INDEX.get(paddle_catalog_key(color))
+
+
+def resolve_paddle_thickness(thickness) -> str | None:
+    return PADDLE_THICKNESS_INDEX.get(paddle_thickness_key(thickness))
+
+
 def paddle_catalog_payload() -> dict:
     brands = PADDLE_CATALOG["brands"]
     return {
         "version": PADDLE_CATALOG["version"],
         "brandCount": len(brands),
         "modelCount": sum(len(entry["models"]) for entry in brands),
+        "colorCount": len(PADDLE_CATALOG["colors"]),
+        "thicknessCount": len(PADDLE_CATALOG["thicknessesMm"]),
         "brands": brands,
+        "colors": PADDLE_CATALOG["colors"],
+        "thicknessesMm": PADDLE_CATALOG["thicknessesMm"],
     }
 
 
@@ -6285,9 +6332,39 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 return
             brand, model = paddle_selection
 
-        if not all([brand, model, category, condition, location]) or price_usd <= 0:
+        canonical_color = resolve_paddle_color(color)
+        if color and not canonical_color:
             self.send_json(
-                {"error": "Add the brand, model, condition, price, and ships-from city before submitting it for review."},
+                {
+                    "error": "Choose the paddle's primary color from the list.",
+                    "code": "invalid_paddle_color_selection",
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        color = canonical_color or ""
+
+        canonical_thickness = resolve_paddle_thickness(thickness_raw)
+        if thickness_raw and not canonical_thickness:
+            self.send_json(
+                {
+                    "error": "Choose a paddle thickness from the list.",
+                    "code": "invalid_paddle_thickness_selection",
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        thickness_raw = canonical_thickness or ""
+        thickness_mm = float(thickness_raw) if thickness_raw else None
+
+        if not all([brand, model, color, thickness_raw, category, condition, location]) or price_usd <= 0:
+            self.send_json(
+                {
+                    "error": (
+                        "Add the brand, model, color, thickness, condition, price, and "
+                        "ships-from city before submitting it for review."
+                    )
+                },
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
@@ -6295,13 +6372,6 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if category not in {"control", "power", "hybrid"}:
             self.send_json(
                 {"error": "Listing category must be control, power, or hybrid."},
-                status=HTTPStatus.BAD_REQUEST,
-            )
-            return
-
-        if thickness_raw and thickness_mm is None:
-            self.send_json(
-                {"error": "Add a valid paddle thickness in millimeters if you include it."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return

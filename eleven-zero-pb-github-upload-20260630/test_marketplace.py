@@ -146,6 +146,10 @@ class MarketplaceSafetyTests(unittest.TestCase):
             app.resolve_paddle_selection("joola", "Pro V Perseus"),
             ("JOOLA", "Pro V Perseus"),
         )
+        self.assertGreaterEqual(payload["colorCount"], 12)
+        self.assertGreaterEqual(payload["thicknessCount"], 12)
+        self.assertEqual(app.resolve_paddle_color("black"), "Black")
+        self.assertEqual(app.resolve_paddle_thickness("16.0"), "16")
 
     def test_listing_submission_rejects_invented_brand_and_model(self):
         captured = {}
@@ -175,6 +179,68 @@ class MarketplaceSafetyTests(unittest.TestCase):
 
         self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
         self.assertEqual(captured["payload"]["code"], "invalid_paddle_catalog_selection")
+
+    def test_listing_submission_rejects_unlisted_color(self):
+        captured = {}
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": 7},
+            {
+                "photoAttestation": "1",
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Invisible Neon",
+                "thickness": "16",
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "invalid_paddle_color_selection")
+
+    def test_listing_submission_rejects_unlisted_thickness(self):
+        captured = {}
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": 7},
+            {
+                "photoAttestation": "1",
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Black",
+                "thickness": "13.7",
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "invalid_paddle_thickness_selection")
 
 
 if __name__ == "__main__":

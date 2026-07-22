@@ -70,9 +70,21 @@
                     </select>
                   </label>
                   <p class="seller-field-wide seller-catalog-help" id="paddle-catalog-help">
-                    Brand and model must match our paddle catalog. Can’t find yours?
-                    <a href="mailto:11zeropb@gmail.com?subject=Missing%20paddle%20model">Tell us what’s missing.</a>
+                    Choose the closest primary color. Can’t find a brand, model, or thickness?
+                    <a href="mailto:11zeropb@gmail.com?subject=Missing%20paddle%20option">Tell us what’s missing.</a>
                   </p>
+                  <label>
+                    Color
+                    <select name="color" required aria-describedby="paddle-catalog-help">
+                      <option value="">Choose a color</option>
+                    </select>
+                  </label>
+                  <label>
+                    Thickness
+                    <select name="thickness" required aria-describedby="paddle-catalog-help">
+                      <option value="">Choose thickness</option>
+                    </select>
+                  </label>
                   <label>
                     Condition
                     <select name="condition">
@@ -243,7 +255,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./marketplace.js?v=20260722catalog1"></script>
+    <script src="./marketplace.js?v=20260722catalog2"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>
