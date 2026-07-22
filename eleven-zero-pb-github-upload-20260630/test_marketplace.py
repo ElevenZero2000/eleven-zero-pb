@@ -1,3 +1,4 @@
+import base64
 import json
 import sqlite3
 import tempfile
@@ -88,6 +89,54 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(dashboard["stats"]["listingApproved"], 1)
         self.assertEqual(dashboard["stats"]["listingPending"], 1)
         self.assertEqual(len(dashboard["listings"]), 3)
+
+    def test_account_profile_settings_update_name_and_photo(self):
+        user_id = self.create_user()
+        captured = {}
+        png_payload = b"\x89PNG\r\n\x1a\n" + b"profile-photo"
+        profile_image = "data:image/png;base64," + base64.b64encode(png_payload).decode("ascii")
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_update_profile(
+            StubHandler(),
+            {"id": user_id},
+            {"name": "Santiago Player", "profileImage": profile_image},
+        )
+
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["payload"]["user"]["name"], "Santiago Player")
+        self.assertTrue(captured["payload"]["user"]["profileImageUrl"].startswith("/api/account/profile-image?v="))
+        with sqlite3.connect(app.DB_PATH) as connection:
+            row = connection.execute(
+                "SELECT name, profile_image_data, profile_image_updated_at FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        self.assertEqual(row[0], "Santiago Player")
+        self.assertEqual(row[1], profile_image)
+        self.assertTrue(row[2])
+
+    def test_account_profile_settings_reject_unsupported_image(self):
+        user_id = self.create_user("second@example.com")
+        captured = {}
+        svg_payload = base64.b64encode(b"<svg></svg>").decode("ascii")
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_update_profile(
+            StubHandler(),
+            {"id": user_id},
+            {"name": "Second Player", "profileImage": f"data:image/svg+xml;base64,{svg_payload}"},
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("JPG, PNG, or WebP", captured["payload"]["error"])
 
     def test_production_startup_quarantines_anonymous_content(self):
         anonymous_listing_id = self.create_listing(None, "Anonymous")

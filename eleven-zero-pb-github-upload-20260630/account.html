@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722admin4" />
+    <link rel="stylesheet" href="./styles.css?v=20260722profile1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -53,6 +53,21 @@
             <p class="hero-text" data-account-copy>
               Sign in to see your listings, trainer profiles, and activity stats.
             </p>
+
+            <div class="account-profile-card" data-account-profile-card>
+              <div class="account-profile-avatar" aria-hidden="true">
+                <img data-account-avatar alt="" hidden />
+                <span data-account-avatar-fallback>EZ</span>
+              </div>
+              <div class="account-profile-identity">
+                <strong data-account-profile-name>Your profile</strong>
+                <span data-account-email></span>
+              </div>
+              <button class="account-settings-button" type="button" data-profile-settings-open>
+                <span aria-hidden="true">⚙</span>
+                Settings
+              </button>
+            </div>
 
             <div class="admin-mode-banner is-hidden" data-admin-mode-banner>
               <span class="admin-mode-icon" aria-hidden="true">EZ</span>
@@ -323,8 +338,69 @@
       </footer>
     </div>
 
+    <dialog class="profile-settings-dialog" data-profile-dialog aria-labelledby="profile-settings-title">
+      <form class="profile-settings-form" data-profile-form>
+        <div class="profile-settings-head">
+          <div>
+            <p class="eyebrow">Account settings</p>
+            <h2 id="profile-settings-title">Edit your profile</h2>
+          </div>
+          <button class="profile-settings-close" type="button" data-profile-settings-close aria-label="Close settings">
+            ×
+          </button>
+        </div>
+
+        <div class="profile-photo-editor">
+          <div class="profile-photo-preview" aria-hidden="true">
+            <img data-profile-preview-image alt="" hidden />
+            <span data-profile-preview-fallback>EZ</span>
+          </div>
+          <div class="profile-photo-actions">
+            <strong>Profile photo</strong>
+            <span>JPG, PNG, or WebP</span>
+            <div>
+              <label class="button button-secondary profile-photo-upload">
+                Choose photo
+                <input
+                  class="profile-image-input"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  data-profile-image-input
+                />
+              </label>
+              <button class="profile-photo-remove" type="button" data-profile-image-remove>
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <label class="profile-settings-field">
+          <span>Display name</span>
+          <input type="text" maxlength="60" autocomplete="name" required data-profile-name-input />
+        </label>
+
+        <div class="profile-settings-field profile-settings-email">
+          <span>Email</span>
+          <strong data-profile-email></strong>
+          <small>Your sign-in email cannot be changed here.</small>
+        </div>
+
+        <p class="profile-settings-status" aria-live="polite" data-profile-status></p>
+
+        <div class="profile-settings-actions">
+          <button class="button button-secondary" type="button" data-profile-settings-cancel>
+            Cancel
+          </button>
+          <button class="button button-primary" type="submit" data-profile-save>
+            Save changes
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./account.js?v=20260722admin1"></script>
+    <script src="./account.js?v=20260722profile1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>
