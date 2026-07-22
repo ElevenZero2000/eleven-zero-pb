@@ -9,7 +9,6 @@ const listingState = {
   items: [],
   buyingListingId: null,
   query: "",
-  location: "",
   brand: "",
   model: "",
   color: "",
@@ -22,7 +21,7 @@ const listingState = {
   draftImages: [],
   imageProcessing: false,
   sellerDraftSavedAt: "",
-  catalog: { version: "", brands: [] },
+  catalog: { version: "", brands: [], colors: [], thicknessesMm: [] },
 };
 
 const listingGrid = document.querySelector("[data-listings-grid]");
@@ -35,7 +34,6 @@ const marketplaceStatus = document.querySelector("[data-marketplace-status]");
 const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
 const searchForm = document.querySelector("[data-listing-search-form]");
 const searchInput = searchForm?.querySelector('input[name="query"]');
-const locationInput = searchForm?.querySelector('input[name="location"]');
 const brandSelect = searchForm?.querySelector('select[name="brand"]');
 const modelSelect = searchForm?.querySelector('select[name="model"]');
 const colorSelect = searchForm?.querySelector('select[name="color"]');
@@ -69,13 +67,14 @@ const shippingModeInput = listingForm?.querySelector('[name="shippingMode"]');
 const shippingFlatField = listingForm?.querySelector("[data-shipping-flat-field]");
 const sellerBrandSelect = listingForm?.querySelector('select[name="brand"]');
 const sellerModelSelect = listingForm?.querySelector('select[name="model"]');
+const sellerColorSelect = listingForm?.querySelector('select[name="color"]');
+const sellerThicknessSelect = listingForm?.querySelector('select[name="thickness"]');
 
 const MARKETPLACE_BROWSE_STORAGE_KEY = "elevenZeroPbMarketplaceBrowseState";
 const SELLER_DRAFT_STORAGE_KEY = "elevenZeroPbSellerDraft";
 const MARKETPLACE_QUERY_KEYS = {
   filter: "shopStyle",
   query: "shopQuery",
-  location: "shopLocation",
   brand: "shopBrand",
   model: "shopModel",
   color: "shopColor",
@@ -150,7 +149,6 @@ function normalizeBrowseState(raw = {}) {
   return {
     filter: MARKETPLACE_FILTERS.has(nextFilter) ? nextFilter : "all",
     query: String(raw.query || "").trim(),
-    location: String(raw.location || "").trim(),
     brand: String(raw.brand || "").trim(),
     model: String(raw.model || "").trim(),
     color: String(raw.color || "").trim(),
@@ -167,7 +165,6 @@ function getMarketplaceBrowseState() {
   return normalizeBrowseState({
     filter: listingState.filter,
     query: listingState.query,
-    location: listingState.location,
     brand: listingState.brand,
     model: listingState.model,
     color: listingState.color,
@@ -184,7 +181,6 @@ function marketplaceBrowseStateHasValues(state = getMarketplaceBrowseState()) {
   return Boolean(
     state.filter !== "all" ||
       state.query ||
-      state.location ||
       state.brand ||
       state.model ||
       state.color ||
@@ -199,7 +195,6 @@ function marketplaceBrowseStateHasValues(state = getMarketplaceBrowseState()) {
 
 function syncSearchInputsFromState() {
   if (searchInput) searchInput.value = listingState.query;
-  if (locationInput) locationInput.value = listingState.location;
   if (brandSelect) brandSelect.value = listingState.brand;
   syncShopModelOptions(listingState.model);
   if (colorSelect) colorSelect.value = listingState.color;
@@ -243,9 +238,6 @@ function writeMarketplaceBrowseStateToUrl(state = getMarketplaceBrowseState()) {
   }
   if (state.query) {
     url.searchParams.set(MARKETPLACE_QUERY_KEYS.query, state.query);
-  }
-  if (state.location) {
-    url.searchParams.set(MARKETPLACE_QUERY_KEYS.location, state.location);
   }
   if (state.brand) {
     url.searchParams.set(MARKETPLACE_QUERY_KEYS.brand, state.brand);
@@ -329,9 +321,6 @@ function getActiveMarketplaceFilters() {
     listingState.condition
       ? { key: "condition", label: "Condition", value: listingState.condition }
       : null,
-    listingState.location
-      ? { key: "location", label: "Location", value: listingState.location }
-      : null,
     listingState.minPrice ? { key: "minPrice", label: "Min", value: `$${listingState.minPrice}` } : null,
     listingState.maxPrice ? { key: "maxPrice", label: "Max", value: `$${listingState.maxPrice}` } : null,
     listingState.photoMode
@@ -354,7 +343,6 @@ function clearMarketplaceFilter(filterKey) {
     color: "",
     thickness: "",
     condition: "",
-    location: "",
     minPrice: "",
     maxPrice: "",
     photoMode: "",
@@ -808,8 +796,8 @@ function renderSellerLivePreview() {
 
   const brand = listingForm.querySelector('select[name="brand"]')?.value?.trim() || "Your brand";
   const model = listingForm.querySelector('select[name="model"]')?.value?.trim() || "Your paddle model";
-  const color = listingForm.querySelector('input[name="color"]')?.value?.trim() || "";
-  const thickness = listingForm.querySelector('input[name="thickness"]')?.value?.trim() || "";
+  const color = listingForm.querySelector('select[name="color"]')?.value?.trim() || "";
+  const thickness = listingForm.querySelector('select[name="thickness"]')?.value?.trim() || "";
   const category = listingForm.querySelector('select[name="category"]')?.value || "control";
   const condition = listingForm.querySelector('select[name="condition"]')?.value || "Excellent";
   const price = listingForm.querySelector('input[name="price"]')?.value?.trim() || "";
@@ -893,7 +881,6 @@ function listingSearchScore(item, query) {
     color: normalizeFilterValue(item.color),
     category: normalizeFilterValue(item.category),
     condition: normalizeFilterValue(item.condition),
-    location: normalizeFilterValue(item.location),
     notes: normalizeFilterValue(item.notes),
     seller: normalizeFilterValue(item.seller_name),
     thickness: normalizeFilterValue(formatThickness(item.thickness_mm)),
@@ -908,7 +895,6 @@ function listingSearchScore(item, query) {
 
   if (fields.brand === normalizedQuery) score += 95;
   if (fields.model === normalizedQuery) score += 90;
-  if (fields.location === normalizedQuery) score += 70;
 
   for (const token of tokens) {
     let tokenMatched = false;
@@ -931,10 +917,6 @@ function listingSearchScore(item, query) {
     }
     if (fields.condition.includes(token)) {
       score += 14;
-      tokenMatched = true;
-    }
-    if (fields.location.includes(token)) {
-      score += 16;
       tokenMatched = true;
     }
     if (fields.seller.includes(token)) {
@@ -1204,7 +1186,6 @@ function renderListingEmptyState() {
 
   const filterSummary = [
     listingState.filter !== "all" ? listingState.filter : "",
-    listingState.location,
     listingState.brand,
     listingState.model,
     listingState.color,
@@ -1234,7 +1215,6 @@ function renderListingEmptyState() {
 function getVisibleListings() {
   const query = listingState.query;
   const normalizedQuery = normalizeFilterValue(query);
-  const locationQuery = listingState.location;
   const selectedBrand = normalizeFilterValue(listingState.brand);
   const selectedModel = normalizeFilterValue(listingState.model);
   const selectedColor = normalizeFilterValue(listingState.color);
@@ -1276,10 +1256,6 @@ function getVisibleListings() {
     }
 
     if (selectedCondition && normalizeFilterValue(item.condition) !== selectedCondition) {
-      return false;
-    }
-
-    if (locationQuery && !valueIncludesAllTokens(item.location, locationQuery)) {
       return false;
     }
 
@@ -1336,6 +1312,16 @@ function catalogBrands() {
   return Array.isArray(listingState.catalog?.brands) ? listingState.catalog.brands : [];
 }
 
+function catalogColors() {
+  return Array.isArray(listingState.catalog?.colors) ? listingState.catalog.colors : [];
+}
+
+function catalogThicknesses() {
+  return Array.isArray(listingState.catalog?.thicknessesMm)
+    ? listingState.catalog.thicknessesMm.map((value) => String(value))
+    : [];
+}
+
 function findCatalogBrand(brandName) {
   const normalizedName = normalizeFilterValue(brandName);
   if (!normalizedName) return null;
@@ -1379,15 +1365,27 @@ function syncSellerModelOptions(preferredModel = "") {
 }
 
 function initializeSellerCatalogFields() {
-  if (!sellerBrandSelect) return;
-  const currentBrand = sellerBrandSelect.value || "";
-  populateSelect(
-    sellerBrandSelect,
-    catalogBrands().map((entry) => entry.name),
-    "Choose a brand",
-    currentBrand
-  );
-  syncSellerModelOptions(sellerModelSelect?.value || "");
+  if (sellerBrandSelect) {
+    const currentBrand = sellerBrandSelect.value || "";
+    populateSelect(
+      sellerBrandSelect,
+      catalogBrands().map((entry) => entry.name),
+      "Choose a brand",
+      currentBrand
+    );
+    syncSellerModelOptions(sellerModelSelect?.value || "");
+  }
+  if (sellerColorSelect) {
+    populateSelect(sellerColorSelect, catalogColors(), "Choose a color", sellerColorSelect.value || "");
+  }
+  if (sellerThicknessSelect) {
+    populateSelect(
+      sellerThicknessSelect,
+      catalogThicknesses(),
+      "Choose thickness",
+      sellerThicknessSelect.value || ""
+    );
+  }
 }
 
 async function loadPaddleCatalog() {
@@ -1396,9 +1394,11 @@ async function loadPaddleCatalog() {
     listingState.catalog = {
       version: String(response.version || ""),
       brands: Array.isArray(response.brands) ? response.brands : [],
+      colors: Array.isArray(response.colors) ? response.colors : [],
+      thicknessesMm: Array.isArray(response.thicknessesMm) ? response.thicknessesMm : [],
     };
   } catch (error) {
-    listingState.catalog = { version: "", brands: [] };
+    listingState.catalog = { version: "", brands: [], colors: [], thicknessesMm: [] };
     if (listingForm) {
       ElevenZeroApp.setStatus(
         listingStatus,
@@ -1422,27 +1422,17 @@ async function loadPaddleCatalog() {
 
 function refreshSearchOptions() {
   const brands = catalogBrands().map((entry) => entry.name);
-  const colors = [...new Set(listingState.items.map((item) => item.color).filter(Boolean))].sort();
+  const colors = catalogColors();
   const conditions = [
     ...new Set(listingState.items.map((item) => item.condition).filter(Boolean)),
   ].sort();
-  const thicknesses = [
-    ...new Set(
-      listingState.items
-        .map((item) => {
-          const numeric = Number(item.thickness_mm);
-          return Number.isFinite(numeric) ? numeric.toFixed(1) : "";
-        })
-        .filter(Boolean)
-    ),
-  ].sort((left, right) => Number(left) - Number(right));
+  const thicknesses = catalogThicknesses();
 
   populateSelect(brandSelect, brands, "All brands", listingState.brand);
   syncShopModelOptions(listingState.model);
   populateSelect(colorSelect, colors, "All colors", listingState.color);
   populateSelect(thicknessSelect, thicknesses, "Any thickness", listingState.thickness);
   populateSelect(conditionSelect, conditions, "Any condition", listingState.condition);
-  if (locationInput) locationInput.value = listingState.location;
   if (minPriceInput) minPriceInput.value = listingState.minPrice;
   if (sortSelect) sortSelect.value = listingState.sortMode;
   if (maxPriceInput) maxPriceInput.value = listingState.maxPrice;
@@ -1511,6 +1501,8 @@ function renderSellerReadiness() {
   const basicsReady = Boolean(
     listingForm?.querySelector('select[name="brand"]')?.value?.trim() &&
       listingForm?.querySelector('select[name="model"]')?.value?.trim() &&
+      listingForm?.querySelector('select[name="color"]')?.value?.trim() &&
+      listingForm?.querySelector('select[name="thickness"]')?.value?.trim() &&
       listingForm?.querySelector('input[name="price"]')?.value?.trim()
   );
   const buyerClarityReady = Boolean(
@@ -1568,7 +1560,13 @@ function renderSellerReadiness() {
 
   sellerReadinessGrid.innerHTML = [
     sellerChecklistItem("Account", signedIn, signedIn ? "Signed in and ready." : "Sign in to continue."),
-    sellerChecklistItem("Basics", basicsReady, basicsReady ? "Brand, model, and price added." : "Add brand, model, and price."),
+    sellerChecklistItem(
+      "Paddle details",
+      basicsReady,
+      basicsReady
+        ? "Brand, model, color, thickness, and price added."
+        : "Add brand, model, color, thickness, and price."
+    ),
     sellerChecklistItem(
       "Buyer clarity",
       buyerClarityReady,
@@ -1701,7 +1699,6 @@ function renderSearchSummary(visible) {
 
   const activeFilters = [
     listingState.filter !== "all" ? `style: ${listingState.filter}` : "",
-    listingState.location ? `location: ${listingState.location}` : "",
     listingState.brand ? `brand: ${listingState.brand}` : "",
     listingState.model ? `model: ${listingState.model}` : "",
     listingState.color ? `color: ${listingState.color}` : "",
@@ -1749,7 +1746,6 @@ function renderListings() {
   if (listingNote) {
     if (
       listingState.query ||
-      listingState.location ||
       listingState.brand ||
       listingState.model ||
       listingState.color ||
@@ -1759,7 +1755,6 @@ function renderListings() {
       listingState.photoMode
     ) {
       const activeFilters = [
-        listingState.location || "all locations",
         listingState.brand || "all brands",
         listingState.model || "all models",
         listingState.color || "all colors",
@@ -2116,6 +2111,8 @@ async function handleListingSubmit(event) {
   const missingBasics = [];
   if (!String(payload.brand || "").trim()) missingBasics.push("brand");
   if (!String(payload.model || "").trim()) missingBasics.push("model");
+  if (!String(payload.color || "").trim()) missingBasics.push("color");
+  if (!String(payload.thickness || "").trim()) missingBasics.push("thickness");
   if (!String(payload.price || "").trim()) missingBasics.push("price");
   if (!String(payload.location || "").trim()) missingBasics.push("ships from");
 
@@ -2177,7 +2174,6 @@ async function handleListingSubmit(event) {
 
 function syncSearchState() {
   listingState.query = searchInput?.value?.trim() || "";
-  listingState.location = locationInput?.value?.trim() || "";
   listingState.brand = brandSelect?.value || "";
   listingState.model = modelSelect?.value || "";
   listingState.color = colorSelect?.value || "";
@@ -2202,7 +2198,6 @@ function setMobileFiltersOpen(isOpen) {
 function resetSearchState() {
   listingState.filter = "all";
   listingState.query = "";
-  listingState.location = "";
   listingState.brand = "";
   listingState.model = "";
   listingState.color = "";
@@ -2214,7 +2209,6 @@ function resetSearchState() {
   listingState.sortMode = DEFAULT_MARKETPLACE_SORT_MODE;
 
   if (searchInput) searchInput.value = "";
-  if (locationInput) locationInput.value = "";
   if (brandSelect) brandSelect.value = "";
   syncShopModelOptions();
   if (colorSelect) colorSelect.value = "";
@@ -2296,7 +2290,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   searchInput?.addEventListener("input", syncSearchState);
-  locationInput?.addEventListener("input", syncSearchState);
   brandSelect?.addEventListener("change", () => {
     listingState.brand = brandSelect.value || "";
     listingState.model = "";
