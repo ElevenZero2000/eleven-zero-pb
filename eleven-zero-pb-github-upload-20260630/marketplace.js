@@ -732,17 +732,17 @@ function updatePhotoMeta() {
   if (!photoMeta) return;
 
   const total = listingState.draftImages.length;
-  const remaining = Math.max(0, 4 - total);
+  const remaining = Math.max(0, MAX_LISTING_PHOTOS - total);
 
   photoMeta.classList.remove("is-success", "is-warning", "is-error");
   photoDropzone?.classList.remove("has-photo-error");
 
   photoMeta.textContent =
     total === 0
-      ? "0 of 4 photos selected."
-      : total >= 4
-        ? "4 of 4 photos selected · upload limit reached."
-        : `${total} of 4 photos selected · ${remaining} more available.`;
+      ? "Add at least 1 photo."
+      : total >= MAX_LISTING_PHOTOS
+        ? `${MAX_LISTING_PHOTOS} photos ready.`
+        : `${total} ready · ${remaining} left.`;
 }
 
 function setPhotoMetaStatus(message, tone = "warning") {
@@ -1493,13 +1493,29 @@ function bindListingActions() {
   });
 }
 
+function renderEmptyPhotoSlots(startIndex = 0) {
+  return Array.from({ length: Math.max(0, MAX_LISTING_PHOTOS - startIndex) }, (_, offset) => {
+    const index = startIndex + offset;
+    const isCover = index === 0;
+
+    return `
+      <label class="seller-photo-empty-slot ${isCover ? "is-cover-slot" : ""}" for="listing-photos-input">
+        <span class="seller-photo-slot-number" aria-hidden="true">${index + 1}</span>
+        <strong>${isCover ? "Cover photo" : `Photo ${index + 1}`}</strong>
+        <small>${isCover ? "Required" : "Optional"}</small>
+      </label>
+    `;
+  }).join("");
+}
+
 function renderPhotoPreview() {
   if (!photoPreview) return;
 
   if (listingState.imageProcessing) {
     photoPreview.innerHTML = `
-      <div class="seller-photo-placeholder">
-        Preparing your photo previews…
+      <div class="seller-photo-placeholder seller-photo-processing">
+        <span class="seller-photo-processing-dot" aria-hidden="true"></span>
+        Preparing your photos…
       </div>
     `;
     updatePhotoMeta();
@@ -1510,11 +1526,7 @@ function renderPhotoPreview() {
   }
 
   if (!listingState.draftImages.length) {
-    photoPreview.innerHTML = `
-      <div class="seller-photo-placeholder">
-        Photo thumbnails will appear here after you upload them.
-      </div>
-    `;
+    photoPreview.innerHTML = renderEmptyPhotoSlots();
     updatePhotoMeta();
     renderSellerDraftStatus();
     renderSellerReadiness();
@@ -1522,7 +1534,7 @@ function renderPhotoPreview() {
     return;
   }
 
-  photoPreview.innerHTML = listingState.draftImages
+  const selectedPhotoMarkup = listingState.draftImages
     .map(
       (image, index) => `
         <figure class="seller-photo-thumb">
@@ -1550,6 +1562,8 @@ function renderPhotoPreview() {
       `
     )
     .join("");
+
+  photoPreview.innerHTML = `${selectedPhotoMarkup}${renderEmptyPhotoSlots(listingState.draftImages.length)}`;
 
   updatePhotoMeta();
   renderSellerDraftStatus();
