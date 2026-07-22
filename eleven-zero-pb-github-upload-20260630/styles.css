@@ -2613,6 +2613,17 @@ body[data-nav="sell"] .feature-photo-copy strong {
   gap: 10px;
 }
 
+.shop-price-fields > .listing-search-field {
+  min-width: 0;
+}
+
+.shop-price-fields input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding-inline: 12px;
+}
+
 .shop-style-filter {
   display: grid;
   gap: 8px;
