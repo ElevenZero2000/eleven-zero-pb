@@ -266,6 +266,13 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertIn("short note", captured["payload"]["error"])
         self.assertNotIn("Choose a court", captured["payload"]["error"])
 
+    def test_google_places_browser_search_uses_javascript_place_field_names(self):
+        javascript = (Path(__file__).parent / "courts.js").read_text(encoding="utf-8")
+        self.assertIn('"googleMapsURI"', javascript)
+        self.assertIn('"websiteURI"', javascript)
+        self.assertIn("place?.googleMapsURI || place?.googleMapsUri", javascript)
+        self.assertIn("place?.websiteURI || place?.websiteUri", javascript)
+
     def test_account_profile_settings_reject_unsupported_image(self):
         user_id = self.create_user("second@example.com")
         captured = {}
