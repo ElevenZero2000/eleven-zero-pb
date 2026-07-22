@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260721stripegate1" />
+    <link rel="stylesheet" href="./styles.css?v=20260722photos2" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260717sell1" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -102,13 +102,23 @@
               <article class="seller-form-block seller-form-block-primary seller-simple-panel">
                 <div class="seller-form-block-head">
                   <h2>Photos &amp; delivery</h2>
-                  <p class="seller-form-help">One clear photo is required. You can add up to four.</p>
+                  <p class="seller-form-help">Add photos, then your shipping address.</p>
                 </div>
 
                 <div class="seller-photo-upload seller-photo-upload-compact">
+                  <div class="seller-photo-step-head">
+                    <div class="seller-photo-step-title">
+                      <h3>Product photos</h3>
+                    </div>
+                    <span class="seller-photo-requirement">1–4 photos</span>
+                  </div>
+
                   <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
-                    <strong>Add paddle photos</strong>
-                    <span>Show the face, handle, and any wear.</span>
+                    <span class="seller-upload-icon" aria-hidden="true">+</span>
+                    <span class="seller-upload-copy">
+                      <strong>Add photos</strong>
+                      <span>Tap or drag here</span>
+                    </span>
                   </label>
                   <input
                     class="seller-native-file-input"
@@ -120,11 +130,16 @@
                     aria-label="Choose up to 4 listing photos"
                   />
                   <div class="seller-photo-toolbar seller-photo-toolbar-compact">
-                    <span class="seller-photo-meta" data-photo-meta>0 of 4 photos selected.</span>
+                    <span class="seller-photo-meta" data-photo-meta role="status">Add at least 1 photo.</span>
                   </div>
                 </div>
 
-                <div class="seller-photo-preview seller-photo-preview-compact" data-photo-preview></div>
+                <div
+                  class="seller-photo-preview seller-photo-preview-compact"
+                  data-photo-preview
+                  aria-label="Selected product photos"
+                  aria-live="polite"
+                ></div>
 
                 <div class="seller-managed-shipping">
                   <input type="hidden" name="shippingMode" value="calculated" data-shipping-mode />
@@ -216,7 +231,7 @@
     </div>
 
     <script src="./app.js?v=20260703f"></script>
-    <script src="./marketplace.js?v=20260721fulfillment1"></script>
+    <script src="./marketplace.js?v=20260722photos2"></script>
     <script src="./header-tweaks.js?v=20260717sell1"></script>
   </body>
 </html>
