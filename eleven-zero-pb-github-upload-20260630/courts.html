@@ -8,8 +8,8 @@
       name="description"
       content="Search the Eleven Zero PB map for free public pickleball courts and pay-to-play facilities near you."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260717courts-simple3" />
-    <link rel="stylesheet" href="./header-tweaks.css?v=20260717courts-simple1" />
+    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="courts-page courts-simple-page" data-nav="courts">
     <div class="page-shell">
@@ -59,7 +59,7 @@
 
             <label class="finder-field">
               <span>Distance</span>
-              <select name="radius">
+              <select name="radius" aria-label="Search radius">
                 <option value="15">15 miles</option>
                 <option value="25" selected>25 miles</option>
                 <option value="50">50 miles</option>
@@ -146,7 +146,7 @@
 
             <label class="court-tool-field courts-simple-sort">
               <span class="sr-only">Sort courts</span>
-              <select data-court-sort>
+              <select data-court-sort aria-label="Sort court results">
                 <option value="recommended" selected>Recommended</option>
                 <option value="closest">Closest first</option>
                 <option value="rating">Highest rated</option>
@@ -156,6 +156,11 @@
           </div>
 
           <div class="courts-grid courts-simple-grid" data-court-results></div>
+
+          <p class="court-affiliate-disclosure reveal">
+            Some venue links may be affiliate links. Eleven Zero PB may earn a commission if you
+            book or buy through one, at no extra cost to you. Google Maps links are provided for directions.
+          </p>
 
           <div class="courts-simple-secondary reveal">
             <details class="courts-simple-disclosure" id="court-reports">
@@ -185,7 +190,7 @@
                     <form class="court-report-form" data-court-report-form>
                       <label class="court-report-field">
                         <span>Court condition</span>
-                        <select name="conditionRating">
+                        <select name="conditionRating" aria-label="Court condition rating">
                           <option value="5">5 · Excellent</option>
                           <option value="4">4 · Good</option>
                           <option value="3" selected>3 · Fine</option>
@@ -196,7 +201,7 @@
 
                       <label class="court-report-field">
                         <span>How busy is it?</span>
-                        <select name="busynessRating">
+                        <select name="busynessRating" aria-label="Court crowd level">
                           <option value="1">Quiet</option>
                           <option value="2" selected>Moderate</option>
                           <option value="3">Busy</option>
@@ -206,7 +211,7 @@
 
                       <label class="court-report-field">
                         <span>Player level</span>
-                        <select name="playerLevel">
+                        <select name="playerLevel" aria-label="Typical player level">
                           <option value="beginner">Beginner-friendly</option>
                           <option value="intermediate" selected>Intermediate-heavy</option>
                           <option value="advanced">Advanced-heavy</option>
@@ -263,7 +268,7 @@
                   </label>
                   <label>
                     Access <span class="seller-required">Required</span>
-                    <select name="accessKind" required>
+                    <select name="accessKind" aria-label="Court access type" required>
                       <option value="">Choose one</option>
                       <option value="free">Free to play</option>
                       <option value="paid">Pay to play</option>
@@ -271,7 +276,7 @@
                   </label>
                   <label>
                     Court type <span class="seller-required">Required</span>
-                    <select name="surfaceKind" required>
+                    <select name="surfaceKind" aria-label="Indoor or outdoor court" required>
                       <option value="">Choose one</option>
                       <option value="outdoor">Outdoor</option>
                       <option value="indoor">Indoor</option>
@@ -353,8 +358,8 @@
       </div>
     </div>
 
-    <script src="./app.js?v=20260705g"></script>
-    <script src="./courts.js?v=20260717courts-simple3"></script>
-    <script src="./header-tweaks.js?v=20260705f"></script>
+    <script src="./app.js?v=20260722audit1"></script>
+    <script src="./courts.js?v=20260722audit1"></script>
+    <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

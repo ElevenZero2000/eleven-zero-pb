@@ -1,35 +1,29 @@
 # Eleven Zero PB
 
-This folder contains the current live beta build of Eleven Zero PB.
-
-Planned public domain:
-
-- `https://11zeropb.com`
+This folder contains the current live beta build of Eleven Zero PB at
+`https://11zeropb.com`.
 
 What is already working:
 
-- account creation and sign in
-- session-based authentication
-- paddle listings
-- trainer profiles
-- trainer reviews
-- account dashboard
-- courts finder
-- interactive courts map
-- court condition, crowd, and player-level reports
-- Stripe seller onboarding foundation
-- marketplace checkout foundation with seller readiness states
+- account creation, sign in, password reset, and email verification
+- expiring sessions with origin and CSRF protections
+- moderated paddle listings with real seller photos
+- a searchable marketplace, product pages, and a dedicated cart
+- Stripe Connect seller onboarding and checkout
+- branded buyer confirmation email
+- owner moderation, notifications, and sales reporting
+- moderated trainer profiles, tenure, ratings, and reviews
+- a Google-powered courts finder with map pins and community reports
+- responsive desktop/mobile navigation and accessibility improvements
 
-What was added for launch prep:
+Production safeguards:
 
-- production-friendly host and port settings
-- safer cookies for HTTPS
-- basic security headers
-- Google Analytics support through an environment variable
-- Stripe Connect environment placeholders
-- Render deployment starter file
-- environment example file
-- launch guide
+- anonymous demo/test listings are excluded from the public catalog
+- new listings and trainer profiles stay pending until owner approval
+- photos are served through lightweight image endpoints instead of embedded in catalog JSON
+- HTTPS security headers, secure cookies, rate limits, and no-store API responses
+- Google Analytics and search metadata support
+- legal, privacy, robots, and sitemap pages
 
 How to run it locally:
 
@@ -60,7 +54,10 @@ Important files:
 
 Important note:
 
-This version is now much closer to a public beta. Stripe seller onboarding and checkout foundations are built in, but live Stripe keys, listing photos, email flows, and admin moderation still need to be connected before a full marketplace launch.
+Managed shipping and automated label purchasing are intentionally paused until the
+Shippo billing method and the complete fulfillment workflow are ready. Do not describe
+that portion as fully launched yet. Legal pages are product-ready drafts and should be
+reviewed by qualified counsel before a large public launch.
 
 Deployment note:
 

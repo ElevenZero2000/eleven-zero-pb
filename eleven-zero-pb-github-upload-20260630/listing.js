@@ -173,6 +173,72 @@ function formatPostedAge(value) {
   return formatPostedDate(value);
 }
 
+function formatMemberSince(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Seller account verified";
+  return `Member since ${new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric",
+  }).format(date)}`;
+}
+
+function updateProductMetadata(item) {
+  const title = `${item.brand || ""} ${item.model || ""}`.trim() || "Pickleball paddle";
+  const description = String(
+    item.notes || `${item.condition || "Used"} pickleball paddle on Eleven Zero PB`
+  ).slice(0, 180);
+  const image = item.images?.[0] || "";
+  const upsertMeta = (selector, attribute, property, content) => {
+    let node = document.head.querySelector(selector);
+    if (!node) {
+      node = document.createElement("meta");
+      node.setAttribute(attribute, property);
+      document.head.appendChild(node);
+    }
+    node.setAttribute("content", content);
+  };
+
+  document.querySelector('meta[name="description"]')?.setAttribute("content", description);
+  upsertMeta('meta[property="og:title"]', "property", "og:title", `${title} · Eleven Zero PB`);
+  upsertMeta('meta[property="og:description"]', "property", "og:description", description);
+  upsertMeta('meta[property="og:type"]', "property", "og:type", "product");
+  if (image) {
+    upsertMeta(
+      'meta[property="og:image"]',
+      "property",
+      "og:image",
+      new URL(image, window.location.href).href
+    );
+  }
+
+  let structuredData = document.getElementById("product-structured-data");
+  if (!structuredData) {
+    structuredData = document.createElement("script");
+    structuredData.id = "product-structured-data";
+    structuredData.type = "application/ld+json";
+    document.head.appendChild(structuredData);
+  }
+  structuredData.textContent = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: title,
+    description,
+    image: item.images || [],
+    brand: { "@type": "Brand", name: item.brand || "" },
+    itemCondition: "https://schema.org/UsedCondition",
+    offers: {
+      "@type": "Offer",
+      url: window.location.href,
+      priceCurrency: "USD",
+      price: Number(item.price_usd || 0).toFixed(2),
+      availability:
+        item.sale_status === "available"
+          ? "https://schema.org/InStock"
+          : "https://schema.org/OutOfStock",
+    },
+  });
+}
+
 function listingPhotoLabel(item) {
   const total = Array.isArray(item.images) ? item.images.length : 0;
   if (!total) return "No photos";
@@ -689,6 +755,7 @@ function renderGallery(item) {
           class="listing-thumb${index === listingDetailState.selectedImageIndex ? " is-active" : ""}"
           type="button"
           data-thumb-index="${index}"
+          aria-label="Show photo ${index + 1} of ${images.length}"
         >
           <img src="${ElevenZeroApp.escapeHtml(image)}" alt="Listing photo ${index + 1}" />
         </button>
@@ -820,6 +887,18 @@ function renderContent(item) {
     <p class="listing-product-location">
       Ships from <strong>${ElevenZeroApp.escapeHtml(item.location || "location not listed")}</strong>
     </p>
+    <div class="listing-seller-trust" aria-label="Seller and listing verification">
+      <div>
+        <span>Seller</span>
+        <strong>${ElevenZeroApp.escapeHtml(item.seller_name || "Community seller")}</strong>
+        <small>${ElevenZeroApp.escapeHtml(formatMemberSince(item.seller_joined_at))}</small>
+      </div>
+      <div>
+        <span>Listing review</span>
+        <strong>Reviewed by Eleven Zero PB</strong>
+        <small>${ElevenZeroApp.escapeHtml(listingPhotoLabel(item))} submitted by the seller</small>
+      </div>
+    </div>
     ${
       listingDetailState.statusTone === "neutral"
         ? ""
@@ -1089,6 +1168,7 @@ async function loadListingDetail() {
     listingDetailState.lightboxOpen = false;
     listingDetailState.shipping = restoreShippingDraftState();
     document.title = `${item.brand} ${item.model} · Eleven Zero PB`;
+    updateProductMetadata(item);
     renderGallery(item);
     renderLightbox(item);
     renderContent(item);

@@ -1063,6 +1063,8 @@ function renderListingArt(item, theme, detailHref) {
           class="listing-photo"
           src="${ElevenZeroApp.escapeHtml(primaryImage)}"
           alt="${ElevenZeroApp.escapeHtml(title)}"
+          loading="lazy"
+          decoding="async"
         />
         <span class="listing-photo-hint">${ElevenZeroApp.escapeHtml(hintLabel)}</span>
       </a>
@@ -1146,9 +1148,6 @@ function renderListingCard(item) {
       <div class="card-art ${ElevenZeroApp.escapeHtml(theme.artClass)}">
         ${renderListingArt(item, theme, detailHref)}
         ${saleLabel ? `<span class="listing-sale-overlay">${ElevenZeroApp.escapeHtml(saleLabel)}</span>` : ""}
-        <button class="shop-save-button" type="button" aria-label="Save listing">
-          ♥
-        </button>
         ${
           item.images?.length > 1
             ? `<span class="listing-photo-count">${ElevenZeroApp.escapeHtml(
@@ -1220,6 +1219,10 @@ function getVisibleListings() {
   const photoMinimum = Number(listingState.photoMode || 0);
 
   const filtered = listingState.items.filter((item) => {
+    if (item.sale_status === "sold") {
+      return false;
+    }
+
     if (listingState.filter !== "all" && item.category !== listingState.filter) {
       return false;
     }

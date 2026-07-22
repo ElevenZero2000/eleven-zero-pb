@@ -8,8 +8,8 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260721fulfillment1" />
-    <link rel="stylesheet" href="./header-tweaks.css?v=20260705f" />
+    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
     <div class="page-shell">
@@ -36,6 +36,16 @@
       </header>
 
       <main id="top">
+        <section class="account-verification-banner" data-email-verification-banner hidden>
+          <div>
+            <strong>Verify your email</strong>
+            <span>Confirm your address to better protect your account activity.</span>
+          </div>
+          <button class="button button-secondary" type="button" data-resend-verification>
+            Resend email
+          </button>
+          <p aria-live="polite" data-verification-banner-status></p>
+        </section>
         <section class="hero-section">
           <div class="hero-copy reveal">
             <p class="eyebrow">Your account</p>
@@ -69,27 +79,6 @@
             </div>
           </div>
 
-          <div class="hero-visual reveal">
-            <article class="feature-card spotlight dashboard-spotlight">
-              <div class="feature-topline">
-                <span class="pill">Live dashboard</span>
-                <span class="price" data-account-email>Account</span>
-              </div>
-
-              <div class="feature-details">
-                <div>
-                  <p class="feature-label">What you can manage here</p>
-                  <h2>Listings, trainer profiles, reviews</h2>
-                </div>
-
-                <div class="feature-meta">
-                  <span>Database-backed records</span>
-                  <span>Session-based account</span>
-                  <span>Ready for payments next</span>
-                </div>
-              </div>
-            </article>
-          </div>
         </section>
 
         <section class="guide-section section-block">
@@ -112,12 +101,12 @@
               <summary>
                 <div>
                   <p class="eyebrow">Sales &amp; shipping</p>
-                  <h3>Prepaid labels and tracking</h3>
+                  <h3>Orders and future shipping tools</h3>
                 </div>
                 <span class="dashboard-pill">Seller tools</span>
               </summary>
               <p class="dashboard-copy">
-                After a buyer pays, Eleven Zero purchases the shipping label. Print it here and drop off the package—no rate shopping required.
+                Shipping automation is being finalized. Your order history stays here while label tools remain paused.
               </p>
               <div class="list-stack" data-account-sales></div>
             </details>
@@ -300,8 +289,8 @@
       </footer>
     </div>
 
-    <script src="./app.js?v=20260703f"></script>
-    <script src="./account.js?v=20260721fulfillment1"></script>
-    <script src="./header-tweaks.js?v=20260705f"></script>
+    <script src="./app.js?v=20260722audit1"></script>
+    <script src="./account.js?v=20260722audit1"></script>
+    <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

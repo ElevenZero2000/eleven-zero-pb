@@ -2,5 +2,6 @@ User-agent: *
 Allow: /
 Disallow: /account.html
 Disallow: /auth.html
+Disallow: /cart.html
 
 Sitemap: https://11zeropb.com/sitemap.xml

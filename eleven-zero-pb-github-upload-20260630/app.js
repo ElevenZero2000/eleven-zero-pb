@@ -41,11 +41,15 @@ const ElevenZeroApp = {
   },
 
   async request(path, options = {}) {
+    const method = (options.method || "GET").toUpperCase();
+    const csrfToken = this.session?.csrfToken || "";
     const fetchOptions = {
-      method: options.method || "GET",
+      method,
+      credentials: "same-origin",
       headers: {
         Accept: "application/json",
         ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(method !== "GET" && csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         ...(options.headers || {}),
       },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
@@ -72,16 +76,30 @@ const ElevenZeroApp = {
 
     if (!destination) return "./account.html";
 
+    let parsedDestination;
+    try {
+      parsedDestination = new URL(destination, window.location.origin);
+    } catch {
+      return "./account.html";
+    }
+
     if (
-      destination === "./auth.html" ||
-      destination === "/auth.html" ||
-      destination.startsWith("./auth.html?") ||
-      destination.startsWith("/auth.html?")
+      parsedDestination.origin !== window.location.origin ||
+      !["http:", "https:"].includes(parsedDestination.protocol)
     ) {
       return "./account.html";
     }
 
-    return destination;
+    const safeDestination = `${parsedDestination.pathname}${parsedDestination.search}${parsedDestination.hash}`;
+
+    if (
+      parsedDestination.pathname === "/auth.html" ||
+      parsedDestination.pathname.endsWith("/auth.html")
+    ) {
+      return "./account.html";
+    }
+
+    return safeDestination || "./account.html";
   },
 
   redirectToAuth(next = `${window.location.pathname}${window.location.search}${window.location.hash}`) {
@@ -208,6 +226,33 @@ const ElevenZeroApp = {
 
       canonicalLink.setAttribute("href", canonicalHref);
     }
+
+    const ensureMeta = (selector, attributes) => {
+      let node = document.head.querySelector(selector);
+      if (!node) {
+        node = document.createElement("meta");
+        document.head.appendChild(node);
+      }
+      Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+    };
+
+    if (!document.head.querySelector('link[rel="icon"]')) {
+      const icon = document.createElement("link");
+      icon.rel = "icon";
+      icon.type = "image/png";
+      icon.href = "./assets/brand-shape.png";
+      document.head.appendChild(icon);
+    }
+
+    const description =
+      document.querySelector('meta[name="description"]')?.content ||
+      "Buy and sell pickleball paddles, find courts, and connect with trainers on Eleven Zero PB.";
+    ensureMeta('meta[property="og:title"]', { property: "og:title", content: document.title });
+    ensureMeta('meta[property="og:description"]', { property: "og:description", content: description });
+    ensureMeta('meta[property="og:type"]', { property: "og:type", content: "website" });
+    ensureMeta('meta[name="twitter:card"]', { name: "twitter:card", content: "summary_large_image" });
+    ensureMeta('meta[name="twitter:title"]', { name: "twitter:title", content: document.title });
+    ensureMeta('meta[name="twitter:description"]', { name: "twitter:description", content: description });
   },
 
   initAnalytics() {

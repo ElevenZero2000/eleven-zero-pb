@@ -4,7 +4,7 @@ const SEARCH_PROVIDERS = {
 };
 
 const CACHE_KEY = "eleven-zero-pb-court-finder-cache-v2";
-const PREF_KEY = "eleven-zero-pb-court-search-pref-v1";
+const PREF_KEY = "eleven-zero-pb-court-search-pref-v2";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 
 const defaultCourts = [
@@ -606,6 +606,11 @@ function googlePlaceCoordinateValue(location, axis) {
 
 function classifyGooglePlaceAccess(place) {
   const types = new Set([place.primaryType, ...(place.types || [])].filter(Boolean));
+  const name = googlePlaceTextValue(place?.displayName).toLowerCase();
+
+  if (/(club|pickleballerz|picklr|lifetime|life time|sports center|racquet|indoor)/.test(name)) {
+    return { kind: "paid", label: "Paid" };
+  }
 
   if (types.has("park")) {
     return { kind: "free", label: "Free" };
@@ -616,6 +621,15 @@ function classifyGooglePlaceAccess(place) {
 
 function classifyGooglePlaceSurface(place) {
   const types = new Set([place.primaryType, ...(place.types || [])].filter(Boolean));
+  const name = googlePlaceTextValue(place?.displayName).toLowerCase();
+
+  if (/(indoor|club|pickleballerz|picklr|sports center|recreation center|gym)/.test(name)) {
+    return { kind: "indoor", label: "Indoor" };
+  }
+
+  if (/(park|outdoor)/.test(name)) {
+    return { kind: "outdoor", label: "Outdoor" };
+  }
 
   if (types.has("park") || types.has("athletic_field")) {
     return { kind: "outdoor", label: "Outdoor" };
@@ -666,7 +680,7 @@ function normalizeGooglePlace(place, fallbackLabel, query) {
     tags: [access.kind, ...(surface.kind !== "unknown" ? [surface.kind] : [])],
     source: "live",
     provider: "google",
-    website: "",
+    website: String(place?.websiteUri || "").trim(),
     osmUrl: "",
     googleMapsUrl: String(place?.googleMapsUri || "").trim(),
     query,
@@ -1331,11 +1345,7 @@ function buildGoogleSearchPlan(geo, radiusMiles) {
   const insetLon = Math.max((box.east - box.west) * 0.18, 0.08);
   const midLat = (box.south + box.north) / 2;
   const midLon = (box.west + box.east) / 2;
-  const regionalRadiusMiles = clamp(
-    Math.ceil(span.maxMiles / 3),
-    Math.max(radiusMiles, 35),
-    31
-  );
+  const regionalRadiusMiles = clamp(Math.ceil(span.maxMiles / 3), 35, 50);
 
   const candidates = [
     { lat: Number(geo.lat), lon: Number(geo.lon), key: "center" },
@@ -2444,7 +2454,19 @@ async function fetchGoogleLiveCourts(query, geo, radiusMiles) {
   const textQuery = /pickleball/i.test(query) ? query : `pickleball courts in ${query}`;
   const browserRequestBase = {
     textQuery,
-    fields: ["displayName", "location", "formattedAddress", "businessStatus", "types"],
+    fields: [
+      "id",
+      "displayName",
+      "location",
+      "formattedAddress",
+      "shortFormattedAddress",
+      "businessStatus",
+      "primaryType",
+      "primaryTypeDisplayName",
+      "types",
+      "googleMapsUri",
+      "websiteUri",
+    ],
     language: "en-US",
     maxResultCount: searchPlan.regional ? 18 : 20,
     region: "us",
@@ -2567,8 +2589,13 @@ async function runLiveSearch(query, radiusMiles) {
     const geo = await geocodeQuery(query);
     const liveSearch = await fetchPreferredLiveCourts(query, geo, radiusMiles);
     const liveCourts = liveSearch.items || [];
+    const radiusMatchedCourts = isRegionalSearchGeo(geo)
+      ? liveCourts
+      : liveCourts.filter(
+          (court) => !Number.isFinite(court.distanceMiles) || court.distanceMiles <= radiusMiles + 1
+        );
     const nearbyDirectoryCourts = getDirectoryCourtsWithinRadius(geo, radiusMiles);
-    const combinedCourts = mergeCourtCollections(liveCourts, nearbyDirectoryCourts);
+    const combinedCourts = mergeCourtCollections(radiusMatchedCourts, nearbyDirectoryCourts);
 
     state.courts = combinedCourts;
     state.source = "live";
