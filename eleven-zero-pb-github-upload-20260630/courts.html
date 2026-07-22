@@ -187,7 +187,7 @@
                   <article class="court-community-panel">
                     <p class="eyebrow">Share a report</p>
                     <h3 data-court-report-target>Choose a court above first.</h3>
-                    <form class="court-report-form" data-court-report-form>
+                    <form class="court-report-form" data-court-report-form novalidate>
                       <label class="court-report-field court-report-field-wide">
                         <span>Choose a court</span>
                         <select name="courtId" required data-court-report-court>
@@ -228,7 +228,13 @@
 
                       <label class="court-report-field court-report-field-wide">
                         <span>Quick note</span>
-                        <textarea name="comment" rows="4" placeholder="What should other players know?"></textarea>
+                        <textarea
+                          name="comment"
+                          rows="4"
+                          minlength="12"
+                          required
+                          placeholder="What should other players know? (at least 12 characters)"
+                        ></textarea>
                       </label>
 
                       <button class="button button-primary court-report-submit" type="submit">
@@ -366,7 +372,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./courts.js?v=20260722review1"></script>
+    <script src="./courts.js?v=20260722review3"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

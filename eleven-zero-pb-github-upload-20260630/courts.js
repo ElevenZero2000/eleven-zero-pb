@@ -806,7 +806,7 @@ function buildCourtReportQuickMarkup(court) {
   `;
 }
 
-function renderCourtCommunity(court) {
+function renderCourtCommunity(court, { preserveStatus = false } = {}) {
   if (!courtReportSummary || !courtReportList || !courtReportTarget) return;
 
   if (!court) {
@@ -818,7 +818,9 @@ function renderCourtCommunity(court) {
     `;
     courtReportList.innerHTML = "";
     courtReportTarget.textContent = "Choose a court above first.";
-    setCourtReportStatus("Sign in and choose a court if you want to share a court report.");
+    if (!preserveStatus) {
+      setCourtReportStatus("Sign in and choose a court if you want to share a court report.");
+    }
     return;
   }
 
@@ -893,11 +895,13 @@ function renderCourtCommunity(court) {
   }
 
   courtReportTarget.textContent = `Share a report for ${court.name}`;
-  setCourtReportStatus(
-    ElevenZeroApp.session?.authenticated
-      ? `Sharing a report for ${court.name}.`
-      : "Sign in if you want to post a court report for this location."
-  );
+  if (!preserveStatus) {
+    setCourtReportStatus(
+      ElevenZeroApp.session?.authenticated
+        ? `Sharing a report for ${court.name}.`
+        : "Sign in if you want to post a court report for this location."
+    );
+  }
 }
 
 function buildCourtInsightsMarkup(court) {
@@ -1525,7 +1529,7 @@ async function loadCourtSummaries(courts) {
   }
 }
 
-async function loadCourtReportDetails(court) {
+async function loadCourtReportDetails(court, { preserveStatus = false } = {}) {
   if (!court) return;
 
   try {
@@ -1540,14 +1544,14 @@ async function loadCourtReportDetails(court) {
     }
 
     state.courtReportsByCourt[court.id] = response.items || [];
-    renderCourtCommunity(court);
+    renderCourtCommunity(court, { preserveStatus });
     if (state.detailCourtId === court.id) {
       renderCourtDetailModal(court);
     }
   } catch {
     if (state.activeCourtId !== court.id) return;
     state.courtReportsByCourt[court.id] = [];
-    renderCourtCommunity(court);
+    renderCourtCommunity(court, { preserveStatus });
     if (state.detailCourtId === court.id) {
       renderCourtDetailModal(court);
     }
@@ -1561,12 +1565,15 @@ function setActiveCourt(courtId, { centerMap = false, scrollMap = false, scrollR
 
   if (!court) return;
 
+  const preserveReportStatus =
+    state.activeCourtId === court.id && courtReportStatus?.classList.contains("is-success");
+
   state.activeCourtId = court.id;
   mapState.activeCourtId = court.id;
   if (courtReportCourtSelect) courtReportCourtSelect.value = court.id;
   highlightCourtCard(court.id);
   buildMapSelection(court);
-  renderCourtCommunity(court);
+  renderCourtCommunity(court, { preserveStatus: preserveReportStatus });
 
   if (mapState.ready) {
     if (centerMap && Number.isFinite(court.lat) && Number.isFinite(court.lon)) {
@@ -1587,7 +1594,7 @@ function setActiveCourt(courtId, { centerMap = false, scrollMap = false, scrollR
     community?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  loadCourtReportDetails(court);
+  loadCourtReportDetails(court, { preserveStatus: preserveReportStatus });
 }
 
 function clearGoogleMarkers() {
@@ -2842,14 +2849,32 @@ async function handleCourtReportSubmit(event) {
   }
 
   const selectedCourtId = String(courtReportCourtSelect?.value || "").trim();
-  const activeCourt =
-    state.courts.find((court) => court.id === selectedCourtId) || getActiveCourt();
-  if (!activeCourt) {
+  if (!selectedCourtId) {
     setCourtReportStatus("Choose a court first so we know where to post your report.", "warning");
+    courtReportCourtSelect?.focus();
+    return;
+  }
+
+  const activeCourt = state.courts.find((court) => court.id === selectedCourtId);
+  if (!activeCourt) {
+    setCourtReportStatus("That court is no longer in these results. Choose it again.", "warning");
+    courtReportCourtSelect?.focus();
     return;
   }
 
   const formData = new FormData(courtReportForm);
+  const comment = String(formData.get("comment") || "").trim();
+  if (!comment) {
+    setCourtReportStatus("Add a short note about the court before posting.", "warning");
+    courtReportForm.querySelector('textarea[name="comment"]')?.focus();
+    return;
+  }
+  if (comment.length < 12) {
+    setCourtReportStatus("Your note needs at least 12 characters.", "warning");
+    courtReportForm.querySelector('textarea[name="comment"]')?.focus();
+    return;
+  }
+
   const payload = {
     courtId: activeCourt.id,
     courtName: activeCourt.name,
@@ -2857,7 +2882,7 @@ async function handleCourtReportSubmit(event) {
     conditionRating: Number(formData.get("conditionRating") || 0),
     busynessRating: Number(formData.get("busynessRating") || 0),
     playerLevel: String(formData.get("playerLevel") || ""),
-    comment: String(formData.get("comment") || "").trim(),
+    comment,
   };
 
   try {
@@ -2873,9 +2898,8 @@ async function handleCourtReportSubmit(event) {
     if (courtReportCourtSelect) courtReportCourtSelect.value = activeCourt.id;
     state.courtSummaries[activeCourt.id] = response.summary || state.courtSummaries[activeCourt.id];
     state.courtReportsByCourt[activeCourt.id] = response.items || [];
-    renderResults({ fitMap: false });
-    setActiveCourt(activeCourt.id, { centerMap: false, scrollMap: false });
     setCourtReportStatus(response.message || "Your court report is now live.", "success");
+    renderResults({ fitMap: false });
   } catch (error) {
     setCourtReportStatus(error.message, "error");
   } finally {
