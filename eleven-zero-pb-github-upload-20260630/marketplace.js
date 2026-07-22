@@ -11,6 +11,7 @@ const listingState = {
   query: "",
   location: "",
   brand: "",
+  model: "",
   color: "",
   thickness: "",
   condition: "",
@@ -21,6 +22,7 @@ const listingState = {
   draftImages: [],
   imageProcessing: false,
   sellerDraftSavedAt: "",
+  catalog: { version: "", brands: [] },
 };
 
 const listingGrid = document.querySelector("[data-listings-grid]");
@@ -35,6 +37,7 @@ const searchForm = document.querySelector("[data-listing-search-form]");
 const searchInput = searchForm?.querySelector('input[name="query"]');
 const locationInput = searchForm?.querySelector('input[name="location"]');
 const brandSelect = searchForm?.querySelector('select[name="brand"]');
+const modelSelect = searchForm?.querySelector('select[name="model"]');
 const colorSelect = searchForm?.querySelector('select[name="color"]');
 const thicknessSelect = searchForm?.querySelector('select[name="thickness"]');
 const conditionSelect = searchForm?.querySelector('select[name="condition"]');
@@ -64,6 +67,8 @@ const sellerSubmitButton = listingForm?.querySelector("[data-seller-submit]");
 const sellerPayoutGate = document.querySelector("[data-seller-payout-gate]");
 const shippingModeInput = listingForm?.querySelector('[name="shippingMode"]');
 const shippingFlatField = listingForm?.querySelector("[data-shipping-flat-field]");
+const sellerBrandSelect = listingForm?.querySelector('select[name="brand"]');
+const sellerModelSelect = listingForm?.querySelector('select[name="model"]');
 
 const MARKETPLACE_BROWSE_STORAGE_KEY = "elevenZeroPbMarketplaceBrowseState";
 const SELLER_DRAFT_STORAGE_KEY = "elevenZeroPbSellerDraft";
@@ -72,6 +77,7 @@ const MARKETPLACE_QUERY_KEYS = {
   query: "shopQuery",
   location: "shopLocation",
   brand: "shopBrand",
+  model: "shopModel",
   color: "shopColor",
   thickness: "shopThickness",
   condition: "shopCondition",
@@ -146,6 +152,7 @@ function normalizeBrowseState(raw = {}) {
     query: String(raw.query || "").trim(),
     location: String(raw.location || "").trim(),
     brand: String(raw.brand || "").trim(),
+    model: String(raw.model || "").trim(),
     color: String(raw.color || "").trim(),
     thickness: String(raw.thickness || "").trim(),
     condition: String(raw.condition || "").trim(),
@@ -162,6 +169,7 @@ function getMarketplaceBrowseState() {
     query: listingState.query,
     location: listingState.location,
     brand: listingState.brand,
+    model: listingState.model,
     color: listingState.color,
     thickness: listingState.thickness,
     condition: listingState.condition,
@@ -178,6 +186,7 @@ function marketplaceBrowseStateHasValues(state = getMarketplaceBrowseState()) {
       state.query ||
       state.location ||
       state.brand ||
+      state.model ||
       state.color ||
       state.thickness ||
       state.condition ||
@@ -192,6 +201,7 @@ function syncSearchInputsFromState() {
   if (searchInput) searchInput.value = listingState.query;
   if (locationInput) locationInput.value = listingState.location;
   if (brandSelect) brandSelect.value = listingState.brand;
+  syncShopModelOptions(listingState.model);
   if (colorSelect) colorSelect.value = listingState.color;
   if (thicknessSelect) thicknessSelect.value = listingState.thickness;
   if (conditionSelect) conditionSelect.value = listingState.condition;
@@ -239,6 +249,9 @@ function writeMarketplaceBrowseStateToUrl(state = getMarketplaceBrowseState()) {
   }
   if (state.brand) {
     url.searchParams.set(MARKETPLACE_QUERY_KEYS.brand, state.brand);
+  }
+  if (state.model) {
+    url.searchParams.set(MARKETPLACE_QUERY_KEYS.model, state.model);
   }
   if (state.color) {
     url.searchParams.set(MARKETPLACE_QUERY_KEYS.color, state.color);
@@ -308,6 +321,7 @@ function getActiveMarketplaceFilters() {
         }
       : null,
     listingState.brand ? { key: "brand", label: "Brand", value: listingState.brand } : null,
+    listingState.model ? { key: "model", label: "Model", value: listingState.model } : null,
     listingState.color ? { key: "color", label: "Color", value: listingState.color } : null,
     listingState.thickness
       ? { key: "thickness", label: "Thickness", value: `${listingState.thickness} mm` }
@@ -336,6 +350,7 @@ function clearMarketplaceFilter(filterKey) {
   const resetValues = {
     filter: "all",
     brand: "",
+    model: "",
     color: "",
     thickness: "",
     condition: "",
@@ -525,11 +540,18 @@ function restoreSellerDraft() {
 
   const draft = readStorageJson(SELLER_DRAFT_STORAGE_KEY);
   if (!draft?.fields || typeof draft.fields !== "object") {
+    syncSellerModelOptions();
     renderSellerDraftStatus();
     return;
   }
 
+  const draftBrand = String(draft.fields.brand || "");
+  const draftModel = String(draft.fields.model || "");
+  if (sellerBrandSelect) sellerBrandSelect.value = draftBrand;
+  syncSellerModelOptions(draftModel);
+
   Object.entries(draft.fields).forEach(([name, value]) => {
+    if (name === "brand" || name === "model") return;
     const field = listingForm.elements?.namedItem?.(name);
     if (!field || !("value" in field)) return;
     field.value = String(value || "");
@@ -549,6 +571,8 @@ function clearSellerDraft() {
   if (photoInput) {
     photoInput.value = "";
   }
+
+  syncSellerModelOptions();
 
   listingState.draftImages = [];
   listingState.sellerDraftSavedAt = "";
@@ -782,8 +806,8 @@ function sellerChecklistItem(label, ready, helper) {
 function renderSellerLivePreview() {
   if (!sellerLivePreview || !listingForm) return;
 
-  const brand = listingForm.querySelector('input[name="brand"]')?.value?.trim() || "Your brand";
-  const model = listingForm.querySelector('input[name="model"]')?.value?.trim() || "Your paddle model";
+  const brand = listingForm.querySelector('select[name="brand"]')?.value?.trim() || "Your brand";
+  const model = listingForm.querySelector('select[name="model"]')?.value?.trim() || "Your paddle model";
   const color = listingForm.querySelector('input[name="color"]')?.value?.trim() || "";
   const thickness = listingForm.querySelector('input[name="thickness"]')?.value?.trim() || "";
   const category = listingForm.querySelector('select[name="category"]')?.value || "control";
@@ -1182,6 +1206,7 @@ function renderListingEmptyState() {
     listingState.filter !== "all" ? listingState.filter : "",
     listingState.location,
     listingState.brand,
+    listingState.model,
     listingState.color,
     listingState.thickness ? `${listingState.thickness} mm` : "",
     listingState.condition,
@@ -1211,6 +1236,7 @@ function getVisibleListings() {
   const normalizedQuery = normalizeFilterValue(query);
   const locationQuery = listingState.location;
   const selectedBrand = normalizeFilterValue(listingState.brand);
+  const selectedModel = normalizeFilterValue(listingState.model);
   const selectedColor = normalizeFilterValue(listingState.color);
   const selectedThickness = String(listingState.thickness || "").trim();
   const selectedCondition = normalizeFilterValue(listingState.condition);
@@ -1228,6 +1254,10 @@ function getVisibleListings() {
     }
 
     if (selectedBrand && normalizeFilterValue(item.brand) !== selectedBrand) {
+      return false;
+    }
+
+    if (selectedModel && normalizeFilterValue(item.model) !== selectedModel) {
       return false;
     }
 
@@ -1302,8 +1332,96 @@ function populateSelect(select, values, placeholder, currentValue = "") {
   select.innerHTML = options.join("");
 }
 
+function catalogBrands() {
+  return Array.isArray(listingState.catalog?.brands) ? listingState.catalog.brands : [];
+}
+
+function findCatalogBrand(brandName) {
+  const normalizedName = normalizeFilterValue(brandName);
+  if (!normalizedName) return null;
+  return catalogBrands().find((entry) => normalizeFilterValue(entry.name) === normalizedName) || null;
+}
+
+function catalogModelsForBrand(brandName) {
+  const entry = findCatalogBrand(brandName);
+  return Array.isArray(entry?.models) ? entry.models : [];
+}
+
+function syncShopModelOptions(preferredModel = listingState.model) {
+  if (!modelSelect) return;
+
+  const brandName = brandSelect?.value || listingState.brand;
+  const models = catalogModelsForBrand(brandName);
+  const validModel = models.includes(preferredModel) ? preferredModel : "";
+  populateSelect(
+    modelSelect,
+    models,
+    brandName ? "All models" : "Choose a brand first",
+    validModel
+  );
+  modelSelect.disabled = !brandName;
+  listingState.model = validModel;
+}
+
+function syncSellerModelOptions(preferredModel = "") {
+  if (!sellerModelSelect) return;
+
+  const brandName = sellerBrandSelect?.value || "";
+  const models = catalogModelsForBrand(brandName);
+  const validModel = models.includes(preferredModel) ? preferredModel : "";
+  populateSelect(
+    sellerModelSelect,
+    models,
+    brandName ? "Choose a model" : "Choose a brand first",
+    validModel
+  );
+  sellerModelSelect.disabled = !brandName;
+}
+
+function initializeSellerCatalogFields() {
+  if (!sellerBrandSelect) return;
+  const currentBrand = sellerBrandSelect.value || "";
+  populateSelect(
+    sellerBrandSelect,
+    catalogBrands().map((entry) => entry.name),
+    "Choose a brand",
+    currentBrand
+  );
+  syncSellerModelOptions(sellerModelSelect?.value || "");
+}
+
+async function loadPaddleCatalog() {
+  try {
+    const response = await ElevenZeroApp.request("/api/paddle-catalog");
+    listingState.catalog = {
+      version: String(response.version || ""),
+      brands: Array.isArray(response.brands) ? response.brands : [],
+    };
+  } catch (error) {
+    listingState.catalog = { version: "", brands: [] };
+    if (listingForm) {
+      ElevenZeroApp.setStatus(
+        listingStatus,
+        "The paddle catalog could not load. Refresh the page before submitting a listing.",
+        "warning"
+      );
+    }
+  }
+
+  initializeSellerCatalogFields();
+  if (brandSelect) {
+    populateSelect(
+      brandSelect,
+      catalogBrands().map((entry) => entry.name),
+      "All brands",
+      listingState.brand
+    );
+    syncShopModelOptions(listingState.model);
+  }
+}
+
 function refreshSearchOptions() {
-  const brands = [...new Set(listingState.items.map((item) => item.brand).filter(Boolean))].sort();
+  const brands = catalogBrands().map((entry) => entry.name);
   const colors = [...new Set(listingState.items.map((item) => item.color).filter(Boolean))].sort();
   const conditions = [
     ...new Set(listingState.items.map((item) => item.condition).filter(Boolean)),
@@ -1320,6 +1438,7 @@ function refreshSearchOptions() {
   ].sort((left, right) => Number(left) - Number(right));
 
   populateSelect(brandSelect, brands, "All brands", listingState.brand);
+  syncShopModelOptions(listingState.model);
   populateSelect(colorSelect, colors, "All colors", listingState.color);
   populateSelect(thicknessSelect, thicknesses, "Any thickness", listingState.thickness);
   populateSelect(conditionSelect, conditions, "Any condition", listingState.condition);
@@ -1329,6 +1448,7 @@ function refreshSearchOptions() {
   if (maxPriceInput) maxPriceInput.value = listingState.maxPrice;
   if (photoSelect) photoSelect.value = listingState.photoMode;
   if (brandSelect) listingState.brand = brandSelect.value || "";
+  if (modelSelect) listingState.model = modelSelect.value || "";
   if (colorSelect) listingState.color = colorSelect.value || "";
   if (thicknessSelect) listingState.thickness = thicknessSelect.value || "";
   if (conditionSelect) listingState.condition = conditionSelect.value || "";
@@ -1379,6 +1499,8 @@ function renderBrandPills() {
       const nextBrand = button.dataset.quickBrand || "";
       listingState.brand = listingState.brand === nextBrand ? "" : nextBrand;
       if (brandSelect) brandSelect.value = listingState.brand;
+      listingState.model = "";
+      syncShopModelOptions();
       persistMarketplaceBrowseState();
       renderListings();
     });
@@ -1387,8 +1509,8 @@ function renderBrandPills() {
 
 function renderSellerReadiness() {
   const basicsReady = Boolean(
-    listingForm?.querySelector('input[name="brand"]')?.value?.trim() &&
-      listingForm?.querySelector('input[name="model"]')?.value?.trim() &&
+    listingForm?.querySelector('select[name="brand"]')?.value?.trim() &&
+      listingForm?.querySelector('select[name="model"]')?.value?.trim() &&
       listingForm?.querySelector('input[name="price"]')?.value?.trim()
   );
   const buyerClarityReady = Boolean(
@@ -1581,6 +1703,7 @@ function renderSearchSummary(visible) {
     listingState.filter !== "all" ? `style: ${listingState.filter}` : "",
     listingState.location ? `location: ${listingState.location}` : "",
     listingState.brand ? `brand: ${listingState.brand}` : "",
+    listingState.model ? `model: ${listingState.model}` : "",
     listingState.color ? `color: ${listingState.color}` : "",
     listingState.thickness ? `thickness: ${listingState.thickness} mm` : "",
     listingState.condition ? `condition: ${listingState.condition}` : "",
@@ -1628,6 +1751,7 @@ function renderListings() {
       listingState.query ||
       listingState.location ||
       listingState.brand ||
+      listingState.model ||
       listingState.color ||
       listingState.thickness ||
       listingState.minPrice ||
@@ -1637,6 +1761,7 @@ function renderListings() {
       const activeFilters = [
         listingState.location || "all locations",
         listingState.brand || "all brands",
+        listingState.model || "all models",
         listingState.color || "all colors",
         listingState.thickness ? `${listingState.thickness} mm` : "any thickness",
         listingState.minPrice ? `from $${listingState.minPrice}` : "",
@@ -2028,6 +2153,7 @@ async function handleListingSubmit(event) {
     });
 
     listingForm.reset();
+    syncSellerModelOptions();
     listingState.draftImages = [];
     listingState.sellerDraftSavedAt = "";
     removeStorageItem(SELLER_DRAFT_STORAGE_KEY);
@@ -2053,6 +2179,7 @@ function syncSearchState() {
   listingState.query = searchInput?.value?.trim() || "";
   listingState.location = locationInput?.value?.trim() || "";
   listingState.brand = brandSelect?.value || "";
+  listingState.model = modelSelect?.value || "";
   listingState.color = colorSelect?.value || "";
   listingState.thickness = thicknessSelect?.value || "";
   listingState.condition = conditionSelect?.value || "";
@@ -2077,6 +2204,7 @@ function resetSearchState() {
   listingState.query = "";
   listingState.location = "";
   listingState.brand = "";
+  listingState.model = "";
   listingState.color = "";
   listingState.thickness = "";
   listingState.condition = "";
@@ -2088,6 +2216,7 @@ function resetSearchState() {
   if (searchInput) searchInput.value = "";
   if (locationInput) locationInput.value = "";
   if (brandSelect) brandSelect.value = "";
+  syncShopModelOptions();
   if (colorSelect) colorSelect.value = "";
   if (thicknessSelect) thicknessSelect.value = "";
   if (conditionSelect) conditionSelect.value = "";
@@ -2133,6 +2262,7 @@ function moveDraftPhotoToCover(index) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
+  await loadPaddleCatalog();
   restoreMarketplaceBrowseState();
   restoreSellerDraft();
   syncShippingFormState();
@@ -2167,7 +2297,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   searchInput?.addEventListener("input", syncSearchState);
   locationInput?.addEventListener("input", syncSearchState);
-  brandSelect?.addEventListener("change", syncSearchState);
+  brandSelect?.addEventListener("change", () => {
+    listingState.brand = brandSelect.value || "";
+    listingState.model = "";
+    syncShopModelOptions();
+    syncSearchState();
+  });
+  modelSelect?.addEventListener("change", syncSearchState);
   colorSelect?.addEventListener("change", syncSearchState);
   thicknessSelect?.addEventListener("change", syncSearchState);
   conditionSelect?.addEventListener("change", syncSearchState);
@@ -2185,6 +2321,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     handlePhotoSelection(event.currentTarget?.files);
   });
   listingForm?.addEventListener("submit", handleListingSubmit);
+  sellerBrandSelect?.addEventListener("change", () => {
+    syncSellerModelOptions();
+  });
   listingForm?.addEventListener("input", () => {
     updateSellerNotesCounter();
     saveSellerDraft();
