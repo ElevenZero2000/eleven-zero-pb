@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -167,6 +167,7 @@ GOOGLE_MAPS_MAP_ID = os.getenv("GOOGLE_MAPS_MAP_ID", "").strip()
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY", GOOGLE_MAPS_API_KEY).strip()
 SHIPPO_API_KEY = os.getenv("SHIPPO_API_KEY", "").strip()
 SHIPPO_LABEL_FILE_TYPE = os.getenv("SHIPPO_LABEL_FILE_TYPE", "PDF").strip().upper() or "PDF"
+SHIPPO_WEBHOOK_TOKEN = os.getenv("SHIPPO_WEBHOOK_TOKEN", "").strip()
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
@@ -180,6 +181,12 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 STRIPE_COUNTRY = os.getenv("STRIPE_COUNTRY", "US").strip().upper() or "US"
 STRIPE_PLATFORM_FEE_PERCENT = float(os.getenv("PLATFORM_FEE_PERCENT", "8.5"))
 STRIPE_API_BASE = "https://api.stripe.com/v1"
+PAYOUT_PROTECTION_HOURS = max(
+    1, min(168, int(os.getenv("PAYOUT_PROTECTION_HOURS", "24")))
+)
+PAYOUT_RELEASE_CHECK_SECONDS = max(
+    60, min(3600, int(os.getenv("PAYOUT_RELEASE_CHECK_SECONDS", "300")))
+)
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
@@ -489,6 +496,41 @@ def connect_db() -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
+
+
+def app_setting(setting_key: str) -> str:
+    with closing(connect_db()) as connection:
+        row = connection.execute(
+            "SELECT setting_value FROM app_settings WHERE setting_key = ?",
+            (setting_key,),
+        ).fetchone()
+    return compact_whitespace(row["setting_value"]) if row else ""
+
+
+def set_app_setting(setting_key: str, setting_value: str) -> None:
+    with closing(connect_db()) as connection:
+        connection.execute(
+            """
+            INSERT INTO app_settings (setting_key, setting_value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET
+              setting_value = excluded.setting_value,
+              updated_at = excluded.updated_at
+            """,
+            (setting_key, setting_value, utc_now()),
+        )
+        connection.commit()
+
+
+def shippo_webhook_token() -> str:
+    if SHIPPO_WEBHOOK_TOKEN:
+        return SHIPPO_WEBHOOK_TOKEN
+    existing = app_setting("shippo_webhook_token")
+    if existing:
+        return existing
+    generated = secrets.token_urlsafe(32)
+    set_app_setting("shippo_webhook_token", generated)
+    return generated
 
 
 def hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -1453,7 +1495,12 @@ def serialize_user(row: sqlite3.Row | None) -> dict | None:
     return payload
 
 
-def stripe_request(method: str, path: str, data: dict | None = None) -> dict:
+def stripe_request(
+    method: str,
+    path: str,
+    data: dict | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
     if not stripe_is_configured():
         raise RuntimeError("Stripe is not configured yet. Add your Stripe keys before starting seller onboarding.")
 
@@ -1470,6 +1517,8 @@ def stripe_request(method: str, path: str, data: dict | None = None) -> dict:
     request = Request(url, data=body, method=method.upper())
     request.add_header("Authorization", f"Bearer {STRIPE_SECRET_KEY}")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    if idempotency_key:
+        request.add_header("Idempotency-Key", compact_whitespace(idempotency_key)[:255])
 
     try:
         with urlopen(request, timeout=30) as response:
@@ -1486,17 +1535,31 @@ def stripe_request(method: str, path: str, data: dict | None = None) -> dict:
         raise ValueError("Stripe could not be reached right now.") from exc
 
 
-def shippo_request(path: str, payload: dict) -> dict:
+def shippo_api_request(
+    method: str,
+    path: str,
+    payload: dict | None = None,
+) -> dict:
     if not shippo_is_configured():
         raise RuntimeError("Shippo is not configured yet.")
 
+    encoded = urlencode(payload or {}, doseq=True)
+    url = f"https://api.goshippo.com{path}"
+    body = None
+    if method.upper() == "GET":
+        if encoded:
+            url = f"{url}?{encoded}"
+    else:
+        body = json.dumps(payload or {}).encode("utf-8")
+
     request = Request(
-        f"https://api.goshippo.com{path}",
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
+        url,
+        data=body,
+        method=method.upper(),
     )
     request.add_header("Authorization", f"ShippoToken {SHIPPO_API_KEY}")
     request.add_header("Content-Type", "application/json")
+    request.add_header("SHIPPO-API-VERSION", "2018-02-08")
 
     try:
         with urlopen(request, timeout=30) as response:
@@ -1515,6 +1578,10 @@ def shippo_request(path: str, payload: dict) -> dict:
         raise ValueError(message) from exc
     except URLError as exc:
         raise ValueError("Shippo could not be reached right now.") from exc
+
+
+def shippo_request(path: str, payload: dict) -> dict:
+    return shippo_api_request("POST", path, payload)
 
 
 def shippo_transaction_error(transaction: dict) -> str:
@@ -1682,6 +1749,10 @@ def build_purchase_confirmation_message(
                 "1. Eleven Zero PB creates the seller's prepaid shipping label.",
                 "2. The seller packs and drops off your paddle.",
                 "3. Shipping and tracking updates stay connected to your Eleven Zero PB account.",
+                (
+                    "4. After Shippo confirms delivery, you have 24 hours to "
+                    "report an order problem from your account before seller proceeds are released."
+                ),
                 f"Order reference: {order_reference}",
                 "",
                 f"View your account: {account_url}",
@@ -1779,7 +1850,7 @@ def build_purchase_confirmation_message(
                   <tr>
                     <td style="padding:22px;">
                       <div style="color:#042814;font-size:16px;font-weight:800;">What happens next</div>
-                      <p style="margin:10px 0 0;color:#5d6f64;font-size:14px;line-height:1.65;">Eleven Zero PB creates the prepaid shipping label, then the seller packs and drops off your paddle. Tracking updates remain connected to your account.</p>
+                      <p style="margin:10px 0 0;color:#5d6f64;font-size:14px;line-height:1.65;">Eleven Zero PB creates the prepaid shipping label, then the seller packs and drops off your paddle. Tracking stays connected to your account. After Shippo confirms delivery, you have 24 hours to report an order problem before seller proceeds are released.</p>
                     </td>
                   </tr>
                 </table>
@@ -1982,7 +2053,14 @@ def build_seller_sale_confirmation_message(
                 "What happens next:",
                 "1. Eleven Zero PB is creating the prepaid shipping label.",
                 "2. A separate email will include the label and packing instructions.",
-                "3. Your proceeds route to your connected Stripe balance. Bank payout timing depends on your Stripe account and bank.",
+                (
+                    "3. Eleven Zero PB holds your estimated proceeds until Shippo "
+                    "confirms delivery and the buyer's 24-hour protection window closes."
+                ),
+                (
+                    "4. If no problem is reported, the proceeds are released to "
+                    "your connected Stripe balance. Bank arrival then depends on Stripe and your bank."
+                ),
                 "",
                 f"Manage this sale: {account_url}",
                 "",
@@ -2037,7 +2115,7 @@ def build_seller_sale_confirmation_message(
               </table></td></tr>
             </table>
           </td></tr>
-          <tr><td style="padding:22px 34px 8px;"><div style="padding:22px;background:#f3fff6;border-radius:20px;color:#5d6f64;font-size:14px;line-height:1.65;"><strong style="display:block;margin-bottom:8px;color:#042814;font-size:16px;">What happens next</strong>We’ll email the prepaid label and packing instructions separately. Your proceeds route to your connected Stripe balance; bank payout timing depends on Stripe and your bank.</div></td></tr>
+          <tr><td style="padding:22px 34px 8px;"><div style="padding:22px;background:#f3fff6;border-radius:20px;color:#5d6f64;font-size:14px;line-height:1.65;"><strong style="display:block;margin-bottom:8px;color:#042814;font-size:16px;">What happens next</strong>We’ll email the prepaid label and packing instructions separately. Eleven Zero PB holds your estimated proceeds until Shippo confirms delivery and the buyer’s 24-hour protection window closes. If no problem is reported, the proceeds are released to your connected Stripe balance; bank arrival then depends on Stripe and your bank.</div></td></tr>
           <tr><td align="center" style="padding:26px 34px 34px;"><a href="{safe_account_url}" style="display:inline-block;padding:15px 25px;border-radius:999px;background:#00ed64;color:#032d17;font-size:15px;font-weight:900;text-decoration:none;">Manage this sale</a><p style="margin:18px 0 0;color:#7b8b82;font-size:12px;">Order reference: <strong>{safe_order_reference}</strong></p></td></tr>
           <tr><td align="center" style="padding:24px 34px;background:#032d17;color:#b8cabf;font-size:12px;line-height:1.7;">Questions? Reply or contact <a href="mailto:{safe_support_email}" style="color:#00ed64;text-decoration:none;">{safe_support_email}</a>.<br>Eleven Zero PB · Built for the pickleball community</td></tr>
         </table>
@@ -2236,7 +2314,14 @@ def build_seller_shipping_label_message(
                 f"5. Drop the package off with {carrier or 'the carrier shown on the label'}.",
                 "6. Keep the drop-off receipt until delivery is confirmed.",
                 "",
-                "Your proceeds route to your connected Stripe balance. Bank payout timing depends on your Stripe account and bank.",
+                (
+                    "Eleven Zero PB holds your estimated proceeds until Shippo "
+                    "confirms delivery and the buyer's 24-hour protection window closes."
+                ),
+                (
+                    "If no problem is reported, the proceeds are released to your "
+                    "connected Stripe balance. Bank arrival then depends on Stripe and your bank."
+                ),
                 "",
                 *([f"Track the package: {tracking_url}"] if tracking_url else []),
                 f"Manage this order: {account_url}",
@@ -2353,7 +2438,7 @@ def build_seller_shipping_label_message(
                           <td align="right" style="padding:16px 0 18px;border-top:1px solid #e4ebe6;color:#042814;font-size:14px;font-weight:800;">{safe_order_reference}</td>
                         </tr>
                       </table>
-                      <p style="margin:16px 0 0;color:#65776c;font-size:12px;line-height:1.6;">Proceeds route to your connected Stripe balance. Bank payout timing depends on Stripe and your bank.</p>
+                      <p style="margin:16px 0 0;color:#65776c;font-size:12px;line-height:1.6;">Eleven Zero PB holds these estimated proceeds until Shippo confirms delivery and the buyer’s 24-hour protection window closes. If no problem is reported, the proceeds are released to your connected Stripe balance; bank arrival then depends on Stripe and your bank.</p>
                     </td>
                   </tr>
                 </table>
@@ -2786,8 +2871,74 @@ def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def mark_order_proceeds_held_for_delivery(session_id: str) -> sqlite3.Row | None:
+    """Move a paid separate-flow order into the delivery hold.
+
+    Retrieving the PaymentIntent here captures its source Charge for the later
+    transfer. A temporary Stripe read failure never blocks buyer/seller emails
+    or label creation; the release worker safely retries before moving money.
+    """
+    with closing(connect_db()) as connection:
+        order_row = connection.execute(
+            "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if not order_row:
+        return None
+    if row_value(order_row, "payment_flow", "legacy_destination_charge") != "separate_charge_transfer":
+        return order_row
+    if not (
+        order_row["status"] == "paid"
+        or order_row["stripe_payment_status"] == "paid"
+    ):
+        return order_row
+
+    payment_intent_id = compact_whitespace(order_row["stripe_payment_intent_id"] or "")
+    charge_id = compact_whitespace(row_value(order_row, "stripe_charge_id", "") or "")
+    lookup_error = ""
+    if payment_intent_id.startswith("pi_") and not charge_id:
+        try:
+            payment_intent = stripe_request(
+                "GET", f"/payment_intents/{payment_intent_id}"
+            )
+            if compact_whitespace(payment_intent.get("status", "")).lower() == "succeeded":
+                charge_id = compact_whitespace(payment_intent.get("latest_charge", ""))
+        except (RuntimeError, ValueError) as error:
+            lookup_error = compact_whitespace(str(error))[:500]
+
+    with closing(connect_db()) as connection:
+        connection.execute(
+            """
+            UPDATE orders
+            SET stripe_charge_id = CASE
+                  WHEN ? != '' THEN ?
+                  ELSE stripe_charge_id
+                END,
+                payout_status = CASE
+                  WHEN payout_status IN ('awaiting_payment', '')
+                    THEN 'held_for_delivery'
+                  ELSE payout_status
+                END,
+                payout_error = CASE
+                  WHEN ? != '' THEN ?
+                  ELSE payout_error
+                END
+            WHERE stripe_checkout_session_id = ?
+              AND payment_flow = 'separate_charge_transfer'
+              AND (status = 'paid' OR stripe_payment_status = 'paid')
+            """,
+            (charge_id, charge_id, lookup_error, lookup_error, session_id),
+        )
+        connection.commit()
+        return connection.execute(
+            "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
+            (session_id,),
+        ).fetchone()
+
+
 def finalize_paid_order(session_id: str) -> sqlite3.Row | None:
     mark_listing_sale_pending_for_order(session_id)
+    mark_order_proceeds_held_for_delivery(session_id)
     send_purchase_confirmation_for_order(session_id)
     send_seller_sale_confirmation_for_order(session_id)
     return purchase_shippo_label_for_order(session_id)
@@ -2847,6 +2998,21 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
         transaction_id = str(transaction.get("object_id") or "").strip()
         tracking_number = str(transaction.get("tracking_number") or "").strip()
         tracking_url = str(transaction.get("tracking_url_provider") or "").strip()
+        raw_tracking_status = transaction.get("tracking_status")
+        if isinstance(raw_tracking_status, dict):
+            tracking_status = compact_whitespace(
+                raw_tracking_status.get("status", "UNKNOWN")
+            ).upper()
+            tracking_details = compact_whitespace(
+                raw_tracking_status.get("status_details", "")
+            )[:500]
+            tracking_status_date = compact_whitespace(
+                raw_tracking_status.get("status_date", "")
+            ) or None
+        else:
+            tracking_status = compact_whitespace(raw_tracking_status or "UNKNOWN").upper()
+            tracking_details = ""
+            tracking_status_date = None
         transaction_status = str(transaction.get("status") or "").strip().upper()
         if transaction_status == "ERROR" or not label_url:
             raise ValueError(shippo_transaction_error(transaction))
@@ -2860,11 +3026,25 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
                   shippo_label_url = ?,
                   tracking_number = ?,
                   tracking_url = ?,
+                  tracking_status = ?,
+                  tracking_status_details = ?,
+                  tracking_status_date = ?,
+                  tracking_updated_at = ?,
                   shipping_status = 'label_ready',
                   shipping_error = ''
                 WHERE stripe_checkout_session_id = ?
                 """,
-                (transaction_id, label_url, tracking_number, tracking_url, session_id),
+                (
+                    transaction_id,
+                    label_url,
+                    tracking_number,
+                    tracking_url,
+                    tracking_status,
+                    tracking_details,
+                    tracking_status_date,
+                    utc_now(),
+                    session_id,
+                ),
             )
             connection.commit()
         return send_seller_shipping_label_email_for_order(session_id)
@@ -2883,6 +3063,653 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
                 "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
                 (session_id,),
             ).fetchone()
+
+
+TRACKING_IN_TRANSIT_STATUSES = {"TRANSIT"}
+TRACKING_DELIVERED_STATUSES = {"DELIVERED"}
+TRACKING_HOLD_STATUSES = {"RETURNED", "FAILURE"}
+
+
+class PayoutHoldError(ValueError):
+    """A non-transient payment or carrier state that requires owner review."""
+
+
+def payout_release_timestamp(base: datetime | None = None) -> str:
+    release_time = (base or datetime.now(timezone.utc)) + timedelta(
+        hours=PAYOUT_PROTECTION_HOURS
+    )
+    return release_time.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def normalize_shippo_tracking_payload(payload: dict) -> dict:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    raw_tracking = data.get("tracking_status")
+    if isinstance(raw_tracking, dict):
+        status = compact_whitespace(raw_tracking.get("status", "UNKNOWN")).upper()
+        details = compact_whitespace(raw_tracking.get("status_details", ""))[:500]
+        status_date = compact_whitespace(raw_tracking.get("status_date", "")) or None
+        event_id = compact_whitespace(raw_tracking.get("object_id", ""))
+        raw_substatus = raw_tracking.get("substatus")
+        if isinstance(raw_substatus, dict):
+            substatus = compact_whitespace(
+                raw_substatus.get("code") or raw_substatus.get("text") or ""
+            )[:120]
+            action_required = bool(raw_substatus.get("action_required"))
+        else:
+            substatus = compact_whitespace(raw_substatus or "")[:120]
+            action_required = False
+    else:
+        status = compact_whitespace(raw_tracking or "UNKNOWN").upper()
+        details = ""
+        status_date = None
+        event_id = ""
+        substatus = ""
+        action_required = False
+
+    return {
+        "event": compact_whitespace(payload.get("event", "")),
+        "is_test": bool(payload.get("test") or data.get("test")),
+        "transaction_id": compact_whitespace(data.get("transaction", "")),
+        "tracking_number": compact_whitespace(data.get("tracking_number", "")),
+        "carrier": compact_whitespace(data.get("carrier", "")),
+        "status": status or "UNKNOWN",
+        "details": details,
+        "status_date": status_date,
+        "event_id": event_id,
+        "substatus": substatus,
+        "action_required": action_required,
+    }
+
+
+def record_shippo_webhook_event(
+    fingerprint: str,
+    tracking_event: dict,
+) -> bool:
+    try:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                INSERT INTO shippo_webhook_events (
+                  event_fingerprint,
+                  event_id,
+                  shippo_transaction_id,
+                  tracking_number,
+                  tracking_status,
+                  received_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fingerprint,
+                    tracking_event.get("event_id", ""),
+                    tracking_event.get("transaction_id", ""),
+                    tracking_event.get("tracking_number", ""),
+                    tracking_event.get("status", ""),
+                    utc_now(),
+                ),
+            )
+            connection.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def apply_shippo_tracking_update(tracking_event: dict) -> sqlite3.Row | None:
+    """Persist a trusted Shippo tracking update without moving money."""
+    transaction_id = compact_whitespace(tracking_event.get("transaction_id", ""))
+    tracking_number = compact_whitespace(tracking_event.get("tracking_number", ""))
+    if not transaction_id or not tracking_number:
+        return None
+
+    status = compact_whitespace(tracking_event.get("status", "UNKNOWN")).upper()
+    now = utc_now()
+    with closing(connect_db()) as connection:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM orders
+            WHERE shippo_transaction_id = ?
+              AND tracking_number = ?
+            """,
+            (transaction_id, tracking_number),
+        ).fetchone()
+        if not row:
+            return None
+
+        existing_status = compact_whitespace(
+            row_value(row, "tracking_status", "UNKNOWN")
+        ).upper()
+        is_hold_event = (
+            status in TRACKING_HOLD_STATUSES
+            or bool(tracking_event.get("action_required"))
+        )
+        # Ignore ordinary out-of-order scans after delivery, but never ignore a
+        # later carrier return, failure, or action-required event.
+        if (
+            existing_status == "DELIVERED"
+            and status != "DELIVERED"
+            and not is_hold_event
+        ):
+            status = existing_status
+
+        shipping_status = row["shipping_status"]
+        payout_status = row_value(row, "payout_status", "legacy_released")
+        shipped_at = row_value(row, "shipped_at")
+        delivered_at = row_value(row, "delivered_at")
+        release_at = row_value(row, "payout_release_at")
+        payout_error = row_value(row, "payout_error", "")
+
+        if is_hold_event:
+            shipping_status = "attention_needed"
+            if (
+                row_value(row, "payment_flow", "legacy_destination_charge")
+                == "separate_charge_transfer"
+            ):
+                carrier_message = (
+                    tracking_event.get("details")
+                    or "Carrier tracking needs review before seller proceeds can be released."
+                )
+                if (
+                    row_value(row, "stripe_transfer_id", "")
+                    or payout_status == "released"
+                ):
+                    payout_status = "attention_needed"
+                    payout_error = (
+                        "Carrier status changed after seller proceeds were released: "
+                        f"{carrier_message}"
+                    )
+                elif payout_status != "legacy_released":
+                    payout_status = "on_hold"
+                    payout_error = carrier_message
+        elif status in TRACKING_IN_TRANSIT_STATUSES:
+            shipping_status = "in_transit"
+            shipped_at = shipped_at or now
+        elif status in TRACKING_DELIVERED_STATUSES:
+            shipping_status = "delivered"
+            delivered_at = delivered_at or now
+            release_at = release_at or payout_release_timestamp()
+            if (
+                row_value(row, "payment_flow", "legacy_destination_charge")
+                == "separate_charge_transfer"
+                and row_value(row, "buyer_issue_status", "none") != "open"
+                and payout_status not in {"released", "legacy_released"}
+            ):
+                payout_status = "release_scheduled"
+                payout_error = ""
+
+        connection.execute(
+            """
+            UPDATE orders
+            SET tracking_status = ?,
+                tracking_substatus = ?,
+                tracking_status_date = ?,
+                tracking_status_details = ?,
+                tracking_event_id = ?,
+                tracking_updated_at = ?,
+                shipped_at = ?,
+                delivered_at = ?,
+                payout_release_at = ?,
+                payout_status = ?,
+                payout_error = ?,
+                shipping_status = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                compact_whitespace(tracking_event.get("substatus", ""))[:120],
+                tracking_event.get("status_date"),
+                compact_whitespace(tracking_event.get("details", ""))[:500],
+                compact_whitespace(tracking_event.get("event_id", ""))[:160],
+                now,
+                shipped_at,
+                delivered_at,
+                release_at,
+                payout_status,
+                compact_whitespace(payout_error)[:500],
+                shipping_status,
+                row["id"],
+            ),
+        )
+        connection.commit()
+        return connection.execute(
+            "SELECT * FROM orders WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+
+
+def refresh_shippo_tracking_for_order(order_id: int) -> sqlite3.Row | None:
+    with closing(connect_db()) as connection:
+        row = connection.execute(
+            "SELECT * FROM orders WHERE id = ?",
+            (order_id,),
+        ).fetchone()
+    if not row:
+        return None
+    transaction_id = compact_whitespace(row["shippo_transaction_id"] or "")
+    tracking_number = compact_whitespace(row["tracking_number"] or "")
+    if not transaction_id or not tracking_number:
+        return row
+
+    carrier = compact_whitespace(row["shipping_carrier"] or "").lower()
+    if carrier:
+        tracking_payload = shippo_api_request(
+            "GET",
+            f"/tracks/{quote(carrier, safe='')}/{quote(tracking_number, safe='')}",
+        )
+        tracking_status = tracking_payload.get("tracking_status") or "UNKNOWN"
+        carrier = compact_whitespace(tracking_payload.get("carrier", "")) or carrier
+    else:
+        transaction = shippo_api_request(
+            "GET",
+            f"/transactions/{quote(transaction_id, safe='')}",
+        )
+        tracking_status = transaction.get("tracking_status") or "UNKNOWN"
+        carrier = compact_whitespace(transaction.get("carrier", ""))
+    tracking_event = normalize_shippo_tracking_payload(
+        {
+            "event": "track_updated",
+            "data": {
+                "transaction": transaction_id,
+                "tracking_number": tracking_number,
+                "carrier": carrier,
+                "tracking_status": tracking_status,
+            },
+        }
+    )
+    return apply_shippo_tracking_update(tracking_event) or row
+
+
+def existing_stripe_transfer_for_order(order_row: sqlite3.Row) -> dict | None:
+    transfer_group = compact_whitespace(order_row["stripe_transfer_group"] or "")
+    if not transfer_group:
+        return None
+    response = stripe_request(
+        "GET",
+        "/transfers",
+        {"transfer_group": transfer_group, "limit": 10},
+    )
+    for transfer in response.get("data") or []:
+        if not isinstance(transfer, dict):
+            continue
+        metadata = transfer.get("metadata") or {}
+        if str(metadata.get("order_id") or "") == str(order_row["id"]):
+            return transfer
+        if (
+            compact_whitespace(transfer.get("transfer_group", "")) == transfer_group
+            and int(transfer.get("amount") or 0)
+            == int(order_row["seller_proceeds_cents"] or 0)
+        ):
+            return transfer
+    return None
+
+
+def release_seller_transfer_for_order(
+    order_id: int,
+    *,
+    admin_override: bool = False,
+) -> sqlite3.Row | None:
+    """Idempotently transfer seller proceeds after delivery protection clears."""
+    try:
+        refreshed = refresh_shippo_tracking_for_order(order_id)
+    except (RuntimeError, ValueError) as error:
+        retry_at = (
+            datetime.now(timezone.utc) + timedelta(minutes=5)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET payout_status = CASE
+                      WHEN payout_status IN ('released', 'legacy_released')
+                        THEN payout_status
+                      ELSE 'attention_needed'
+                    END,
+                    payout_next_attempt_at = ?,
+                    payout_error = ?
+                WHERE id = ?
+                  AND payment_flow = 'separate_charge_transfer'
+                  AND stripe_transfer_id = ''
+                """,
+                (
+                    retry_at,
+                    (
+                        "Shippo delivery revalidation failed before payout: "
+                        f"{compact_whitespace(str(error))}"
+                    )[:500],
+                    order_id,
+                ),
+            )
+            connection.commit()
+            return connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+
+    with closing(connect_db()) as connection:
+        order_row = connection.execute(
+            """
+            SELECT orders.*, users.stripe_account_id
+            FROM orders
+            LEFT JOIN users ON users.id = orders.seller_user_id
+            WHERE orders.id = ?
+            """,
+            (order_id,),
+        ).fetchone()
+    if not order_row:
+        return None
+    if order_row["payment_flow"] != "separate_charge_transfer":
+        return order_row
+    if order_row["stripe_transfer_id"] or order_row["payout_status"] == "released":
+        return order_row
+    if not (
+        order_row["status"] == "paid"
+        or order_row["stripe_payment_status"] == "paid"
+    ):
+        return order_row
+    if order_row["buyer_issue_status"] == "open":
+        return order_row
+    if compact_whitespace(order_row["tracking_status"]).upper() != "DELIVERED":
+        return order_row
+    release_at = parse_activity_datetime(order_row["payout_release_at"])
+    if not release_at or release_at > datetime.now(timezone.utc):
+        return order_row
+
+    current_status = compact_whitespace(order_row["payout_status"])
+    allowed_statuses = {"release_scheduled", "attention_needed"}
+    if admin_override:
+        allowed_statuses.add("on_hold")
+    if current_status == "releasing":
+        attempted_at = parse_activity_datetime(order_row["payout_attempted_at"])
+        if attempted_at and (
+            datetime.now(timezone.utc) - attempted_at
+        ).total_seconds() < 15 * 60:
+            return order_row
+        allowed_statuses.add("releasing")
+    if current_status not in allowed_statuses:
+        return order_row
+
+    next_attempt = parse_activity_datetime(order_row["payout_next_attempt_at"])
+    if not admin_override and next_attempt and next_attempt > datetime.now(timezone.utc):
+        return order_row
+
+    with closing(connect_db()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        claimed = connection.execute(
+            """
+            UPDATE orders
+            SET payout_status = 'releasing',
+                payout_attempted_at = ?,
+                payout_error = ''
+            WHERE id = ?
+              AND payment_flow = 'separate_charge_transfer'
+              AND stripe_transfer_id = ''
+              AND buyer_issue_status != 'open'
+              AND payout_status = ?
+            """,
+            (utc_now(), order_id, current_status),
+        )
+        if claimed.rowcount != 1:
+            connection.rollback()
+            return connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+        connection.commit()
+
+    try:
+        with closing(connect_db()) as connection:
+            claimed_row = connection.execute(
+                """
+                SELECT orders.*, users.stripe_account_id
+                FROM orders
+                LEFT JOIN users ON users.id = orders.seller_user_id
+                WHERE orders.id = ?
+                """,
+                (order_id,),
+            ).fetchone()
+        if not claimed_row:
+            return None
+
+        payment_intent_id = compact_whitespace(
+            claimed_row["stripe_payment_intent_id"] or ""
+        )
+        if not payment_intent_id.startswith("pi_"):
+            raise ValueError("The paid Stripe PaymentIntent is missing.")
+        payment_intent = stripe_request(
+            "GET", f"/payment_intents/{payment_intent_id}"
+        )
+        if compact_whitespace(payment_intent.get("status", "")).lower() != "succeeded":
+            raise ValueError("Stripe has not confirmed the buyer payment as succeeded.")
+        charge_id = compact_whitespace(
+            claimed_row["stripe_charge_id"]
+            or payment_intent.get("latest_charge")
+            or ""
+        )
+        if not charge_id.startswith("ch_"):
+            raise ValueError("The Stripe source charge is not available yet.")
+
+        transfer = existing_stripe_transfer_for_order(claimed_row)
+        if not transfer:
+            charge = stripe_request("GET", f"/charges/{charge_id}")
+            if (
+                compact_whitespace(charge.get("status", "")).lower() != "succeeded"
+                or not bool(charge.get("paid"))
+                or bool(charge.get("refunded"))
+                or int(charge.get("amount_refunded") or 0) > 0
+                or bool(charge.get("disputed"))
+            ):
+                raise PayoutHoldError(
+                    "Stripe charge is refunded, disputed, unpaid, or no longer succeeded; "
+                    "seller proceeds remain on hold."
+                )
+            destination = compact_whitespace(
+                claimed_row["stripe_destination_account_id"]
+                or claimed_row["stripe_account_id"]
+                or ""
+            )
+            if not destination.startswith("acct_"):
+                raise ValueError("The seller Stripe destination account is missing.")
+            transfer = stripe_request(
+                "POST",
+                "/transfers",
+                {
+                    "amount": int(claimed_row["seller_proceeds_cents"] or 0),
+                    "currency": "usd",
+                    "destination": destination,
+                    "source_transaction": charge_id,
+                    "transfer_group": claimed_row["stripe_transfer_group"],
+                    "description": f"Seller proceeds for Eleven Zero order {order_id}",
+                    "metadata[order_id]": str(order_id),
+                    "metadata[listing_id]": str(claimed_row["listing_id"] or ""),
+                    "metadata[platform]": "Eleven Zero PB",
+                },
+                idempotency_key=f"ezpb-seller-transfer-{claimed_row['stripe_transfer_group']}-v1",
+            )
+        transfer_id = compact_whitespace(transfer.get("id", ""))
+        if not transfer_id.startswith("tr_"):
+            raise ValueError("Stripe did not return a seller transfer.")
+
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET stripe_charge_id = ?,
+                    stripe_transfer_id = ?,
+                    payout_status = 'released',
+                    payout_released_at = ?,
+                    payout_next_attempt_at = NULL,
+                    payout_error = ''
+                WHERE id = ?
+                  AND payment_flow = 'separate_charge_transfer'
+                  AND stripe_transfer_id = ''
+                """,
+                (charge_id, transfer_id, utc_now(), order_id),
+            )
+            connection.commit()
+            return connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+    except PayoutHoldError as error:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET payout_status = 'on_hold',
+                    payout_next_attempt_at = NULL,
+                    payout_error = ?
+                WHERE id = ?
+                  AND stripe_transfer_id = ''
+                """,
+                (compact_whitespace(str(error))[:500], order_id),
+            )
+            connection.commit()
+            return connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+    except (RuntimeError, ValueError) as error:
+        with closing(connect_db()) as connection:
+            retry_row = connection.execute(
+                "SELECT payout_retry_count FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+            retry_count = int(retry_row["payout_retry_count"] or 0) + 1 if retry_row else 1
+            retry_minutes = min(360, 5 * (2 ** min(retry_count - 1, 6)))
+            next_attempt_at = (
+                datetime.now(timezone.utc) + timedelta(minutes=retry_minutes)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            connection.execute(
+                """
+                UPDATE orders
+                SET payout_status = 'attention_needed',
+                    payout_retry_count = ?,
+                    payout_next_attempt_at = ?,
+                    payout_error = ?
+                WHERE id = ?
+                  AND stripe_transfer_id = ''
+                """,
+                (
+                    retry_count,
+                    next_attempt_at,
+                    compact_whitespace(str(error))[:500],
+                    order_id,
+                ),
+            )
+            connection.commit()
+            return connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+
+
+def reconcile_order_tracking_and_payouts(limit: int = 12) -> dict:
+    """Bounded maintenance pass used by the background worker and dashboards."""
+    refreshed = 0
+    released = 0
+    with closing(connect_db()) as connection:
+        tracking_rows = connection.execute(
+            """
+            SELECT id
+            FROM orders
+            WHERE payment_flow = 'separate_charge_transfer'
+              AND (status = 'paid' OR stripe_payment_status = 'paid')
+              AND shippo_transaction_id != ''
+              AND tracking_number != ''
+              AND payout_status IN (
+                'held_for_delivery',
+                'release_scheduled',
+                'attention_needed',
+                'releasing'
+              )
+            ORDER BY COALESCE(tracking_updated_at, created_at) ASC
+            LIMIT ?
+            """,
+            (max(1, min(limit, 50)),),
+        ).fetchall()
+    for row in tracking_rows:
+        try:
+            if refresh_shippo_tracking_for_order(int(row["id"])):
+                refreshed += 1
+        except (RuntimeError, ValueError):
+            continue
+
+    with closing(connect_db()) as connection:
+        due_rows = connection.execute(
+            """
+            SELECT id
+            FROM orders
+            WHERE payment_flow = 'separate_charge_transfer'
+              AND (status = 'paid' OR stripe_payment_status = 'paid')
+              AND stripe_transfer_id = ''
+              AND buyer_issue_status != 'open'
+              AND tracking_status = 'DELIVERED'
+              AND payout_release_at IS NOT NULL
+              AND payout_release_at <= ?
+              AND payout_status IN ('release_scheduled', 'attention_needed', 'releasing')
+              AND (
+                payout_next_attempt_at IS NULL
+                OR payout_next_attempt_at <= ?
+              )
+            ORDER BY payout_release_at ASC
+            LIMIT ?
+            """,
+            (utc_now(), utc_now(), max(1, min(limit, 50))),
+        ).fetchall()
+    for row in due_rows:
+        before_id = int(row["id"])
+        result = release_seller_transfer_for_order(before_id)
+        if result and row_value(result, "payout_status") == "released":
+            released += 1
+    return {"refreshed": refreshed, "released": released}
+
+
+def shippo_tracking_webhook_url() -> str:
+    if not SITE_URL:
+        return ""
+    return (
+        f"{SITE_URL.rstrip('/')}/api/shippo/webhook?"
+        f"{urlencode({'token': shippo_webhook_token()})}"
+    )
+
+
+def ensure_shippo_tracking_webhook() -> dict:
+    """Create exactly one live Shippo tracking webhook for this deployment."""
+    if not shippo_is_configured() or not SITE_URL:
+        return {"configured": False}
+    target_url = shippo_tracking_webhook_url()
+    response = shippo_api_request("GET", "/webhooks/")
+    for webhook in response.get("results") or []:
+        if (
+            isinstance(webhook, dict)
+            and webhook.get("event") == "track_updated"
+            and compact_whitespace(webhook.get("url", "")) == target_url
+            and bool(webhook.get("active", True))
+            and bool(webhook.get("is_test")) == SHIPPO_API_KEY.startswith("shippo_test_")
+        ):
+            set_app_setting(
+                "shippo_tracking_webhook_id",
+                compact_whitespace(webhook.get("object_id", "")),
+            )
+            return {
+                "configured": True,
+                "created": False,
+                "webhookId": compact_whitespace(webhook.get("object_id", "")),
+            }
+
+    webhook = shippo_api_request(
+        "POST",
+        "/webhooks",
+        {
+            "event": "track_updated",
+            "url": target_url,
+            "active": True,
+            "is_test": SHIPPO_API_KEY.startswith("shippo_test_"),
+        },
+    )
+    webhook_id = compact_whitespace(webhook.get("object_id", ""))
+    if webhook_id:
+        set_app_setting("shippo_tracking_webhook_id", webhook_id)
+    return {"configured": bool(webhook_id), "created": True, "webhookId": webhook_id}
 
 
 def google_places_is_configured() -> bool:
@@ -3114,11 +3941,58 @@ def init_database() -> None:
               platform_fee_cents INTEGER NOT NULL,
               stripe_application_fee_cents INTEGER NOT NULL DEFAULT 0,
               seller_proceeds_cents INTEGER NOT NULL DEFAULT 0,
+              payment_flow TEXT NOT NULL DEFAULT 'separate_charge_transfer',
+              stripe_destination_account_id TEXT NOT NULL DEFAULT '',
+              stripe_transfer_group TEXT NOT NULL DEFAULT '',
+              stripe_charge_id TEXT NOT NULL DEFAULT '',
+              stripe_transfer_id TEXT NOT NULL DEFAULT '',
+              payout_status TEXT NOT NULL DEFAULT 'awaiting_payment',
+              payout_release_at TEXT,
+              payout_released_at TEXT,
+              payout_attempted_at TEXT,
+              payout_next_attempt_at TEXT,
+              payout_retry_count INTEGER NOT NULL DEFAULT 0,
+              payout_error TEXT NOT NULL DEFAULT '',
+              tracking_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+              tracking_substatus TEXT NOT NULL DEFAULT '',
+              tracking_status_date TEXT,
+              tracking_status_details TEXT NOT NULL DEFAULT '',
+              tracking_event_id TEXT NOT NULL DEFAULT '',
+              tracking_updated_at TEXT,
+              shipped_at TEXT,
+              delivered_at TEXT,
+              buyer_issue_status TEXT NOT NULL DEFAULT 'none',
+              buyer_issue_reason TEXT NOT NULL DEFAULT '',
+              buyer_issue_details TEXT NOT NULL DEFAULT '',
+              buyer_issue_reported_at TEXT,
+              buyer_issue_resolved_at TEXT,
+              buyer_issue_resolution TEXT NOT NULL DEFAULT '',
               stripe_payment_status TEXT NOT NULL DEFAULT 'unpaid',
               stripe_session_status TEXT NOT NULL DEFAULT 'open',
               status TEXT NOT NULL DEFAULT 'open',
               created_at TEXT NOT NULL,
               completed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+              setting_key TEXT PRIMARY KEY,
+              setting_value TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS shippo_webhook_events (
+              event_fingerprint TEXT PRIMARY KEY,
+              event_id TEXT NOT NULL DEFAULT '',
+              shippo_transaction_id TEXT NOT NULL DEFAULT '',
+              tracking_number TEXT NOT NULL DEFAULT '',
+              tracking_status TEXT NOT NULL DEFAULT '',
+              received_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+              event_id TEXT PRIMARY KEY,
+              event_type TEXT NOT NULL,
+              processed_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS court_reports (
@@ -3234,6 +4108,40 @@ def init_database() -> None:
         add_column_if_missing(connection, "orders", "seller_sale_email_error", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "stripe_application_fee_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "seller_proceeds_cents", "INTEGER NOT NULL DEFAULT 0")
+        # Existing production orders used destination charges, so this migration
+        # deliberately labels them as already routed. New orders explicitly use
+        # separate charges and transfers and can never be confused with legacy rows.
+        add_column_if_missing(
+            connection,
+            "orders",
+            "payment_flow",
+            "TEXT NOT NULL DEFAULT 'legacy_destination_charge'",
+        )
+        add_column_if_missing(connection, "orders", "stripe_destination_account_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "stripe_transfer_group", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "stripe_charge_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "stripe_transfer_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "payout_status", "TEXT NOT NULL DEFAULT 'legacy_released'")
+        add_column_if_missing(connection, "orders", "payout_release_at", "TEXT")
+        add_column_if_missing(connection, "orders", "payout_released_at", "TEXT")
+        add_column_if_missing(connection, "orders", "payout_attempted_at", "TEXT")
+        add_column_if_missing(connection, "orders", "payout_next_attempt_at", "TEXT")
+        add_column_if_missing(connection, "orders", "payout_retry_count", "INTEGER NOT NULL DEFAULT 0")
+        add_column_if_missing(connection, "orders", "payout_error", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "tracking_status", "TEXT NOT NULL DEFAULT 'UNKNOWN'")
+        add_column_if_missing(connection, "orders", "tracking_substatus", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "tracking_status_date", "TEXT")
+        add_column_if_missing(connection, "orders", "tracking_status_details", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "tracking_event_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "tracking_updated_at", "TEXT")
+        add_column_if_missing(connection, "orders", "shipped_at", "TEXT")
+        add_column_if_missing(connection, "orders", "delivered_at", "TEXT")
+        add_column_if_missing(connection, "orders", "buyer_issue_status", "TEXT NOT NULL DEFAULT 'none'")
+        add_column_if_missing(connection, "orders", "buyer_issue_reason", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "buyer_issue_details", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "buyer_issue_reported_at", "TEXT")
+        add_column_if_missing(connection, "orders", "buyer_issue_resolved_at", "TEXT")
+        add_column_if_missing(connection, "orders", "buyer_issue_resolution", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
@@ -3243,6 +4151,22 @@ def init_database() -> None:
             "CREATE INDEX IF NOT EXISTS idx_listings_checkout_reservation "
             "ON listings(sale_status, reserved_checkout_session_id)"
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_payout_due "
+            "ON orders(payment_flow, payout_status, payout_release_at)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_tracking_lookup "
+            "ON orders(shippo_transaction_id, tracking_number)"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_transfer_group "
+            "ON orders(stripe_transfer_group) WHERE stripe_transfer_group != ''"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_transfer_id "
+            "ON orders(stripe_transfer_id) WHERE stripe_transfer_id != ''"
+        )
 
         # The live marketplace uses one managed, prepaid Shippo flow. Normalize
         # legacy modes so buyers never receive a quote that cannot create a label.
@@ -3251,6 +4175,29 @@ def init_database() -> None:
             UPDATE listings
             SET shipping_mode = 'calculated', shipping_flat_usd = 0
             WHERE shipping_mode IS NULL OR shipping_mode != 'calculated'
+            """
+        )
+        connection.execute(
+            """
+            UPDATE orders
+            SET payment_flow = 'legacy_destination_charge'
+            WHERE payment_flow IS NULL OR payment_flow = ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE orders
+            SET payout_status = CASE
+              WHEN status = 'paid' OR stripe_payment_status = 'paid'
+                THEN 'legacy_released'
+              ELSE 'legacy_not_paid'
+            END
+            WHERE payment_flow = 'legacy_destination_charge'
+              AND (
+                payout_status IS NULL
+                OR payout_status = ''
+                OR payout_status IN ('awaiting_payment', 'legacy_released')
+              )
             """
         )
 
@@ -3263,6 +4210,7 @@ def init_database() -> None:
             SET stripe_application_fee_cents = platform_fee_cents + shipping_amount_cents
             WHERE stripe_application_fee_cents = 0
               AND (platform_fee_cents > 0 OR shipping_amount_cents > 0)
+              AND payment_flow = 'legacy_destination_charge'
             """
         )
         connection.execute(
@@ -4005,12 +4953,19 @@ def site_config_payload() -> dict:
         "googlePlacesSearchEnabled": google_places_is_configured(),
         "shippoConfigured": bool(SHIPPO_API_KEY),
         "managedShippingEnabled": bool(SHIPPO_API_KEY),
+        "shippoTrackingWebhookConfigured": bool(
+            app_setting("shippo_tracking_webhook_id")
+        ),
         "stripeConfigured": stripe_is_configured(),
         "stripeWebhookConfigured": bool(STRIPE_WEBHOOK_SECRET),
         "stripeMode": stripe_mode(),
         "stripePublishableKeyPresent": bool(STRIPE_PUBLISHABLE_KEY),
         "platformFeePercent": STRIPE_PLATFORM_FEE_PERCENT,
         "checkoutEnabled": bool(stripe_is_configured() and STRIPE_PUBLISHABLE_KEY),
+        "delayedSellerPayoutsEnabled": bool(
+            stripe_is_configured() and shippo_is_configured()
+        ),
+        "payoutProtectionHours": PAYOUT_PROTECTION_HOURS,
     }
 
 
@@ -4448,6 +5403,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_stripe_webhook()
             return
 
+        if parsed.path == "/api/shippo/webhook":
+            self.handle_shippo_webhook(parsed)
+            return
+
         if not self.validate_request_origin():
             return
 
@@ -4666,6 +5625,27 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_owner_mark_listing_sold(user, body)
             return
 
+        if parsed.path == "/api/account/orders/report-issue":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_report_order_issue(user, body)
+            return
+
+        if parsed.path == "/api/admin/orders/resolve-issue":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_resolve_order_issue(body)
+            return
+
+        if parsed.path == "/api/admin/orders/release-payout":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_release_order_payout(body)
+            return
+
         if parsed.path == "/api/checkout/create-session":
             user = self.require_user()
             if not user:
@@ -4688,6 +5668,76 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_json({"error": "Unknown API route."}, status=HTTPStatus.NOT_FOUND)
+
+    def handle_shippo_webhook(self, parsed):
+        """Accept Shippo tracking events without cookies, origin checks, or CSRF.
+
+        The unguessable URL token authenticates the sender. This endpoint only
+        persists carrier state and schedules a future release; moving money is
+        deliberately left to the idempotent maintenance worker.
+        """
+        expected_token = shippo_webhook_token()
+        received_token = str(
+            parse_qs(parsed.query or "", keep_blank_values=True).get("token", [""])[0]
+        ).strip()
+        if not received_token or not hmac.compare_digest(expected_token, received_token):
+            self.send_json(
+                {"error": "Shippo webhook authentication failed."},
+                status=HTTPStatus.UNAUTHORIZED,
+            )
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0") or 0)
+        if content_length <= 0 or content_length > 1_000_000:
+            self.send_json(
+                {"error": "Invalid Shippo webhook body."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        raw_body = self.rfile.read(content_length)
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json(
+                {"error": "Invalid Shippo webhook body."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        tracking_event = normalize_shippo_tracking_payload(payload)
+        if tracking_event["event"] != "track_updated":
+            self.send_json({"received": True, "ignored": True})
+            return
+        if tracking_event["is_test"]:
+            self.send_json({"received": True, "test": True})
+            return
+
+        fingerprint = hashlib.sha256(raw_body).hexdigest()
+        with closing(connect_db()) as connection:
+            already_processed = connection.execute(
+                """
+                SELECT 1
+                FROM shippo_webhook_events
+                WHERE event_fingerprint = ?
+                """,
+                (fingerprint,),
+            ).fetchone()
+        if already_processed:
+            self.send_json({"received": True, "duplicate": True})
+            return
+
+        matched_order = apply_shippo_tracking_update(tracking_event)
+        # Write the audit marker after the idempotent order update. A hard
+        # process crash can therefore be retried instead of silently losing a
+        # carrier event forever.
+        record_shippo_webhook_event(fingerprint, tracking_event)
+        self.send_json(
+            {
+                "received": True,
+                "matched": bool(matched_order),
+                "orderId": int(matched_order["id"]) if matched_order else None,
+            }
+        )
 
     def handle_stripe_webhook(self):
         if not STRIPE_WEBHOOK_SECRET:
@@ -4736,63 +5786,223 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Invalid Stripe webhook body."}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        event_type = str(event.get("type") or "")
-        session = (event.get("data") or {}).get("object") or {}
-        session_id = str(session.get("id") or "")
-        if not session_id.startswith("cs_"):
-            self.send_json({"received": True})
+        event_id = compact_whitespace(event.get("id", ""))
+        event_type = compact_whitespace(event.get("type", ""))
+        if not event_id.startswith("evt_") or not event_type:
+            self.send_json(
+                {"error": "Stripe webhook event is incomplete."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
             return
 
-        if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
-            payment_status = str(session.get("payment_status") or "paid")
-            order_status = "paid" if payment_status == "paid" else "processing"
-            completed_at = utc_now() if order_status == "paid" else None
-            with closing(connect_db()) as connection:
-                connection.execute(
-                    """
-                    UPDATE orders
-                    SET
-                      stripe_payment_intent_id = ?,
-                      stripe_payment_status = ?,
-                      stripe_session_status = ?,
-                      status = ?,
-                      completed_at = CASE
-                        WHEN ? IS NOT NULL THEN COALESCE(completed_at, ?)
-                        ELSE completed_at
-                      END
-                    WHERE stripe_checkout_session_id = ?
-                    """,
-                    (
-                        str(session.get("payment_intent") or ""),
-                        payment_status,
-                        str(session.get("status") or "complete"),
-                        order_status,
-                        completed_at,
-                        completed_at,
-                        session_id,
-                    ),
-                )
-                connection.commit()
-            if order_status == "paid":
-                finalize_paid_order(session_id)
-        elif event_type in {"checkout.session.expired", "checkout.session.async_payment_failed"}:
-            with closing(connect_db()) as connection:
-                connection.execute(
-                    """
-                    UPDATE orders
-                    SET stripe_payment_status = ?, stripe_session_status = ?, status = ?
-                    WHERE stripe_checkout_session_id = ?
-                    """,
-                    (
-                        str(session.get("payment_status") or "unpaid"),
-                        str(session.get("status") or "expired"),
-                        "expired" if event_type == "checkout.session.expired" else "payment_failed",
-                        session_id,
-                    ),
-                )
-                connection.commit()
-            release_listing_reservation_for_order(session_id)
+        with closing(connect_db()) as connection:
+            already_processed = connection.execute(
+                """
+                SELECT 1
+                FROM stripe_webhook_events
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+        if already_processed:
+            self.send_json({"received": True, "duplicate": True})
+            return
 
+        try:
+            stripe_object = (event.get("data") or {}).get("object") or {}
+            object_id = compact_whitespace(stripe_object.get("id", ""))
+
+            if (
+                event_type
+                in {
+                    "checkout.session.completed",
+                    "checkout.session.async_payment_succeeded",
+                }
+                and object_id.startswith("cs_")
+            ):
+                payment_status = str(stripe_object.get("payment_status") or "paid")
+                order_status = "paid" if payment_status == "paid" else "processing"
+                completed_at = utc_now() if order_status == "paid" else None
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET
+                          stripe_payment_intent_id = ?,
+                          stripe_payment_status = ?,
+                          stripe_session_status = ?,
+                          status = ?,
+                          completed_at = CASE
+                            WHEN ? IS NOT NULL THEN COALESCE(completed_at, ?)
+                            ELSE completed_at
+                          END
+                        WHERE stripe_checkout_session_id = ?
+                        """,
+                        (
+                            str(stripe_object.get("payment_intent") or ""),
+                            payment_status,
+                            str(stripe_object.get("status") or "complete"),
+                            order_status,
+                            completed_at,
+                            completed_at,
+                            object_id,
+                        ),
+                    )
+                    connection.commit()
+                if order_status == "paid":
+                    finalize_paid_order(object_id)
+            elif (
+                event_type
+                in {
+                    "checkout.session.expired",
+                    "checkout.session.async_payment_failed",
+                }
+                and object_id.startswith("cs_")
+            ):
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET stripe_payment_status = ?, stripe_session_status = ?, status = ?
+                        WHERE stripe_checkout_session_id = ?
+                        """,
+                        (
+                            str(stripe_object.get("payment_status") or "unpaid"),
+                            str(stripe_object.get("status") or "expired"),
+                            (
+                                "expired"
+                                if event_type == "checkout.session.expired"
+                                else "payment_failed"
+                            ),
+                            object_id,
+                        ),
+                    )
+                    connection.commit()
+                release_listing_reservation_for_order(object_id)
+            elif event_type in {"charge.dispute.created", "charge.dispute.updated"}:
+                charge_id = compact_whitespace(stripe_object.get("charge", ""))
+                payment_intent_id = compact_whitespace(
+                    stripe_object.get("payment_intent", "")
+                )
+                dispute_status = compact_whitespace(
+                    stripe_object.get("status", "needs_response")
+                )
+                dispute_reason = compact_whitespace(stripe_object.get("reason", ""))
+                hold_message = (
+                    "Stripe payment dispute"
+                    + (f" ({dispute_reason})" if dispute_reason else "")
+                    + f" is {dispute_status or 'open'}; seller proceeds require review."
+                )
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET payout_status = CASE
+                              WHEN stripe_transfer_id != '' OR payout_status = 'released'
+                                THEN 'attention_needed'
+                              ELSE 'on_hold'
+                            END,
+                            payout_error = ?,
+                            buyer_issue_status = 'open',
+                            buyer_issue_reason = 'payment_dispute',
+                            buyer_issue_details = ?,
+                            buyer_issue_reported_at = COALESCE(
+                              buyer_issue_reported_at, ?
+                            )
+                        WHERE payment_flow = 'separate_charge_transfer'
+                          AND (
+                            (? != '' AND stripe_charge_id = ?)
+                            OR (? != '' AND stripe_payment_intent_id = ?)
+                          )
+                        """,
+                        (
+                            hold_message[:500],
+                            hold_message[:1000],
+                            utc_now(),
+                            charge_id,
+                            charge_id,
+                            payment_intent_id,
+                            payment_intent_id,
+                        ),
+                    )
+                    connection.commit()
+            elif event_type == "charge.refunded" and object_id.startswith("ch_"):
+                payment_intent_id = compact_whitespace(
+                    stripe_object.get("payment_intent", "")
+                )
+                is_full_refund = bool(stripe_object.get("refunded"))
+                refund_message = (
+                    "Stripe reports a full refund."
+                    if is_full_refund
+                    else "Stripe reports a partial refund; seller proceeds require review."
+                )
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET payout_status = CASE
+                              WHEN stripe_transfer_id != '' OR payout_status = 'released'
+                                THEN 'attention_needed'
+                              WHEN ? THEN 'refunded'
+                              ELSE 'on_hold'
+                            END,
+                            payout_error = ?,
+                            buyer_issue_status = CASE
+                              WHEN ? THEN 'resolved'
+                              ELSE 'open'
+                            END,
+                            buyer_issue_reason = 'stripe_refund',
+                            buyer_issue_details = ?,
+                            buyer_issue_reported_at = COALESCE(
+                              buyer_issue_reported_at, ?
+                            ),
+                            buyer_issue_resolved_at = CASE
+                              WHEN ? THEN COALESCE(buyer_issue_resolved_at, ?)
+                              ELSE buyer_issue_resolved_at
+                            END,
+                            buyer_issue_resolution = CASE
+                              WHEN ? THEN 'Refund confirmed by Stripe'
+                              ELSE buyer_issue_resolution
+                            END
+                        WHERE payment_flow = 'separate_charge_transfer'
+                          AND (
+                            stripe_charge_id = ?
+                            OR (? != '' AND stripe_payment_intent_id = ?)
+                          )
+                        """,
+                        (
+                            is_full_refund,
+                            refund_message,
+                            is_full_refund,
+                            refund_message,
+                            utc_now(),
+                            is_full_refund,
+                            utc_now(),
+                            is_full_refund,
+                            object_id,
+                            payment_intent_id,
+                            payment_intent_id,
+                        ),
+                    )
+                    connection.commit()
+        except Exception:
+            raise
+
+        # All webhook side effects above are idempotent. Record completion only
+        # after they succeed so a process crash cannot poison future Stripe
+        # retries with a premature "duplicate" result.
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO stripe_webhook_events (
+                  event_id,
+                  event_type,
+                  processed_at
+                ) VALUES (?, ?, ?)
+                """,
+                (event_id, event_type, utc_now()),
+            )
+            connection.commit()
         self.send_json({"received": True})
 
     def fetch_listings(self) -> list[dict]:
@@ -5507,8 +6717,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             total_cents - 1,
             max(0, int(round(total_cents * STRIPE_PLATFORM_FEE_PERCENT / 100))),
         )
-        stripe_application_fee_cents = platform_fee_cents + shipping_cents
+        stripe_application_fee_cents = 0
         seller_proceeds_cents = max(total_cents - platform_fee_cents, 0)
+        transfer_group = f"EZPB_{listing['id']}_{secrets.token_hex(8)}"
         checkout_expires_at = int(time.time()) + (31 * 60)
         reservation_expires_at = (
             datetime.now(timezone.utc) + timedelta(minutes=31)
@@ -5518,6 +6729,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         verified_address = shipping_quote["address"]
         payload = {
             "mode": "payment",
+            "payment_method_types[0]": "card",
             "success_url": self.checkout_success_url(),
             "cancel_url": self.checkout_cancel_url(),
             "expires_at": str(checkout_expires_at),
@@ -5533,10 +6745,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "line_items[1][price_data][unit_amount]": str(shipping_cents),
             "line_items[1][price_data][product_data][name]": "Prepaid shipping",
             "line_items[1][price_data][product_data][description]": shipping_quote["summary"],
-            # Keep the marketplace commission plus the buyer-paid shipping amount on
-            # Eleven Zero. The product proceeds still route to the connected seller.
-            "payment_intent_data[application_fee_amount]": str(stripe_application_fee_cents),
-            "payment_intent_data[transfer_data][destination]": seller_profile["connectedAccountId"],
+            # This is a separate charge-and-transfer flow. The buyer charge stays
+            # on Eleven Zero until Shippo confirms delivery and the 24-hour buyer
+            # protection window ends. Only then is the seller transfer created.
+            "payment_intent_data[transfer_group]": transfer_group,
             "payment_intent_data[shipping][name]": verified_address["name"],
             "payment_intent_data[shipping][address][line1]": verified_address["line1"],
             "payment_intent_data[shipping][address][city]": verified_address["city"],
@@ -5551,8 +6763,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "metadata[listing_id]": str(listing["id"]),
             "metadata[buyer_user_id]": str(user["id"]),
             "metadata[seller_user_id]": str(seller_user_id),
+            "metadata[transfer_group]": transfer_group,
             "metadata[shipping_summary]": shipping_quote["summary"],
             "metadata[shipping_postal_code]": shipping_quote["postal_code"],
+            "payment_intent_data[metadata][listing_id]": str(listing["id"]),
+            "payment_intent_data[metadata][buyer_user_id]": str(user["id"]),
+            "payment_intent_data[metadata][seller_user_id]": str(seller_user_id),
+            "payment_intent_data[metadata][transfer_group]": transfer_group,
         }
         if verified_address.get("line2"):
             payload["payment_intent_data[shipping][address][line2]"] = verified_address["line2"]
@@ -5611,11 +6828,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                           platform_fee_cents,
                           stripe_application_fee_cents,
                           seller_proceeds_cents,
+                          payment_flow,
+                          stripe_destination_account_id,
+                          stripe_transfer_group,
+                          payout_status,
                           stripe_payment_status,
                           stripe_session_status,
                           status,
                           created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             listing["id"],
@@ -5635,6 +6856,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                             platform_fee_cents,
                             stripe_application_fee_cents,
                             seller_proceeds_cents,
+                            "separate_charge_transfer",
+                            seller_profile["connectedAccountId"],
+                            transfer_group,
+                            "awaiting_payment",
                             str(session.get("payment_status") or "unpaid"),
                             str(session.get("status") or "open"),
                             "open",
@@ -5685,6 +6910,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "platformFeePercent": STRIPE_PLATFORM_FEE_PERCENT,
                     "platformFeeCents": platform_fee_cents,
                     "shippingHeldByPlatformCents": shipping_cents,
+                    "sellerProceedsHeldCents": seller_proceeds_cents,
                 },
                 "shipping": {
                     "amountCents": shipping_cents,
@@ -5782,7 +7008,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if payment_status == "paid":
             order_status = "paid"
-            message = "Payment confirmed. The seller payout will route through Stripe after the platform fee."
+            message = (
+                "Payment confirmed. Eleven Zero PB holds seller proceeds until "
+                "Shippo confirms delivery and the 24-hour buyer protection window closes."
+            )
         elif session_status == "complete":
             order_status = "processing"
             message = "Stripe shows the checkout as complete and the payment is still processing."
@@ -5847,7 +7076,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     "shippingStatus": order_row["shipping_status"],
                     "trackingNumber": order_row["tracking_number"],
                     "trackingUrl": order_row["tracking_url"],
+                    "trackingStatus": row_value(order_row, "tracking_status", "UNKNOWN"),
                     "platformFeeCents": order_row["platform_fee_cents"],
+                    "payoutStatus": row_value(
+                        order_row, "payout_status", "legacy_released"
+                    ),
+                    "payoutReleaseAt": row_value(order_row, "payout_release_at"),
+                    "buyerIssueStatus": row_value(
+                        order_row, "buyer_issue_status", "none"
+                    ),
                 },
             }
         )
@@ -6025,6 +7262,358 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             }
         )
 
+    def handle_report_order_issue(self, user: dict, body: dict):
+        session_id = compact_whitespace(body.get("sessionId", ""))
+        try:
+            order_id = int(body.get("orderId") or 0)
+        except (TypeError, ValueError):
+            order_id = 0
+        reason = compact_whitespace(body.get("reason", "")).lower()
+        details = compact_whitespace(body.get("details", ""))[:1000]
+        allowed_reasons = {
+            "damaged",
+            "not_as_described",
+            "not_received",
+            "wrong_item",
+            "other",
+        }
+        if not session_id.startswith("cs_") and order_id <= 0:
+            self.send_json(
+                {"error": "Choose a valid purchase before reporting a problem."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if reason not in allowed_reasons or len(details) < 10:
+            self.send_json(
+                {
+                    "error": (
+                        "Choose the problem type and add at least 10 characters "
+                        "so the Eleven Zero PB team can help."
+                    )
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            order_row = connection.execute(
+                """
+                SELECT *
+                FROM orders
+                WHERE (
+                    (? != '' AND stripe_checkout_session_id = ?)
+                    OR (? > 0 AND id = ?)
+                )
+                """,
+                (session_id, session_id, order_id, order_id),
+            ).fetchone()
+            if not order_row:
+                connection.rollback()
+                self.send_json(
+                    {"error": "That purchase could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            if int(order_row["buyer_user_id"] or 0) != int(user["id"]):
+                connection.rollback()
+                self.send_json(
+                    {"error": "That purchase belongs to another account."},
+                    status=HTTPStatus.FORBIDDEN,
+                )
+                return
+            if order_row["payment_flow"] != "separate_charge_transfer":
+                connection.rollback()
+                self.send_json(
+                    {
+                        "error": (
+                            "This earlier order used the previous payout flow. "
+                            "Contact Eleven Zero PB support for help."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if not (
+                order_row["status"] == "paid"
+                or order_row["stripe_payment_status"] == "paid"
+            ):
+                connection.rollback()
+                self.send_json(
+                    {"error": "Payment must be confirmed before reporting this order."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if order_row["stripe_transfer_id"] or order_row["payout_status"] in {
+                "released",
+                "releasing",
+            }:
+                connection.rollback()
+                self.send_json(
+                    {
+                        "error": (
+                            "Seller proceeds are already being released. "
+                            "Contact Eleven Zero PB support immediately."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if order_row["buyer_issue_status"] == "open":
+                connection.rollback()
+                self.send_json(
+                    {
+                        "ok": True,
+                        "orderId": int(order_row["id"]),
+                        "issueStatus": "open",
+                        "message": "Your report is already open and seller proceeds remain on hold.",
+                    }
+                )
+                return
+
+            reported_at = utc_now()
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_issue_status = 'open',
+                    buyer_issue_reason = ?,
+                    buyer_issue_details = ?,
+                    buyer_issue_reported_at = ?,
+                    buyer_issue_resolved_at = NULL,
+                    buyer_issue_resolution = '',
+                    payout_status = 'on_hold',
+                    payout_next_attempt_at = NULL,
+                    payout_error = 'Buyer reported an order problem; owner review is required.'
+                WHERE id = ?
+                  AND stripe_transfer_id = ''
+                  AND payout_status != 'releasing'
+                """,
+                (reason, details, reported_at, order_row["id"]),
+            )
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "orderId": int(order_row["id"]),
+                "issueStatus": "open",
+                "message": (
+                    "Your report is open. Seller proceeds are on hold while "
+                    "Eleven Zero PB reviews the order."
+                ),
+            },
+            status=HTTPStatus.CREATED,
+        )
+
+    def handle_admin_resolve_order_issue(self, body: dict):
+        try:
+            order_id = int(body.get("orderId") or 0)
+        except (TypeError, ValueError):
+            order_id = 0
+        action = compact_whitespace(body.get("action", "")).lower()
+        note = compact_whitespace(body.get("note", ""))[:500]
+        if order_id <= 0 or action not in {"dismiss", "resume", "hold"}:
+            self.send_json(
+                {"error": "Choose an order and a valid issue action."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if len(note) < 5:
+            self.send_json(
+                {"error": "Add a short internal resolution note."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            order_row = connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+            if not order_row:
+                connection.rollback()
+                self.send_json(
+                    {"error": "That order could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            if order_row["payment_flow"] != "separate_charge_transfer":
+                connection.rollback()
+                self.send_json(
+                    {"error": "Legacy payout orders must be handled in Stripe support."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if order_row["stripe_transfer_id"] or order_row["payout_status"] == "released":
+                connection.rollback()
+                self.send_json(
+                    {"error": "Seller proceeds have already been released."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            if action == "hold":
+                connection.execute(
+                    """
+                    UPDATE orders
+                    SET buyer_issue_status = 'open',
+                        buyer_issue_resolution = ?,
+                        payout_status = 'on_hold',
+                        payout_next_attempt_at = NULL,
+                        payout_error = ?
+                    WHERE id = ?
+                    """,
+                    (note, f"Owner hold: {note}"[:500], order_id),
+                )
+                message = "The issue remains open and seller proceeds stay on hold."
+                issue_status = "open"
+                payout_status = "on_hold"
+            else:
+                next_payout_status = (
+                    "release_scheduled"
+                    if compact_whitespace(order_row["tracking_status"]).upper()
+                    == "DELIVERED"
+                    else "held_for_delivery"
+                )
+                connection.execute(
+                    """
+                    UPDATE orders
+                    SET buyer_issue_status = 'resolved',
+                        buyer_issue_resolved_at = ?,
+                        buyer_issue_resolution = ?,
+                        payout_status = ?,
+                        payout_next_attempt_at = NULL,
+                        payout_error = ''
+                    WHERE id = ?
+                    """,
+                    (utc_now(), note, next_payout_status, order_id),
+                )
+                message = (
+                    "The issue is resolved. Seller proceeds returned to the "
+                    "delivery-release queue."
+                )
+                issue_status = "resolved"
+                payout_status = next_payout_status
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "orderId": order_id,
+                "issueStatus": issue_status,
+                "payoutStatus": payout_status,
+                "message": message,
+            }
+        )
+
+    def handle_admin_release_order_payout(self, body: dict):
+        try:
+            order_id = int(body.get("orderId") or 0)
+        except (TypeError, ValueError):
+            order_id = 0
+        if order_id <= 0:
+            self.send_json(
+                {"error": "Choose a valid order payout to release."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            order_row = connection.execute(
+                "SELECT * FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()
+            if not order_row:
+                self.send_json(
+                    {"error": "That order could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            if order_row["payment_flow"] != "separate_charge_transfer":
+                self.send_json(
+                    {"error": "Legacy order proceeds were already routed by Stripe."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if order_row["buyer_issue_status"] == "open":
+                self.send_json(
+                    {"error": "Resolve the buyer issue before releasing seller proceeds."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if compact_whitespace(order_row["tracking_status"]).upper() != "DELIVERED":
+                self.send_json(
+                    {
+                        "error": (
+                            "Shippo must confirm delivery before seller proceeds "
+                            "can be released."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            release_at = parse_activity_datetime(order_row["payout_release_at"])
+            if not release_at or release_at > datetime.now(timezone.utc):
+                self.send_json(
+                    {
+                        "error": (
+                            "The 24-hour buyer protection period must finish before "
+                            "seller proceeds can be released."
+                        ),
+                        "payoutStatus": order_row["payout_status"],
+                        "payoutReleaseAt": order_row["payout_release_at"],
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if order_row["stripe_transfer_id"] or order_row["payout_status"] == "released":
+                self.send_json(
+                    {
+                        "ok": True,
+                        "orderId": order_id,
+                        "payoutStatus": "released",
+                        "message": "Seller proceeds were already released.",
+                    }
+                )
+                return
+            connection.execute(
+                """
+                UPDATE orders
+                SET payout_status = 'release_scheduled',
+                    payout_next_attempt_at = NULL,
+                    payout_error = ''
+                WHERE id = ?
+                  AND stripe_transfer_id = ''
+                  AND buyer_issue_status != 'open'
+                """,
+                (order_id,),
+            )
+            connection.commit()
+
+        result = release_seller_transfer_for_order(order_id)
+        if result and result["payout_status"] == "released":
+            self.send_json(
+                {
+                    "ok": True,
+                    "orderId": order_id,
+                    "payoutStatus": "released",
+                    "transferId": result["stripe_transfer_id"],
+                    "message": "Seller proceeds were released to the connected Stripe balance.",
+                }
+            )
+            return
+        self.send_json(
+            {
+                "error": (
+                    compact_whitespace(row_value(result, "payout_error", ""))
+                    or "Stripe could not release seller proceeds yet."
+                ),
+                "payoutStatus": row_value(result, "payout_status", "attention_needed"),
+            },
+            status=HTTPStatus.BAD_GATEWAY,
+        )
+
     def build_dashboard(self, user_id: int) -> dict:
         with closing(connect_db()) as connection:
             user = connection.execute(
@@ -6104,6 +7693,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             recent_sales = connection.execute(
                 """
                 SELECT
+                  orders.id,
                   orders.listing_id,
                   orders.stripe_checkout_session_id,
                   orders.amount_total_cents,
@@ -6115,19 +7705,90 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   orders.shippo_label_url,
                   orders.tracking_number,
                   orders.tracking_url,
+                  orders.tracking_status,
+                  orders.tracking_substatus,
+                  orders.tracking_status_date,
+                  orders.tracking_status_details,
+                  orders.tracking_updated_at,
+                  orders.shipped_at,
+                  orders.delivered_at,
                   orders.shipping_status,
                   orders.shipping_error,
+                  orders.payment_flow,
+                  orders.stripe_transfer_id,
+                  orders.payout_status,
+                  orders.payout_release_at,
+                  orders.payout_released_at,
+                  orders.payout_error,
+                  orders.buyer_issue_status,
+                  orders.buyer_issue_reason,
+                  orders.buyer_issue_details,
+                  orders.buyer_issue_reported_at,
+                  orders.buyer_issue_resolved_at,
+                  orders.buyer_issue_resolution,
                   orders.seller_sale_email_status,
                   orders.seller_sale_email_sent_at,
                   orders.seller_sale_email_error,
                   orders.status,
                   orders.created_at,
+                  orders.completed_at,
                   listings.brand,
                   listings.model,
-                  listings.sale_status
+                  listings.sale_status,
+                  buyers.name AS buyer_name
                 FROM orders
                 LEFT JOIN listings ON listings.id = orders.listing_id
+                LEFT JOIN users AS buyers ON buyers.id = orders.buyer_user_id
                 WHERE orders.seller_user_id = ?
+                ORDER BY orders.created_at DESC
+                LIMIT 10
+                """,
+                (user_id,),
+            ).fetchall()
+            recent_purchases = connection.execute(
+                """
+                SELECT
+                  orders.id,
+                  orders.listing_id,
+                  orders.stripe_checkout_session_id,
+                  orders.amount_total_cents,
+                  orders.shipping_amount_cents,
+                  orders.shipping_label,
+                  orders.shipping_carrier,
+                  orders.shipping_service,
+                  orders.tracking_number,
+                  orders.tracking_url,
+                  orders.tracking_status,
+                  orders.tracking_substatus,
+                  orders.tracking_status_date,
+                  orders.tracking_status_details,
+                  orders.tracking_updated_at,
+                  orders.shipped_at,
+                  orders.delivered_at,
+                  orders.shipping_status,
+                  orders.shipping_error,
+                  orders.payment_flow,
+                  orders.payout_status,
+                  orders.payout_release_at,
+                  orders.payout_released_at,
+                  orders.buyer_issue_status,
+                  orders.buyer_issue_reason,
+                  orders.buyer_issue_details,
+                  orders.buyer_issue_reported_at,
+                  orders.buyer_issue_resolved_at,
+                  orders.buyer_issue_resolution,
+                  orders.status,
+                  orders.created_at,
+                  orders.completed_at,
+                  listings.brand,
+                  listings.model,
+                  listings.condition,
+                  listings.sale_status,
+                  sellers.name AS seller_name
+                FROM orders
+                LEFT JOIN listings ON listings.id = orders.listing_id
+                LEFT JOIN users AS sellers ON sellers.id = orders.seller_user_id
+                WHERE orders.buyer_user_id = ?
                 ORDER BY orders.created_at DESC
                 LIMIT 10
                 """,
@@ -6145,6 +7806,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "recentListings": [row_to_dict(row) for row in recent_listings],
             "recentTrainers": [row_to_dict(row) for row in recent_trainers],
             "recentSales": [row_to_dict(row) for row in recent_sales],
+            "recentPurchases": [row_to_dict(row) for row in recent_purchases],
         }
 
     def handle_update_profile(self, user: dict, body: dict):
@@ -6313,8 +7975,33 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   orders.listing_id,
                   orders.stripe_checkout_session_id,
                   orders.amount_total_cents,
+                  orders.shipping_amount_cents,
+                  orders.platform_fee_cents,
+                  orders.seller_proceeds_cents,
                   orders.shipping_status,
                   orders.shipping_error,
+                  orders.shipping_carrier,
+                  orders.shipping_service,
+                  orders.tracking_number,
+                  orders.tracking_url,
+                  orders.tracking_status,
+                  orders.tracking_substatus,
+                  orders.tracking_status_date,
+                  orders.tracking_status_details,
+                  orders.shipped_at,
+                  orders.delivered_at,
+                  orders.payment_flow,
+                  orders.stripe_transfer_id,
+                  orders.payout_status,
+                  orders.payout_release_at,
+                  orders.payout_released_at,
+                  orders.payout_error,
+                  orders.buyer_issue_status,
+                  orders.buyer_issue_reason,
+                  orders.buyer_issue_details,
+                  orders.buyer_issue_reported_at,
+                  orders.buyer_issue_resolved_at,
+                  orders.buyer_issue_resolution,
                   orders.buyer_confirmation_status,
                   orders.buyer_confirmation_error,
                   orders.buyer_confirmation_sent_at,
@@ -8241,8 +9928,42 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
 
 
+def maintenance_worker() -> None:
+    """Run bounded tracking and payout reconciliation outside request threads."""
+    next_webhook_check = 0.0
+    while True:
+        now = time.monotonic()
+        if now >= next_webhook_check:
+            try:
+                result = ensure_shippo_tracking_webhook()
+                if result.get("configured"):
+                    set_app_setting("shippo_tracking_webhook_last_error", "")
+            except (RuntimeError, ValueError, sqlite3.Error) as error:
+                try:
+                    set_app_setting(
+                        "shippo_tracking_webhook_last_error",
+                        compact_whitespace(str(error))[:500],
+                    )
+                except sqlite3.Error:
+                    pass
+            next_webhook_check = now + 6 * 60 * 60
+
+        try:
+            reconcile_order_tracking_and_payouts(limit=12)
+        except (RuntimeError, ValueError, sqlite3.Error):
+            # Each pass is bounded and idempotent. A later pass will retry any
+            # Shippo, Stripe, or transient database failure.
+            pass
+        time.sleep(PAYOUT_RELEASE_CHECK_SECONDS)
+
+
 def run() -> None:
     init_database()
+    threading.Thread(
+        target=maintenance_worker,
+        name="eleven-zero-order-maintenance",
+        daemon=True,
+    ).start()
     server = ThreadingHTTPServer((HOST, PORT), ElevenZeroHandler)
     public_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
     print(f"Eleven Zero PB is running in {APP_ENV} mode at http://{public_host}:{PORT}")
