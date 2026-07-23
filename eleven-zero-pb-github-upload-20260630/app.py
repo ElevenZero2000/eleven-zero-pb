@@ -492,9 +492,10 @@ def build_sales_analytics(order_rows, now: datetime | None = None) -> dict:
 
 
 def connect_db() -> sqlite3.Connection:
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, timeout=35.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 35000")
     return connection
 
 
@@ -3359,7 +3360,12 @@ def release_seller_transfer_for_order(
                 """
                 UPDATE orders
                 SET payout_status = CASE
-                      WHEN payout_status IN ('released', 'legacy_released')
+                      WHEN payout_status IN (
+                        'released',
+                        'legacy_released',
+                        'on_hold'
+                      )
+                        OR buyer_issue_status = 'open'
                         THEN payout_status
                       ELSE 'attention_needed'
                     END,
@@ -3488,48 +3494,170 @@ def release_seller_transfer_for_order(
             raise ValueError("The Stripe source charge is not available yet.")
 
         transfer = existing_stripe_transfer_for_order(claimed_row)
-        if not transfer:
-            charge = stripe_request("GET", f"/charges/{charge_id}")
-            if (
-                compact_whitespace(charge.get("status", "")).lower() != "succeeded"
-                or not bool(charge.get("paid"))
-                or bool(charge.get("refunded"))
-                or int(charge.get("amount_refunded") or 0) > 0
-                or bool(charge.get("disputed"))
-            ):
-                raise PayoutHoldError(
-                    "Stripe charge is refunded, disputed, unpaid, or no longer succeeded; "
-                    "seller proceeds remain on hold."
-                )
-            destination = compact_whitespace(
-                claimed_row["stripe_destination_account_id"]
-                or claimed_row["stripe_account_id"]
-                or ""
-            )
-            if not destination.startswith("acct_"):
-                raise ValueError("The seller Stripe destination account is missing.")
-            transfer = stripe_request(
-                "POST",
-                "/transfers",
-                {
-                    "amount": int(claimed_row["seller_proceeds_cents"] or 0),
-                    "currency": "usd",
-                    "destination": destination,
-                    "source_transaction": charge_id,
-                    "transfer_group": claimed_row["stripe_transfer_group"],
-                    "description": f"Seller proceeds for Eleven Zero order {order_id}",
-                    "metadata[order_id]": str(order_id),
-                    "metadata[listing_id]": str(claimed_row["listing_id"] or ""),
-                    "metadata[platform]": "Eleven Zero PB",
-                },
-                idempotency_key=f"ezpb-seller-transfer-{claimed_row['stripe_transfer_group']}-v1",
-            )
-        transfer_id = compact_whitespace(transfer.get("id", ""))
-        if not transfer_id.startswith("tr_"):
-            raise ValueError("Stripe did not return a seller transfer.")
-
         with closing(connect_db()) as connection:
-            connection.execute(
+            # Serialize the final eligibility check, Stripe transfer, and local
+            # recording step. A refund, return, dispute, or buyer issue that
+            # commits after the initial claim must never be overwritten here.
+            connection.execute("BEGIN IMMEDIATE")
+            final_row = connection.execute(
+                """
+                SELECT orders.*, users.stripe_account_id
+                FROM orders
+                LEFT JOIN users ON users.id = orders.seller_user_id
+                WHERE orders.id = ?
+                """,
+                (order_id,),
+            ).fetchone()
+            final_release_at = (
+                parse_activity_datetime(final_row["payout_release_at"])
+                if final_row
+                else None
+            )
+            final_now = datetime.now(timezone.utc)
+            final_is_releasable = bool(
+                final_row
+                and final_row["payment_flow"] == "separate_charge_transfer"
+                and not final_row["stripe_transfer_id"]
+                and final_row["payout_status"] == "releasing"
+                and final_row["buyer_issue_status"] != "open"
+                and compact_whitespace(final_row["tracking_status"]).upper()
+                == "DELIVERED"
+                and final_release_at
+                and final_release_at <= final_now
+                and (
+                    final_row["status"] == "paid"
+                    or final_row["stripe_payment_status"] == "paid"
+                )
+            )
+            existing_transfer_id = (
+                compact_whitespace(transfer.get("id", "")) if transfer else ""
+            )
+            if transfer and not existing_transfer_id.startswith("tr_"):
+                raise ValueError("Stripe returned an invalid existing seller transfer.")
+            if not final_is_releasable:
+                if (
+                    final_row
+                    and existing_transfer_id
+                    and not final_row["stripe_transfer_id"]
+                ):
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET stripe_charge_id = ?,
+                            stripe_transfer_id = ?,
+                            payout_status = 'attention_needed',
+                            payout_released_at = CASE
+                              WHEN payout_released_at = '' THEN ?
+                              ELSE payout_released_at
+                            END,
+                            payout_next_attempt_at = NULL,
+                            payout_error = ?
+                        WHERE id = ?
+                          AND payment_flow = 'separate_charge_transfer'
+                          AND stripe_transfer_id = ''
+                        """,
+                        (
+                            charge_id,
+                            existing_transfer_id,
+                            utc_now(),
+                            (
+                                "Stripe already contains this seller transfer, but "
+                                "the order became ineligible during release. Owner "
+                                "review is required."
+                            ),
+                            order_id,
+                        ),
+                    )
+                    connection.commit()
+                    return connection.execute(
+                        "SELECT * FROM orders WHERE id = ?",
+                        (order_id,),
+                    ).fetchone()
+                if final_row and final_row["payout_status"] == "releasing":
+                    safe_status = (
+                        "release_scheduled"
+                        if (
+                            final_row["buyer_issue_status"] != "open"
+                            and compact_whitespace(
+                                final_row["tracking_status"]
+                            ).upper()
+                            == "DELIVERED"
+                            and final_release_at
+                            and final_release_at > final_now
+                        )
+                        else "on_hold"
+                    )
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET payout_status = ?,
+                            payout_next_attempt_at = NULL,
+                            payout_error = CASE
+                              WHEN ? = 'on_hold'
+                                THEN 'Payout eligibility changed during release; owner review is required.'
+                              ELSE payout_error
+                            END
+                        WHERE id = ?
+                          AND payout_status = 'releasing'
+                          AND stripe_transfer_id = ''
+                        """,
+                        (safe_status, safe_status, order_id),
+                    )
+                    connection.commit()
+                else:
+                    connection.rollback()
+                return connection.execute(
+                    "SELECT * FROM orders WHERE id = ?",
+                    (order_id,),
+                ).fetchone()
+
+            if not transfer:
+                charge = stripe_request("GET", f"/charges/{charge_id}")
+                if (
+                    compact_whitespace(charge.get("status", "")).lower()
+                    != "succeeded"
+                    or not bool(charge.get("paid"))
+                    or bool(charge.get("refunded"))
+                    or int(charge.get("amount_refunded") or 0) > 0
+                    or bool(charge.get("disputed"))
+                ):
+                    raise PayoutHoldError(
+                        "Stripe charge is refunded, disputed, unpaid, or no longer "
+                        "succeeded; seller proceeds remain on hold."
+                    )
+                destination = compact_whitespace(
+                    final_row["stripe_destination_account_id"]
+                    or final_row["stripe_account_id"]
+                    or ""
+                )
+                if not destination.startswith("acct_"):
+                    raise ValueError("The seller Stripe destination account is missing.")
+                transfer = stripe_request(
+                    "POST",
+                    "/transfers",
+                    {
+                        "amount": int(final_row["seller_proceeds_cents"] or 0),
+                        "currency": "usd",
+                        "destination": destination,
+                        "source_transaction": charge_id,
+                        "transfer_group": final_row["stripe_transfer_group"],
+                        "description": (
+                            f"Seller proceeds for Eleven Zero order {order_id}"
+                        ),
+                        "metadata[order_id]": str(order_id),
+                        "metadata[listing_id]": str(final_row["listing_id"] or ""),
+                        "metadata[platform]": "Eleven Zero PB",
+                    },
+                    idempotency_key=(
+                        "ezpb-seller-transfer-"
+                        f"{final_row['stripe_transfer_group']}-v1"
+                    ),
+                )
+            transfer_id = compact_whitespace(transfer.get("id", ""))
+            if not transfer_id.startswith("tr_"):
+                raise ValueError("Stripe did not return a seller transfer.")
+
+            recorded = connection.execute(
                 """
                 UPDATE orders
                 SET stripe_charge_id = ?,
@@ -3541,9 +3669,26 @@ def release_seller_transfer_for_order(
                 WHERE id = ?
                   AND payment_flow = 'separate_charge_transfer'
                   AND stripe_transfer_id = ''
+                  AND payout_status = 'releasing'
+                  AND buyer_issue_status != 'open'
+                  AND tracking_status = 'DELIVERED'
+                  AND payout_release_at != ''
+                  AND payout_release_at <= ?
+                  AND (status = 'paid' OR stripe_payment_status = 'paid')
                 """,
-                (charge_id, transfer_id, utc_now(), order_id),
+                (
+                    charge_id,
+                    transfer_id,
+                    utc_now(),
+                    order_id,
+                    final_now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                ),
             )
+            if recorded.rowcount != 1:
+                connection.rollback()
+                raise RuntimeError(
+                    "Payout state changed before the Stripe transfer could be recorded."
+                )
             connection.commit()
             return connection.execute(
                 "SELECT * FROM orders WHERE id = ?",
@@ -3559,6 +3704,8 @@ def release_seller_transfer_for_order(
                     payout_error = ?
                 WHERE id = ?
                   AND stripe_transfer_id = ''
+                  AND payout_status = 'releasing'
+                  AND buyer_issue_status != 'open'
                 """,
                 (compact_whitespace(str(error))[:500], order_id),
             )
@@ -3587,6 +3734,8 @@ def release_seller_transfer_for_order(
                     payout_error = ?
                 WHERE id = ?
                   AND stripe_transfer_id = ''
+                  AND payout_status = 'releasing'
+                  AND buyer_issue_status != 'open'
                 """,
                 (
                     retry_count,
