@@ -863,6 +863,64 @@ class ManagedShippingTests(unittest.TestCase):
         self.assertEqual(listing_state, ("available", ""))
         self.assertEqual(order_state, ("expired", "expired"))
 
+    def test_catalog_read_releases_missed_async_payment_failure(self):
+        listing_id = self.create_paid_order("cs_test_reconcile_failed")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET stripe_payment_intent_id = 'pi_test_reconcile_failed',
+                    stripe_payment_status = 'unpaid',
+                    status = 'processing',
+                    stripe_session_status = 'complete'
+                WHERE stripe_checkout_session_id = 'cs_test_reconcile_failed'
+                """
+            )
+            connection.execute(
+                """
+                UPDATE listings
+                SET sale_status = 'reserved',
+                    reserved_checkout_session_id = 'cs_test_reconcile_failed',
+                    reserved_until = '2020-01-01T00:00:00Z'
+                WHERE id = ?
+                """,
+                (listing_id,),
+            )
+            connection.commit()
+
+        app.STRIPE_SECRET_KEY = "sk_test_reconcile"
+
+        def fake_stripe_request(method, path, data=None):
+            if path == "/checkout/sessions/cs_test_reconcile_failed":
+                return {
+                    "id": "cs_test_reconcile_failed",
+                    "payment_intent": "pi_test_reconcile_failed",
+                    "payment_status": "unpaid",
+                    "status": "complete",
+                }
+            if path == "/payment_intents/pi_test_reconcile_failed":
+                return {
+                    "id": "pi_test_reconcile_failed",
+                    "status": "requires_payment_method",
+                }
+            raise AssertionError(f"Unexpected Stripe request: {method} {path}")
+
+        app.stripe_request = fake_stripe_request
+        items = app.ElevenZeroHandler.fetch_listings(None)
+
+        listing = next(item for item in items if item["id"] == listing_id)
+        self.assertEqual(listing["sale_status"], "available")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            order_state = connection.execute(
+                """
+                SELECT status, stripe_session_status
+                FROM orders
+                WHERE stripe_checkout_session_id = ?
+                """,
+                ("cs_test_reconcile_failed",),
+            ).fetchone()
+        self.assertEqual(order_state, ("payment_failed", "complete"))
+
     def test_sale_pending_listing_cannot_start_checkout(self):
         state = app.listing_checkout_state_from_row(
             {
