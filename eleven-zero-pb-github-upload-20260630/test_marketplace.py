@@ -21,6 +21,7 @@ class MarketplaceSafetyTests(unittest.TestCase):
         app.APP_ENV = "development"
         app.ENABLE_STARTER_LISTINGS = False
         app.ENABLE_DEMO_DATA = False
+        app.RATE_LIMIT_BUCKETS.clear()
         app.init_database()
 
     def tearDown(self):
@@ -488,6 +489,63 @@ class MarketplaceSafetyTests(unittest.TestCase):
             self.assertGreater(normalized.width, normalized.height)
             self.assertNotIn("exif", normalized.info)
 
+    def test_account_can_create_only_one_trainer_profile(self):
+        user_id = self.create_user("trainer-single@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        handler = StubHandler()
+        user = {"id": user_id, "email": "trainer-single@example.com"}
+        app.ElevenZeroHandler.handle_create_trainer(
+            handler,
+            user,
+            self.trainer_payload(),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            handler,
+            user,
+            self.trainer_payload(name="Second Trainer Profile"),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertIn("already has a trainer profile", captured["payload"]["error"])
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_count = connection.execute(
+                "SELECT COUNT(*) FROM trainers WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()[0]
+        self.assertEqual(trainer_count, 1)
+
+    def test_json_body_rejects_oversized_request_before_reading(self):
+        captured = {}
+
+        class RejectRead(BytesIO):
+            def read(self, *_args, **_kwargs):
+                raise AssertionError("Oversized request body should not be read.")
+
+        class StubHandler:
+            headers = {"Content-Length": str(app.MAX_API_JSON_BODY_BYTES + 1)}
+            rfile = RejectRead(b"")
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        with self.assertRaises(ValueError):
+            app.ElevenZeroHandler.json_body(StubHandler())
+
+        self.assertEqual(
+            captured["status"],
+            app.HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        )
+        self.assertIn("too large", captured["payload"]["error"].lower())
+
     def test_trainer_image_access_is_limited_until_approval(self):
         owner_id = self.create_user("trainer-owner@example.com")
         other_id = self.create_user("trainer-other@example.com")
@@ -517,10 +575,11 @@ class MarketplaceSafetyTests(unittest.TestCase):
                 captured["payload"] = payload
                 captured["status"] = status
 
-            def send_bytes(self, payload, content_type, status=200):
+            def send_bytes(self, payload, content_type, status=200, **kwargs):
                 captured["bytes"] = payload
                 captured["content_type"] = content_type
                 captured["status"] = status
+                captured["cache_control"] = kwargs.get("cache_control")
 
         handler = StubHandler()
         app.ElevenZeroHandler.handle_trainer_image(handler, trainer_id, None)
@@ -537,6 +596,7 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(captured["status"], 200)
         self.assertEqual(captured["content_type"], "image/jpeg")
         self.assertTrue(captured["bytes"].startswith(b"\xff\xd8\xff"))
+        self.assertEqual(captured["cache_control"], "no-store")
 
         app.ElevenZeroHandler.handle_trainer_image(
             handler, trainer_id, {"id": 999, "isAdmin": True}
@@ -551,6 +611,10 @@ class MarketplaceSafetyTests(unittest.TestCase):
             connection.commit()
         app.ElevenZeroHandler.handle_trainer_image(handler, trainer_id, None)
         self.assertEqual(captured["status"], 200)
+        self.assertEqual(
+            captured["cache_control"],
+            "public, max-age=86400, immutable",
+        )
 
     def test_owner_image_replacement_returns_entire_profile_to_review(self):
         owner_id = self.create_user("trainer-replace@example.com")
