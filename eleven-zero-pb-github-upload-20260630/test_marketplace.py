@@ -90,6 +90,80 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(dashboard["stats"]["listingPending"], 1)
         self.assertEqual(len(dashboard["listings"]), 3)
 
+    def test_seller_can_mark_only_own_paid_pending_listing_sold(self):
+        seller_id = self.create_user("paid-seller@example.com")
+        buyer_id = self.create_user("paid-buyer@example.com")
+        listing_id = self.create_listing(
+            seller_id,
+            "Paid Pending",
+            sale_status="pending",
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                INSERT INTO orders (
+                  listing_id, buyer_user_id, seller_user_id,
+                  stripe_checkout_session_id, amount_total_cents,
+                  shipping_amount_cents, platform_fee_cents,
+                  stripe_payment_status, stripe_session_status, status, created_at
+                ) VALUES (?, ?, ?, 'cs_test_mark_sold', 16000, 1000, 1275,
+                  'paid', 'complete', 'paid', '2026-07-22T00:00:00Z')
+                """,
+                (listing_id, buyer_id, seller_id),
+            )
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_owner_mark_listing_sold(
+            StubHandler(),
+            {"id": seller_id},
+            {"id": listing_id},
+        )
+
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["payload"]["saleStatus"], "sold")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            sale_status = connection.execute(
+                "SELECT sale_status FROM listings WHERE id = ?",
+                (listing_id,),
+            ).fetchone()[0]
+        self.assertEqual(sale_status, "sold")
+
+    def test_other_seller_cannot_mark_listing_sold(self):
+        seller_id = self.create_user("owner-seller@example.com")
+        other_seller_id = self.create_user("other-seller@example.com")
+        listing_id = self.create_listing(
+            seller_id,
+            "Protected Pending",
+            sale_status="pending",
+        )
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_owner_mark_listing_sold(
+            StubHandler(),
+            {"id": other_seller_id},
+            {"id": listing_id},
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.FORBIDDEN)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            sale_status = connection.execute(
+                "SELECT sale_status FROM listings WHERE id = ?",
+                (listing_id,),
+            ).fetchone()[0]
+        self.assertEqual(sale_status, "pending")
+
     def test_account_profile_settings_queue_name_and_photo_for_review(self):
         user_id = self.create_user()
         captured = {}
