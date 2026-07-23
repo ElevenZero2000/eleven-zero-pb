@@ -2638,6 +2638,54 @@ def reconcile_expired_listing_reservation(listing_row: sqlite3.Row | dict | None
         finalize_paid_order(session_id)
         return True
 
+    if session_status == "complete":
+        payment_intent_id = compact_whitespace(session.get("payment_intent", ""))
+        if payment_intent_id.startswith("pi_"):
+            try:
+                payment_intent = stripe_request(
+                    "GET", f"/payment_intents/{payment_intent_id}"
+                )
+            except (RuntimeError, ValueError):
+                return False
+
+            payment_intent_status = compact_whitespace(
+                payment_intent.get("status", "")
+            ).lower()
+            if payment_intent_status == "succeeded":
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET stripe_payment_intent_id = ?,
+                            stripe_payment_status = 'paid',
+                            stripe_session_status = 'complete',
+                            status = 'paid',
+                            completed_at = COALESCE(completed_at, ?)
+                        WHERE stripe_checkout_session_id = ?
+                        """,
+                        (payment_intent_id, utc_now(), session_id),
+                    )
+                    connection.commit()
+                finalize_paid_order(session_id)
+                return True
+
+            if payment_intent_status in {"canceled", "requires_payment_method"}:
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET stripe_payment_intent_id = ?,
+                            stripe_payment_status = 'unpaid',
+                            stripe_session_status = 'complete',
+                            status = 'payment_failed'
+                        WHERE stripe_checkout_session_id = ?
+                        """,
+                        (payment_intent_id, session_id),
+                    )
+                    connection.commit()
+                release_listing_reservation_for_order(session_id)
+                return True
+
     if session_status == "expired":
         with closing(connect_db()) as connection:
             connection.execute(
@@ -4798,6 +4846,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """
             ).fetchall()
 
+        reconciled = False
+        for row in rows:
+            if reconcile_expired_listing_reservation(row):
+                reconciled = True
+        if reconciled:
+            return ElevenZeroHandler.fetch_listings(self)
+
         return [serialize_listing_row(row) for row in rows]
 
     def handle_listing_image(self, listing_id: int, image_index: int, viewer: dict | None):
@@ -4924,6 +4979,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not row:
             return None
+
+        if reconcile_expired_listing_reservation(row):
+            return ElevenZeroHandler.fetch_listing_by_id(self, listing_id, viewer)
 
         approval_status = normalize_listing_approval_status(
             row_value(row, "approval_status", "approved"), default="approved"
@@ -5073,7 +5131,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
     def fetch_user_account_row(self, user_id: int) -> sqlite3.Row | None:
         with closing(connect_db()) as connection:
-            return connection.execute(
+            row = connection.execute(
                 """
                 SELECT
                   id,
@@ -5151,6 +5209,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """,
                 (listing_id,),
             ).fetchone()
+
+        if reconcile_expired_listing_reservation(row):
+            return ElevenZeroHandler.fetch_listing_checkout_row(self, listing_id)
+
+        return row
 
     def fetch_order_row(self, session_id: str) -> sqlite3.Row | None:
         with closing(connect_db()) as connection:
