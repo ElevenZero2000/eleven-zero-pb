@@ -3,9 +3,11 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 import app
+from PIL import Image
 
 
 class MarketplaceSafetyTests(unittest.TestCase):
@@ -19,6 +21,7 @@ class MarketplaceSafetyTests(unittest.TestCase):
         app.APP_ENV = "development"
         app.ENABLE_STARTER_LISTINGS = False
         app.ENABLE_DEMO_DATA = False
+        app.RATE_LIMIT_BUCKETS.clear()
         app.init_database()
 
     def tearDown(self):
@@ -64,6 +67,34 @@ class MarketplaceSafetyTests(unittest.TestCase):
             ).lastrowid
             connection.commit()
         return listing_id
+
+    def trainer_image_data(self, width=1_200, height=800, image_format="PNG"):
+        image = Image.new("RGB", (width, height), (18, 104, 72))
+        output = BytesIO()
+        image.save(output, format=image_format)
+        mime_type = {
+            "JPEG": "image/jpeg",
+            "PNG": "image/png",
+            "WEBP": "image/webp",
+        }[image_format]
+        encoded = base64.b64encode(output.getvalue()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    def trainer_payload(self, **overrides):
+        payload = {
+            "name": "Eleven Zero Demo Coach",
+            "location": "Arlington, VA",
+            "format": "private",
+            "level": "beginner",
+            "rate": "$75/hr",
+            "email": "trainer@example.com",
+            "experience": "PPR-certified coach",
+            "availability": "Weekday evenings",
+            "bio": "Demo profile for platform testing and trainer flow review.",
+            "trainerImage": self.trainer_image_data(),
+        }
+        payload.update(overrides)
+        return payload
 
     def test_public_catalog_only_returns_approved_real_seller_listings(self):
         seller_id = self.create_user()
@@ -365,6 +396,355 @@ class MarketplaceSafetyTests(unittest.TestCase):
 
         self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
         self.assertIn("JPG, PNG, or WebP", captured["payload"]["error"])
+
+    def test_new_trainer_requires_exactly_one_landscape_image(self):
+        user_id = self.create_user("trainer-required@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-required@example.com"},
+            self.trainer_payload(trainerImage=None),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("landscape trainer photo", captured["payload"]["error"])
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-required@example.com"},
+            self.trainer_payload(trainerImage=[self.trainer_image_data()]),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("exactly one", captured["payload"]["error"])
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_count = connection.execute(
+                "SELECT COUNT(*) FROM trainers WHERE user_id = ?", (user_id,)
+            ).fetchone()[0]
+        self.assertEqual(trainer_count, 0)
+
+    def test_new_trainer_rejects_portrait_image(self):
+        user_id = self.create_user("trainer-portrait@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-portrait@example.com"},
+            self.trainer_payload(
+                trainerImage=self.trainer_image_data(width=600, height=900)
+            ),
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("wider than it is tall", captured["payload"]["error"])
+
+    def test_new_trainer_stores_normalized_image_without_base64_leak(self):
+        user_id = self.create_user("trainer-valid@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-valid@example.com"},
+            self.trainer_payload(),
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        item = captured["payload"]["item"]
+        self.assertTrue(item["imageUrl"].startswith("/api/trainers/"))
+        self.assertNotIn("image_data", item)
+        self.assertNotIn("data:image", json.dumps(captured["payload"]))
+        self.assertEqual(item["approval_status"], "pending")
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            row = connection.execute(
+                """
+                SELECT image_data, image_updated_at, approval_status
+                FROM trainers
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        self.assertTrue(row[0].startswith("data:image/jpeg;base64,"))
+        self.assertTrue(row[1])
+        self.assertEqual(row[2], "pending")
+
+        mime_type, normalized_payload = app.decode_trainer_image_data(row[0])
+        self.assertEqual(mime_type, "image/jpeg")
+        with Image.open(BytesIO(normalized_payload)) as normalized:
+            self.assertGreater(normalized.width, normalized.height)
+            self.assertNotIn("exif", normalized.info)
+
+    def test_account_can_create_only_one_trainer_profile(self):
+        user_id = self.create_user("trainer-single@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        handler = StubHandler()
+        user = {"id": user_id, "email": "trainer-single@example.com"}
+        app.ElevenZeroHandler.handle_create_trainer(
+            handler,
+            user,
+            self.trainer_payload(),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            handler,
+            user,
+            self.trainer_payload(name="Second Trainer Profile"),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertIn("already has a trainer profile", captured["payload"]["error"])
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_count = connection.execute(
+                "SELECT COUNT(*) FROM trainers WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()[0]
+        self.assertEqual(trainer_count, 1)
+
+    def test_json_body_rejects_oversized_request_before_reading(self):
+        captured = {}
+
+        class RejectRead(BytesIO):
+            def read(self, *_args, **_kwargs):
+                raise AssertionError("Oversized request body should not be read.")
+
+        class StubHandler:
+            headers = {"Content-Length": str(app.MAX_API_JSON_BODY_BYTES + 1)}
+            rfile = RejectRead(b"")
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        with self.assertRaises(ValueError):
+            app.ElevenZeroHandler.json_body(StubHandler())
+
+        self.assertEqual(
+            captured["status"],
+            app.HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        )
+        self.assertIn("too large", captured["payload"]["error"].lower())
+
+    def test_trainer_image_access_is_limited_until_approval(self):
+        owner_id = self.create_user("trainer-owner@example.com")
+        other_id = self.create_user("trainer-other@example.com")
+        image_data = app.normalize_trainer_landscape_image_data(
+            self.trainer_image_data()
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, image_data,
+                  image_updated_at, approval_status
+                ) VALUES (?, 'Demo Coach', 'Arlington, VA', 'private',
+                  'beginner', '$75/hr', 'trainer-owner@example.com',
+                  'Five years', 'Demo biography', 'Evenings', '2026-07-23',
+                  ?, '2026-07-23T12:00:00Z', 'pending')
+                """,
+                (owner_id, image_data),
+            ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+            def send_bytes(self, payload, content_type, status=200, **kwargs):
+                captured["bytes"] = payload
+                captured["content_type"] = content_type
+                captured["status"] = status
+                captured["cache_control"] = kwargs.get("cache_control")
+
+        handler = StubHandler()
+        app.ElevenZeroHandler.handle_trainer_image(handler, trainer_id, None)
+        self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+
+        app.ElevenZeroHandler.handle_trainer_image(
+            handler, trainer_id, {"id": other_id, "isAdmin": False}
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+
+        app.ElevenZeroHandler.handle_trainer_image(
+            handler, trainer_id, {"id": owner_id, "isAdmin": False}
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["content_type"], "image/jpeg")
+        self.assertTrue(captured["bytes"].startswith(b"\xff\xd8\xff"))
+        self.assertEqual(captured["cache_control"], "no-store")
+
+        app.ElevenZeroHandler.handle_trainer_image(
+            handler, trainer_id, {"id": 999, "isAdmin": True}
+        )
+        self.assertEqual(captured["status"], 200)
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE trainers SET approval_status = 'approved' WHERE id = ?",
+                (trainer_id,),
+            )
+            connection.commit()
+        app.ElevenZeroHandler.handle_trainer_image(handler, trainer_id, None)
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(
+            captured["cache_control"],
+            "public, max-age=86400, immutable",
+        )
+
+    def test_owner_image_replacement_returns_entire_profile_to_review(self):
+        owner_id = self.create_user("trainer-replace@example.com")
+        original_image = app.normalize_trainer_landscape_image_data(
+            self.trainer_image_data(width=1_000, height=700)
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, image_data,
+                  image_updated_at, approval_status, reviewed_at
+                ) VALUES (?, 'Approved Coach', 'Arlington, VA', 'private',
+                  'beginner', '$75/hr', 'trainer-replace@example.com',
+                  'Five years', 'Demo biography', 'Evenings', '2026-07-23',
+                  ?, '2026-07-23T12:00:00Z', 'approved',
+                  '2026-07-23T12:05:00Z')
+                """,
+                (owner_id, original_image),
+            ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_replace_trainer_image(
+            StubHandler(),
+            {"id": owner_id},
+            {
+                "id": trainer_id,
+                "trainerImage": self.trainer_image_data(width=1_400, height=900),
+            },
+        )
+
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["payload"]["item"]["approval_status"], "pending")
+        self.assertNotIn("data:image", json.dumps(captured["payload"]))
+        with sqlite3.connect(app.DB_PATH) as connection:
+            row = connection.execute(
+                """
+                SELECT approval_status, reviewed_at, image_data
+                FROM trainers
+                WHERE id = ?
+                """,
+                (trainer_id,),
+            ).fetchone()
+        self.assertEqual(row[0], "pending")
+        self.assertIsNone(row[1])
+        self.assertNotEqual(row[2], original_image)
+
+    def test_admin_cannot_approve_pending_image_less_trainer_but_legacy_live_survives(self):
+        owner_id = self.create_user("trainer-legacy@example.com")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, approval_status
+                ) VALUES (?, 'Legacy Coach', 'Arlington, VA', 'private',
+                  'beginner', '$75/hr', 'trainer-legacy@example.com',
+                  'Five years', 'Legacy biography', 'Evenings', '2026-07-23',
+                  'pending')
+                """,
+                (owner_id,),
+            ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        handler = StubHandler()
+        app.ElevenZeroHandler.handle_admin_trainer_review(
+            handler, {"id": trainer_id, "status": "approved"}
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertIn("landscape trainer photo", captured["payload"]["error"])
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE trainers SET approval_status = 'approved' WHERE id = ?",
+                (trainer_id,),
+            )
+            connection.commit()
+        app.ElevenZeroHandler.handle_admin_trainer_review(
+            handler, {"id": trainer_id, "status": "approved"}
+        )
+        self.assertEqual(captured["status"], 200)
+        public_items = app.ElevenZeroHandler.fetch_trainers(None)
+        self.assertEqual(public_items[0]["id"], trainer_id)
+        self.assertEqual(public_items[0]["imageUrl"], "")
+
+    def test_admin_dashboard_exposes_trainer_image_url_without_raw_image(self):
+        owner_id = self.create_user("trainer-admin-preview@example.com")
+        image_data = app.normalize_trainer_landscape_image_data(
+            self.trainer_image_data()
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, image_data,
+                  image_updated_at, approval_status
+                ) VALUES (?, 'Pending Coach', 'Arlington, VA', 'private',
+                  'beginner', '$75/hr', 'trainer-admin-preview@example.com',
+                  'Five years', 'Pending biography', 'Evenings', '2026-07-23',
+                  ?, '2026-07-23T12:00:00Z', 'pending')
+                """,
+                (owner_id, image_data),
+            ).lastrowid
+            connection.commit()
+
+        dashboard = app.ElevenZeroHandler.build_admin_dashboard(object())
+        item = next(
+            trainer for trainer in dashboard["trainers"] if trainer["id"] == trainer_id
+        )
+        self.assertTrue(
+            item["imageUrl"].startswith(f"/api/trainers/{trainer_id}/image?v=")
+        )
+        self.assertNotIn("image_data", item)
+        self.assertNotIn("data:image", json.dumps(item))
 
     def test_production_startup_quarantines_anonymous_content(self):
         anonymous_listing_id = self.create_listing(None, "Anonymous")

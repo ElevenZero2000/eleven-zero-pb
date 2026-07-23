@@ -8,7 +8,7 @@
       name="description"
       content="Find pickleball trainers, leave reviews, and join the Eleven Zero PB coaching network."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link rel="stylesheet" href="./styles.css?v=20260723trainerphoto1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="trainers-page" data-nav="trainers">
@@ -194,10 +194,52 @@
                 <h2>Help more players find you.</h2>
                 <p>
                   Add your location, lesson format, player level, rate, and contact
-                  information. You can update the profile from your account.
+                  information. We review every profile before it appears publicly.
                 </p>
               </div>
               <form class="seller-form" data-trainer-join-form>
+                <div class="trainer-photo-field">
+                  <div class="trainer-photo-field-head">
+                    <strong>Trainer photo</strong>
+                    <span>Required · landscape</span>
+                  </div>
+                  <button
+                    class="trainer-photo-dropzone"
+                    type="button"
+                    data-trainer-photo-dropzone
+                    aria-controls="trainer-photo-input"
+                    aria-describedby="trainer-photo-status"
+                  >
+                    <span class="trainer-photo-add-icon" aria-hidden="true">+</span>
+                    <span>
+                      <strong>Add photo</strong>
+                      <small>Tap or drag here</small>
+                    </span>
+                  </button>
+                  <input
+                    class="trainer-photo-native-input"
+                    id="trainer-photo-input"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    data-trainer-photo-input
+                    aria-label="Choose one landscape trainer photo"
+                  />
+                  <div class="trainer-photo-preview" data-trainer-photo-preview hidden>
+                    <img data-trainer-photo-preview-image alt="Trainer photo preview" />
+                    <div class="trainer-photo-preview-actions">
+                      <button type="button" data-trainer-photo-replace>Replace</button>
+                      <button type="button" data-trainer-photo-remove>Remove</button>
+                    </div>
+                  </div>
+                  <p
+                    class="trainer-photo-status"
+                    id="trainer-photo-status"
+                    data-trainer-photo-status
+                    aria-live="polite"
+                  >
+                    JPG, PNG or WebP · 10 MB max
+                  </p>
+                </div>
                 <label>
                   Trainer name
                   <input type="text" name="name" placeholder="Ex: Maria Alvarez" />
@@ -267,7 +309,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./trainers.js?v=20260722audit1"></script>
+    <script src="./trainers.js?v=20260723trainerphoto1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

@@ -1079,6 +1079,19 @@ function renderAdminTrainers(items) {
           </summary>
 
           <form class="admin-editor-form" data-admin-form="trainer" data-record-id="${escapeAttr(item.id)}">
+            ${
+              item.imageUrl
+                ? `<div class="admin-trainer-photo-preview">
+                    <img
+                      src="${escapeAttr(item.imageUrl)}"
+                      alt="Submitted trainer photo for ${escapeAttr(item.name)}"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span>Trainer photo submitted with this profile</span>
+                  </div>`
+                : ""
+            }
             <div class="admin-field-grid">
               <label>Name <input name="name" value="${escapeAttr(item.name)}" /></label>
               <label>Location <input name="location" value="${escapeAttr(item.location)}" /></label>

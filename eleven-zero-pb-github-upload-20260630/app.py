@@ -13,6 +13,7 @@ import smtplib
 import sqlite3
 import threading
 import time
+import warnings
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -20,10 +21,13 @@ from html import escape
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -311,6 +315,7 @@ US_STATE_REGION = {
     "PR": "territory",
 }
 ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
+MAX_API_JSON_BODY_BYTES = 10_000_000
 
 
 def cache_control_for_path(path: str) -> str:
@@ -1299,34 +1304,26 @@ def serialize_admin_court_row(row: sqlite3.Row | dict | None) -> dict | None:
 
 
 def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
-    if not row:
+    payload = serialize_trainer_row(row)
+    if not payload:
         return None
 
     approval_status = normalize_listing_approval_status(
         row_value(row, "approval_status", "approved"), default="approved"
     )
-    return {
-        "id": row["id"],
-        "user_id": row["user_id"],
-        "name": row["name"],
-        "location": row["location"],
-        "format": row["format"],
-        "level": row["level"],
-        "rate": row["rate"],
-        "email": row["email"],
-        "verified": bool(row["verified"]),
-        "experience": row["experience"],
-        "bio": row["bio"],
-        "availability": row["availability"],
-        "joined_at": row["joined_at"],
-        "rating": row["rating"],
-        "review_count": row["review_count"],
-        "owner_name": row["owner_name"],
-        "owner_email": row["owner_email"],
-        "approval_status": approval_status,
-        "approval_label": LISTING_APPROVAL_LABELS.get(approval_status, "Pending review"),
-        "reviewed_at": row_value(row, "reviewed_at"),
-    }
+    payload.update(
+        {
+            "user_id": row["user_id"],
+            "owner_name": row["owner_name"],
+            "owner_email": row["owner_email"],
+            "approval_status": approval_status,
+            "approval_label": LISTING_APPROVAL_LABELS.get(
+                approval_status, "Pending review"
+            ),
+            "reviewed_at": row_value(row, "reviewed_at"),
+        }
+    )
+    return payload
 
 
 def serialize_admin_trainer_review_row(row: sqlite3.Row | dict | None) -> dict | None:
@@ -4043,6 +4040,8 @@ def init_database() -> None:
               joined_at TEXT NOT NULL,
               rating REAL NOT NULL DEFAULT 0,
               review_count INTEGER NOT NULL DEFAULT 0,
+              image_data TEXT NOT NULL DEFAULT '',
+              image_updated_at TEXT,
               approval_status TEXT NOT NULL DEFAULT 'approved',
               reviewed_at TEXT
             );
@@ -4233,6 +4232,8 @@ def init_database() -> None:
         add_column_if_missing(connection, "listings", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "trainers", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "trainers", "reviewed_at", "TEXT")
+        add_column_if_missing(connection, "trainers", "image_data", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "trainers", "image_updated_at", "TEXT")
         add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -4841,6 +4842,17 @@ def row_to_dict(row: sqlite3.Row) -> dict:
 MAX_LISTING_IMAGE_DATA_URL_LENGTH = 2_000_000
 PROFILE_IMAGE_MAX_BYTES = 750_000
 PROFILE_IMAGE_MAX_DATA_URL_LENGTH = 1_100_000
+TRAINER_IMAGE_MAX_INPUT_BYTES = 3_000_000
+TRAINER_IMAGE_MAX_DATA_URL_LENGTH = 4_100_000
+TRAINER_IMAGE_MAX_OUTPUT_BYTES = 1_500_000
+TRAINER_IMAGE_MAX_PIXELS = 20_000_000
+TRAINER_IMAGE_MAX_WIDTH = 1_600
+TRAINER_IMAGE_MAX_HEIGHT = 1_200
+
+# Pillow checks this before allocating decoded pixel buffers. Treat its warning
+# as an error below so a small compressed upload cannot expand into an
+# unreasonable amount of memory.
+Image.MAX_IMAGE_PIXELS = TRAINER_IMAGE_MAX_PIXELS
 
 
 def decode_profile_image_data(value: str) -> tuple[str, bytes]:
@@ -4887,6 +4899,168 @@ def normalize_profile_image_data(value: str) -> str:
     mime_type, payload = decode_profile_image_data(value)
     encoded = base64.b64encode(payload).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def decode_trainer_image_data(value) -> tuple[str, bytes]:
+    if not isinstance(value, str):
+        raise ValueError("Add exactly one landscape trainer photo.")
+
+    image = value.strip()
+    if not image:
+        raise ValueError("Add one landscape trainer photo.")
+    if len(image) > TRAINER_IMAGE_MAX_DATA_URL_LENGTH:
+        raise ValueError("Trainer photo must be smaller than 3 MB.")
+
+    match = re.fullmatch(
+        r"data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)",
+        image,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Choose one JPG, PNG, or WebP trainer photo.")
+
+    mime_type = match.group(1).lower()
+    try:
+        payload = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("That trainer photo could not be read.") from error
+
+    if not payload or len(payload) > TRAINER_IMAGE_MAX_INPUT_BYTES:
+        raise ValueError("Trainer photo must be smaller than 3 MB.")
+
+    has_valid_signature = (
+        (mime_type == "image/jpeg" and payload.startswith(b"\xff\xd8\xff"))
+        or (mime_type == "image/png" and payload.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (
+            mime_type == "image/webp"
+            and len(payload) >= 12
+            and payload[:4] == b"RIFF"
+            and payload[8:12] == b"WEBP"
+        )
+    )
+    if not has_valid_signature:
+        raise ValueError("That file is not a valid JPG, PNG, or WebP image.")
+
+    return mime_type, payload
+
+
+def normalize_trainer_landscape_image_data(value) -> str:
+    """Validate, orient, resize, and strip metadata from one trainer image."""
+    mime_type, payload = decode_trainer_image_data(value)
+    expected_format = {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/webp": "WEBP",
+    }[mime_type]
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(payload)) as uploaded:
+                if str(uploaded.format or "").upper() != expected_format:
+                    raise ValueError("The trainer photo type does not match the uploaded file.")
+
+                oriented = ImageOps.exif_transpose(uploaded)
+                oriented.load()
+                width, height = oriented.size
+                if width <= height:
+                    raise ValueError("Use a landscape trainer photo that is wider than it is tall.")
+                if width * height > TRAINER_IMAGE_MAX_PIXELS:
+                    raise ValueError("Trainer photo dimensions are too large.")
+
+                if oriented.mode in {"RGBA", "LA"} or "transparency" in oriented.info:
+                    rgba = oriented.convert("RGBA")
+                    normalized = Image.new("RGB", rgba.size, "white")
+                    normalized.paste(rgba, mask=rgba.getchannel("A"))
+                else:
+                    normalized = oriented.convert("RGB")
+
+                normalized.thumbnail(
+                    (TRAINER_IMAGE_MAX_WIDTH, TRAINER_IMAGE_MAX_HEIGHT),
+                    Image.Resampling.LANCZOS,
+                )
+
+                output = BytesIO()
+                normalized.save(output, format="JPEG", quality=86, optimize=True)
+                normalized_payload = output.getvalue()
+                if len(normalized_payload) > TRAINER_IMAGE_MAX_OUTPUT_BYTES:
+                    output = BytesIO()
+                    normalized.save(output, format="JPEG", quality=76, optimize=True)
+                    normalized_payload = output.getvalue()
+    except ValueError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+        OSError,
+    ) as error:
+        raise ValueError("That trainer photo could not be safely processed.") from error
+
+    if not normalized_payload or len(normalized_payload) > TRAINER_IMAGE_MAX_OUTPUT_BYTES:
+        raise ValueError("Trainer photo is still too large after processing.")
+
+    encoded = base64.b64encode(normalized_payload).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def trainer_image_url(row: sqlite3.Row | dict | None) -> str:
+    trainer_id = int(row_value(row, "id", 0) or 0)
+    image_present = bool(row_value(row, "image_present", 0)) or bool(
+        str(row_value(row, "image_data", "") or "").strip()
+    )
+    if trainer_id <= 0 or not image_present:
+        return ""
+
+    version = str(
+        row_value(row, "image_updated_at", "")
+        or row_value(row, "joined_at", "")
+        or "current"
+    )
+    return f"/api/trainers/{trainer_id}/image?v={quote(version, safe='')}"
+
+
+def serialize_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "location": row["location"],
+        "format": row["format"],
+        "level": row["level"],
+        "rate": row["rate"],
+        "email": row["email"],
+        "verified": bool(row["verified"]),
+        "experience": row["experience"],
+        "bio": row["bio"],
+        "availability": row["availability"],
+        "joined_at": row["joined_at"],
+        "rating": row["rating"],
+        "review_count": row["review_count"],
+        "imageUrl": trainer_image_url(row),
+    }
+
+
+def serialize_owner_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
+    payload = serialize_trainer_row(row)
+    if not payload:
+        return None
+
+    approval_status = normalize_listing_approval_status(
+        row_value(row, "approval_status", "pending"), default="pending"
+    )
+    payload.update(
+        {
+            "approval_status": approval_status,
+            "approval_label": LISTING_APPROVAL_LABELS.get(
+                approval_status, "Pending review"
+            ),
+            "reviewed_at": row_value(row, "reviewed_at"),
+        }
+    )
+    return payload
 
 
 def normalize_listing_image_payload(raw_images) -> list[str]:
@@ -5147,7 +5321,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         path = urlparse(self.path).path
-        self.send_header("Cache-Control", cache_control_for_path(path))
+        cache_control = getattr(self, "_cache_control_override", None)
+        self.send_header("Cache-Control", cache_control or cache_control_for_path(path))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "DENY")
@@ -5159,7 +5334,29 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def json_body(self) -> dict:
-        content_length = int(self.headers.get("Content-Length", "0"))
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            self.send_json(
+                {"error": "Invalid Content-Length header."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            raise ValueError("Invalid Content-Length")
+
+        if content_length < 0:
+            self.send_json(
+                {"error": "Invalid Content-Length header."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            raise ValueError("Invalid Content-Length")
+
+        if content_length > MAX_API_JSON_BODY_BYTES:
+            self.send_json(
+                {"error": "That request is too large. Use smaller images and try again."},
+                status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            raise ValueError("Request body too large")
+
         raw = self.rfile.read(content_length) if content_length else b"{}"
 
         try:
@@ -5180,12 +5377,21 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_bytes(self, body: bytes, content_type: str, status: int = HTTPStatus.OK):
+    def send_bytes(
+        self,
+        body: bytes,
+        content_type: str,
+        status: int = HTTPStatus.OK,
+        cache_control: str | None = None,
+    ):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if cache_control:
+            self._cache_control_override = cache_control
         self.end_headers()
         self.wfile.write(body)
+        self._cache_control_override = None
 
     def parse_cookies(self) -> SimpleCookie:
         cookie = SimpleCookie()
@@ -5451,6 +5657,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        trainer_image_match = re.fullmatch(r"/api/trainers/(\d+)/image", parsed.path)
+        if trainer_image_match:
+            self.handle_trainer_image(
+                int(trainer_image_match.group(1)), self.current_user()
+            )
+            return
+
         if parsed.path.startswith("/api/listings/"):
             listing_id = parsed.path.rsplit("/", 1)[-1].strip()
             if not listing_id.isdigit():
@@ -5625,6 +5838,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not self.require_verified_user(user):
                 return
             self.handle_create_trainer(user, body)
+            return
+
+        if parsed.path == "/api/account/trainers/image":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_replace_trainer_image(user, body)
             return
 
         if parsed.path == "/api/courts-directory":
@@ -6256,6 +6476,52 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         self.send_bytes(payload, match.group(1))
 
+    def handle_trainer_image(self, trainer_id: int, viewer: dict | None):
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, approval_status, image_data
+                FROM trainers
+                WHERE id = ?
+                """,
+                (trainer_id,),
+            ).fetchone()
+
+        if not row:
+            self.send_json(
+                {"error": "That trainer photo could not be found."},
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
+
+        viewer_id = int(viewer.get("id") or 0) if viewer else 0
+        viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
+        owner_id = int(row["user_id"] or 0)
+        is_public = row["approval_status"] == "approved" and owner_id > 0
+        if not is_public and not viewer_is_admin and viewer_id != owner_id:
+            self.send_json(
+                {"error": "That trainer photo could not be found."},
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
+
+        try:
+            mime_type, payload = decode_trainer_image_data(row["image_data"])
+        except ValueError:
+            self.send_json(
+                {"error": "That trainer photo could not be found."},
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
+
+        self.send_bytes(
+            payload,
+            mime_type,
+            cache_control=(
+                "public, max-age=86400, immutable" if is_public else "no-store"
+            ),
+        )
+
     def handle_profile_image(self, user: dict):
         self.handle_stored_profile_image(int(user["id"]), "profile_image_data")
 
@@ -6376,6 +6642,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   joined_at,
                   rating,
                   review_count,
+                  image_updated_at,
+                  CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   approval_status,
                   reviewed_at
                 FROM trainers
@@ -6385,7 +6653,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """
             ).fetchall()
 
-        return [row_to_dict(row) for row in rows]
+        return [serialize_trainer_row(row) for row in rows]
 
     def fetch_directory_courts(self) -> list[dict]:
         with closing(connect_db()) as connection:
@@ -7831,7 +8099,25 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchall()
             recent_trainers = connection.execute(
                 """
-                SELECT name, level, format, rate, verified, joined_at
+                SELECT
+                  id,
+                  name,
+                  location,
+                  format,
+                  level,
+                  rate,
+                  email,
+                  verified,
+                  experience,
+                  bio,
+                  availability,
+                  joined_at,
+                  rating,
+                  review_count,
+                  image_updated_at,
+                  CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
+                  approval_status,
+                  reviewed_at
                 FROM trainers
                 WHERE user_id = ?
                 ORDER BY joined_at DESC
@@ -7953,7 +8239,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "reviews": review_count,
             },
             "recentListings": [row_to_dict(row) for row in recent_listings],
-            "recentTrainers": [row_to_dict(row) for row in recent_trainers],
+            "recentTrainers": [
+                serialize_owner_trainer_row(row) for row in recent_trainers
+            ],
             "recentSales": [row_to_dict(row) for row in recent_sales],
             "recentPurchases": [row_to_dict(row) for row in recent_purchases],
         }
@@ -8293,6 +8581,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   trainers.joined_at,
                   trainers.rating,
                   trainers.review_count,
+                  trainers.image_updated_at,
+                  CASE WHEN length(trim(trainers.image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   trainers.approval_status,
                   trainers.reviewed_at,
                   users.name AS owner_name,
@@ -9047,9 +9337,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         reviewed_at = utc_now() if requested_status in {"approved", "rejected"} else None
         with closing(connect_db()) as connection:
-            row = connection.execute("SELECT name FROM trainers WHERE id = ?", (trainer_id,)).fetchone()
+            row = connection.execute(
+                """
+                SELECT name, approval_status, image_data
+                FROM trainers
+                WHERE id = ?
+                """,
+                (trainer_id,),
+            ).fetchone()
             if not row:
                 self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+            if (
+                requested_status == "approved"
+                and row["approval_status"] != "approved"
+                and not str(row["image_data"] or "").strip()
+            ):
+                self.send_json(
+                    {
+                        "error": (
+                            "Add one approved landscape trainer photo before "
+                            "publishing this profile."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
                 return
             connection.execute(
                 "UPDATE trainers SET approval_status = ?, reviewed_at = ? WHERE id = ?",
@@ -9711,6 +10023,22 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Trainer level is not valid."}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        client_key = f"trainer-create:{int(user['id'])}"
+        if not rate_limit_allows(client_key, 5, 3600):
+            self.send_json(
+                {"error": "Too many trainer profile attempts. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        try:
+            image_data = normalize_trainer_landscape_image_data(
+                body.get("trainerImage")
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if not experience:
             experience = "New trainer profile · Account verified"
 
@@ -9724,13 +10052,32 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
 
         with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT id FROM trainers WHERE user_id = ? LIMIT 1",
+                (int(user["id"]),),
+            ).fetchone()
+            if existing:
+                connection.rollback()
+                self.send_json(
+                    {
+                        "error": (
+                            "This account already has a trainer profile. "
+                            "Manage that profile from Account."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            image_updated_at = utc_now()
             cursor = connection.execute(
                 """
                 INSERT INTO trainers (
                   user_id, name, location, format, level, rate, email,
                   verified, experience, bio, availability, joined_at, rating, review_count,
-                  approval_status, reviewed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, 'pending', NULL)
+                  image_data, image_updated_at, approval_status, reviewed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, ?, ?, 'pending', NULL)
                 """,
                 (
                     user["id"],
@@ -9744,6 +10091,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     bio,
                     availability,
                     datetime.now().date().isoformat(),
+                    image_data,
+                    image_updated_at,
                 ),
             )
             connection.commit()
@@ -9755,10 +10104,77 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_json(
             {
                 "ok": True,
-                "item": row_to_dict(row),
+                "item": serialize_owner_trainer_row(row),
                 "message": "Trainer profile submitted for Eleven Zero PB review.",
             },
             status=HTTPStatus.CREATED,
+        )
+
+    def handle_replace_trainer_image(self, user: dict, body: dict):
+        trainer_id = int(body.get("id") or 0)
+        if trainer_id <= 0:
+            self.send_json(
+                {"error": "Choose a valid trainer profile."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        client_key = f"trainer-image:{int(user['id'])}"
+        if not rate_limit_allows(client_key, 10, 3600):
+            self.send_json(
+                {"error": "Too many trainer photo changes. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        try:
+            image_data = normalize_trainer_landscape_image_data(
+                body.get("trainerImage")
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                "SELECT id, user_id FROM trainers WHERE id = ?",
+                (trainer_id,),
+            ).fetchone()
+            if not row or int(row["user_id"] or 0) != int(user["id"]):
+                self.send_json(
+                    {"error": "That trainer profile could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+
+            image_updated_at = utc_now()
+            connection.execute(
+                """
+                UPDATE trainers
+                SET
+                  image_data = ?,
+                  image_updated_at = ?,
+                  approval_status = 'pending',
+                  reviewed_at = NULL
+                WHERE id = ?
+                """,
+                (image_data, image_updated_at, trainer_id),
+            )
+            connection.commit()
+            updated = connection.execute(
+                "SELECT * FROM trainers WHERE id = ?",
+                (trainer_id,),
+            ).fetchone()
+
+        self.send_json(
+            {
+                "ok": True,
+                "item": serialize_owner_trainer_row(updated),
+                "message": (
+                    "Trainer photo updated. The full profile is back in review "
+                    "before it appears publicly."
+                ),
+            }
         )
 
     def handle_create_directory_court(self, user: dict, body: dict):

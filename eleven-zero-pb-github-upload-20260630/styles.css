@@ -11995,3 +11995,444 @@ body.account-admin-mode {
     padding: 13px;
   }
 }
+
+/* Trainer profile photos and directory cards */
+.trainers-page .trainer-photo-field {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+}
+
+.trainers-page .trainer-photo-field-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.trainers-page .trainer-photo-field-head strong {
+  color: var(--forest);
+  font-size: 0.92rem;
+}
+
+.trainers-page .trainer-photo-field-head span {
+  color: rgba(18, 18, 18, 0.55);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.trainers-page .trainer-photo-dropzone {
+  display: flex;
+  width: 100%;
+  min-height: 154px;
+  padding: 20px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1.5px dashed rgba(3, 45, 23, 0.26);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 86% 12%, rgba(8, 233, 90, 0.13), transparent 25%),
+    rgba(255, 255, 255, 0.76);
+  color: var(--forest);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.trainers-page .trainer-photo-dropzone[hidden],
+.trainers-page .trainer-photo-preview[hidden] {
+  display: none;
+}
+
+.trainers-page .trainer-photo-dropzone:hover,
+.trainers-page .trainer-photo-dropzone.is-dragging {
+  border-color: var(--acid);
+  background: rgba(8, 233, 90, 0.1);
+}
+
+.trainers-page .trainer-photo-dropzone.is-dragging {
+  transform: scale(0.995);
+}
+
+.trainers-page .trainer-photo-dropzone:focus-visible,
+.trainers-page .trainer-photo-preview-actions button:focus-visible {
+  outline: 3px solid rgba(8, 233, 90, 0.42);
+  outline-offset: 3px;
+}
+
+.trainers-page .trainer-photo-add-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--forest);
+  color: #fff;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.trainers-page .trainer-photo-dropzone > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.trainers-page .trainer-photo-dropzone strong {
+  font-size: 0.98rem;
+}
+
+.trainers-page .trainer-photo-dropzone small {
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.78rem;
+}
+
+.trainers-page .trainer-photo-native-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.trainers-page .trainer-photo-preview {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  border: 1px solid rgba(3, 45, 23, 0.12);
+  border-radius: 20px;
+  background: #dfeae2;
+}
+
+.trainers-page .trainer-photo-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trainers-page .trainer-photo-preview::after {
+  content: "";
+  position: absolute;
+  inset: 52% 0 0;
+  background: linear-gradient(180deg, transparent, rgba(3, 25, 13, 0.68));
+  pointer-events: none;
+}
+
+.trainers-page .trainer-photo-preview-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+}
+
+.trainers-page .trainer-photo-preview-actions button {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--forest);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.trainers-page .trainer-photo-status {
+  min-height: 1.2em;
+  margin: 0;
+  color: rgba(18, 18, 18, 0.56);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.trainers-page .trainer-photo-status.is-success {
+  color: #176936;
+}
+
+.trainers-page .trainer-photo-status.is-warning {
+  color: #7d5600;
+}
+
+.trainers-page .trainer-photo-status.is-error {
+  color: #9d2c1c;
+}
+
+.trainers-page .trainer-profile-card {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 28px;
+  background: #fff;
+  box-shadow: 0 16px 38px rgba(3, 26, 14, 0.08);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.trainers-page .trainer-profile-media {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  place-items: center;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 70% 18%, rgba(8, 233, 90, 0.48), transparent 28%),
+    linear-gradient(145deg, #0b4527, #70d996);
+}
+
+.trainers-page .trainer-profile-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(3, 25, 13, 0.05) 36%, rgba(3, 25, 13, 0.62) 100%);
+  pointer-events: none;
+}
+
+.trainers-page .trainer-profile-photo {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  transition: transform 240ms ease;
+}
+
+.trainers-page .trainer-profile-photo-fallback {
+  color: #fff;
+  font-family: var(--display);
+  font-size: clamp(3.6rem, 8vw, 5.5rem);
+  line-height: 1;
+}
+
+.trainers-page .trainer-profile-media-badges {
+  position: absolute;
+  inset: 16px;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.trainers-page .trainer-profile-rate,
+.trainers-page .trainer-profile-verified {
+  display: inline-flex;
+  min-height: 36px;
+  padding: 0 12px;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+  color: var(--forest);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.trainers-page .trainer-profile-body {
+  display: flex;
+  flex: 1;
+  padding: 22px;
+  flex-direction: column;
+}
+
+.trainers-page .trainer-profile-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.trainers-page .trainer-profile-heading h3 {
+  margin: 0;
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: 2rem;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-profile-heading p {
+  margin: 7px 0 0;
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 0.9rem;
+}
+
+.trainers-page .trainer-profile-heading .trainer-rating-pill {
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 0.78rem;
+}
+
+.trainers-page .trainer-profile-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 17px;
+}
+
+.trainers-page .trainer-profile-facts span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(3, 45, 23, 0.06);
+  color: rgba(3, 45, 23, 0.78);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.trainers-page .trainer-profile-bio {
+  margin: 18px 0 0;
+  color: rgba(18, 18, 18, 0.72);
+  line-height: 1.58;
+}
+
+.trainers-page .trainer-profile-details {
+  display: grid;
+  gap: 11px;
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+  border-top: 1px solid rgba(3, 45, 23, 0.09);
+}
+
+.trainers-page .trainer-profile-details div {
+  display: grid;
+  gap: 3px;
+}
+
+.trainers-page .trainer-profile-details dt {
+  color: rgba(18, 18, 18, 0.5);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-profile-details dd {
+  margin: 0;
+  color: var(--forest);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.trainers-page .trainer-profile-contact {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 20px;
+}
+
+.admin-trainer-photo-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 14px;
+  align-items: center;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 18px;
+  background: rgba(3, 45, 23, 0.035);
+}
+
+.admin-trainer-photo-preview img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 13px;
+}
+
+.admin-trainer-photo-preview span {
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .trainers-page .trainer-profile-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 22px 46px rgba(3, 26, 14, 0.12);
+  }
+
+  .trainers-page .trainer-profile-card:hover .trainer-profile-photo {
+    transform: scale(1.025);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trainers-page .trainer-photo-dropzone,
+  .trainers-page .trainer-profile-card,
+  .trainers-page .trainer-profile-photo {
+    transition: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .trainers-page .trainer-photo-dropzone {
+    min-height: 132px;
+  }
+
+  .trainers-page .trainer-photo-preview,
+  .trainers-page .trainer-profile-media {
+    aspect-ratio: 3 / 2;
+  }
+
+  .trainers-page .trainer-profile-card {
+    border-radius: 23px;
+  }
+
+  .trainers-page .trainer-profile-body {
+    padding: 18px;
+  }
+
+  .trainers-page .trainer-profile-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .trainers-page .trainer-profile-heading .trainer-rating-pill {
+    width: fit-content;
+  }
+
+  .trainers-page .trainer-profile-contact {
+    min-height: 48px;
+  }
+
+  .admin-trainer-photo-preview {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .trainers-page .trainer-photo-field-head {
+    display: grid;
+    gap: 2px;
+  }
+
+  .trainers-page .trainer-profile-media-badges {
+    inset: 12px;
+  }
+
+  .trainers-page .trainer-profile-body {
+    padding: 16px;
+  }
+
+  .trainers-page .trainer-profile-heading h3 {
+    font-size: 1.82rem;
+  }
+}
