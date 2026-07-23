@@ -38,7 +38,11 @@ For your first public version, the cleanest path is:
 - `GA_MEASUREMENT_ID=G-SH18CJ4XZD`
 - `STRIPE_SECRET_KEY=...`
 - `STRIPE_PUBLISHABLE_KEY=pk_live_...`
+- `STRIPE_WEBHOOK_SECRET=whsec_...`
+- `SHIPPO_API_KEY=shippo_live_...`
 - `PLATFORM_FEE_PERCENT=8.5`
+- `PAYOUT_PROTECTION_HOURS=24`
+- `PAYOUT_RELEASE_CHECK_SECONDS=300`
 
 ## Your real domain
 
@@ -59,17 +63,21 @@ set to `https://11zeropb.com`.
 - courts page
 - interactive court map
 - court condition, crowd, and player-level reporting
-- seller Stripe onboarding foundation
-- checkout foundation
+- seller Stripe onboarding
+- Stripe Checkout with separate charges and delayed seller transfers
+- prepaid Shippo labels and carrier tracking
+- a 24-hour buyer issue window after carrier-confirmed delivery
 - privacy page
 - terms page
 
-## What still needs your real business info
+## Required live-payment checks
 
-- your real support email
-- your live domain
-- your live Stripe keys
-- your live Google Analytics ID
+- Shippo has an active billing method for prepaid labels
+- Stripe sends Checkout completion, refund, and dispute events to the production webhook
+- the Shippo `track_updated` webhook is active for the production site
+- a seller has completed Stripe Connect onboarding
+- a test order produces one label, one tracking number, and no immediate seller transfer
+- a delivered test order remains protected for 24 hours, then creates only one seller transfer
 
 ## What I recommend next
 
@@ -97,11 +105,11 @@ Then we can improve the next layer:
 - `LAUNCH-GUIDE.md` for the fuller explanation
 - `privacy.html` and `terms.html` for public trust pages
 
-## Last missing item before live payments
+## Money movement
 
-The only Stripe item still missing from the production setup is:
-
-- `STRIPE_SECRET_KEY`
-
-Without that key, the site can still go online, but real buyer checkout and seller payout
-activation will stay off.
+For new orders, the platform receives the buyer charge. The seller does not receive an
+immediate destination charge. After Shippo reports delivery and the 24-hour protection
+window ends without an open buyer issue, the app transfers the paddle price minus the
+8.5% marketplace commission to the seller's connected Stripe balance. Shipping remains
+on the platform to pay for the prepaid label. Stripe then pays the connected balance to
+the seller's bank on that account's payout schedule.

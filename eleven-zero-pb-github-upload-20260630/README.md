@@ -10,6 +10,7 @@ What is already working:
 - moderated paddle listings with real seller photos
 - a searchable marketplace, product pages, and a dedicated cart
 - Stripe Connect seller onboarding and checkout
+- delivery-protected seller proceeds with a 24-hour buyer issue window
 - branded buyer confirmation email
 - owner moderation, notifications, and sales reporting
 - moderated trainer profiles, tenure, ratings, and reviews
@@ -54,10 +55,17 @@ Important files:
 
 Important note:
 
-Managed shipping and automated label purchasing are intentionally paused until the
-Shippo billing method and the complete fulfillment workflow are ready. Do not describe
-that portion as fully launched yet. Legal pages are product-ready drafts and should be
-reviewed by qualified counsel before a large public launch.
+For new purchases, the buyer pays the paddle and prepaid shipping at Stripe Checkout.
+The seller's proceeds stay on the Eleven Zero platform until Shippo reports the package
+as delivered. The buyer then has 24 hours to report a problem. If no issue is open, the
+app creates one idempotent Stripe transfer to the seller's connected Stripe balance;
+the seller's bank arrival follows their Stripe payout schedule. Older destination-charge
+orders are marked as legacy and are never transferred a second time.
+
+Live label purchasing still requires an active Shippo billing method. If Shippo cannot
+create a label or confirm delivery, the seller payout stays on hold for owner review.
+Legal pages are product-ready drafts and should be reviewed by qualified counsel before
+a large public launch.
 
 Deployment note:
 

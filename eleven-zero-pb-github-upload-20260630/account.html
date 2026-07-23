@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722profile3" />
+    <link rel="stylesheet" href="./styles.css?v=20260723payout1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -127,16 +127,30 @@
               </article>
             </div>
 
+            <details class="dashboard-card dashboard-card-wide account-sales-details account-purchases-details" open data-customer-account-section>
+              <summary>
+                <div>
+                  <p class="eyebrow">Purchases</p>
+                  <h3>Your orders</h3>
+                </div>
+                <span class="dashboard-pill">Buyer protection</span>
+              </summary>
+              <p class="dashboard-copy">
+                Follow delivery here. Report a problem before seller proceeds are released.
+              </p>
+              <div class="list-stack" data-account-purchases></div>
+            </details>
+
             <details class="dashboard-card dashboard-card-wide account-sales-details" data-customer-account-section>
               <summary>
                 <div>
                   <p class="eyebrow">Sales &amp; shipping</p>
-                  <h3>Orders and future shipping tools</h3>
+                  <h3>Your sold paddles</h3>
                 </div>
                 <span class="dashboard-pill">Seller tools</span>
               </summary>
               <p class="dashboard-copy">
-                Shipping automation is being finalized. Your order history stays here while label tools remain paused.
+                Print the prepaid label and track when proceeds are released to your Stripe balance.
               </p>
               <div class="list-stack" data-account-sales></div>
             </details>
@@ -412,7 +426,7 @@
     </dialog>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./account.js?v=20260723checkout1"></script>
+    <script src="./account.js?v=20260723payout1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>

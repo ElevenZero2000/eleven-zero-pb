@@ -27,12 +27,20 @@ services:
         value: G-SH18CJ4XZD
       - key: STRIPE_SECRET_KEY
         sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: STRIPE_PUBLISHABLE_KEY
         value: pk_live_51RgmD8KPW9C7Lp8KHBWIwesr6O2oJkwNtvML9yJJHUGA4IRVuErMDgb0o4Zuwe4FVuuYlgqYrehTqpUU6ORKLQYj00M0lqTfrp
       - key: STRIPE_COUNTRY
         value: US
       - key: PLATFORM_FEE_PERCENT
         value: 8.5
+      - key: SHIPPO_API_KEY
+        sync: false
+      - key: PAYOUT_PROTECTION_HOURS
+        value: 24
+      - key: PAYOUT_RELEASE_CHECK_SECONDS
+        value: 300
     disk:
       name: eleven-zero-pb-data
       mountPath: /var/data

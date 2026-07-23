@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import unittest
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import app
@@ -13,6 +14,8 @@ class ManagedShippingTests(unittest.TestCase):
         self.original_db_path = app.DB_PATH
         self.original_shippo_key = app.SHIPPO_API_KEY
         self.original_shippo_request = app.shippo_request
+        self.original_shippo_api_request = app.shippo_api_request
+        self.original_payout_protection_hours = app.PAYOUT_PROTECTION_HOURS
         self.original_starter_listings = app.ENABLE_STARTER_LISTINGS
         self.original_demo_data = app.ENABLE_DEMO_DATA
         self.original_smtp = app.smtplib.SMTP
@@ -24,6 +27,7 @@ class ManagedShippingTests(unittest.TestCase):
         self.original_stripe_request = app.stripe_request
         app.DB_PATH = Path(self.temp_dir.name) / "shipping-test.db"
         app.SHIPPO_API_KEY = "shippo_test_key"
+        app.PAYOUT_PROTECTION_HOURS = 24
         app.ENABLE_STARTER_LISTINGS = False
         app.ENABLE_DEMO_DATA = False
         app.init_database()
@@ -32,6 +36,8 @@ class ManagedShippingTests(unittest.TestCase):
         app.DB_PATH = self.original_db_path
         app.SHIPPO_API_KEY = self.original_shippo_key
         app.shippo_request = self.original_shippo_request
+        app.shippo_api_request = self.original_shippo_api_request
+        app.PAYOUT_PROTECTION_HOURS = self.original_payout_protection_hours
         app.ENABLE_STARTER_LISTINGS = self.original_starter_listings
         app.ENABLE_DEMO_DATA = self.original_demo_data
         app.smtplib.SMTP = self.original_smtp
@@ -84,6 +90,76 @@ class ManagedShippingTests(unittest.TestCase):
             )
             connection.commit()
         return listing_id
+
+    def create_delivery_gated_order(
+        self,
+        session_id="cs_test_delivery_gated",
+        *,
+        release_at="2020-01-01T00:00:00Z",
+        buyer_issue_status="none",
+    ):
+        email_tag = "".join(character for character in session_id if character.isalnum())
+        with sqlite3.connect(app.DB_PATH) as connection:
+            seller_id = connection.execute(
+                """
+                INSERT INTO users (
+                  name, email, password_salt, password_hash, created_at,
+                  stripe_account_id
+                ) VALUES ('Seller', ?, 'salt', 'hash',
+                  '2026-07-23T00:00:00Z', 'acct_ready')
+                """,
+                (f"payout-seller+{email_tag}@example.com",),
+            ).lastrowid
+            buyer_id = connection.execute(
+                """
+                INSERT INTO users (name, email, password_salt, password_hash, created_at)
+                VALUES ('Buyer', ?, 'salt', 'hash',
+                  '2026-07-23T00:00:00Z')
+                """,
+                (f"payout-buyer+{email_tag}@example.com",),
+            ).lastrowid
+            listing_id = connection.execute(
+                """
+                INSERT INTO listings (
+                  user_id, brand, model, category, condition, price_usd, location,
+                  notes, approval_status, sale_status, created_at
+                ) VALUES (?, 'JOOLA', 'Perseus', 'power', 'Used - good', 150,
+                  'Miami, FL', 'Clean paddle', 'approved', 'pending',
+                  '2026-07-23T00:00:00Z')
+                """,
+                (seller_id,),
+            ).lastrowid
+            order_id = connection.execute(
+                """
+                INSERT INTO orders (
+                  listing_id, buyer_user_id, seller_user_id,
+                  stripe_checkout_session_id, stripe_payment_intent_id,
+                  amount_total_cents, shipping_amount_cents, platform_fee_cents,
+                  stripe_application_fee_cents, seller_proceeds_cents,
+                  payment_flow, stripe_destination_account_id,
+                  stripe_transfer_group, stripe_charge_id, payout_status,
+                  payout_release_at, tracking_status, shippo_transaction_id,
+                  tracking_number, shipping_carrier, shipping_status,
+                  buyer_issue_status, stripe_payment_status,
+                  stripe_session_status, status, created_at
+                ) VALUES (?, ?, ?, ?, 'pi_test_delivery', 16000, 1000, 1275,
+                  0, 13725, 'separate_charge_transfer', 'acct_ready', ?,
+                  'ch_test_delivery', 'release_scheduled', ?, 'DELIVERED',
+                  'transaction_delivery', 'TRACK123', 'USPS', 'delivered', ?,
+                  'paid', 'complete', 'paid', '2026-07-23T00:00:00Z')
+                """,
+                (
+                    listing_id,
+                    buyer_id,
+                    seller_id,
+                    session_id,
+                    f"EZPB_{listing_id}_{session_id}",
+                    release_at,
+                    buyer_issue_status,
+                ),
+            ).lastrowid
+            connection.commit()
+        return order_id
 
     def test_live_quote_preserves_rate_for_label_purchase(self):
         captured = {}
@@ -760,9 +836,19 @@ class ManagedShippingTests(unittest.TestCase):
             captured["shippo"]["address_to"]["email"],
             "checkout-buyer@example.com",
         )
-        self.assertEqual(
-            stripe_payload["payment_intent_data[application_fee_amount]"],
-            "2275",
+        self.assertEqual(stripe_payload["payment_method_types[0]"], "card")
+        self.assertNotIn(
+            "payment_intent_data[application_fee_amount]",
+            stripe_payload,
+        )
+        self.assertNotIn(
+            "payment_intent_data[transfer_data][destination]",
+            stripe_payload,
+        )
+        self.assertTrue(
+            stripe_payload["payment_intent_data[transfer_group]"].startswith(
+                f"EZPB_{listing_id}_"
+            )
         )
 
         with sqlite3.connect(app.DB_PATH) as connection:
@@ -776,14 +862,401 @@ class ManagedShippingTests(unittest.TestCase):
             order = connection.execute(
                 """
                 SELECT shipping_address_json, platform_fee_cents,
-                  stripe_application_fee_cents, seller_proceeds_cents
+                  stripe_application_fee_cents, seller_proceeds_cents,
+                  payment_flow, stripe_destination_account_id,
+                  stripe_transfer_group, payout_status
                 FROM orders WHERE stripe_checkout_session_id = ?
                 """,
                 ("cs_test_address_reservation",),
             ).fetchone()
         self.assertEqual(listing_state, ("reserved", "cs_test_address_reservation"))
         self.assertEqual(json.loads(order[0])["name"], "Buyer Name")
-        self.assertEqual(order[1:], (1275, 2275, 13725))
+        self.assertEqual(order[1:4], (1275, 0, 13725))
+        self.assertEqual(order[4], "separate_charge_transfer")
+        self.assertEqual(order[5], "acct_ready")
+        self.assertEqual(
+            order[6],
+            stripe_payload["payment_intent_data[transfer_group]"],
+        )
+        self.assertEqual(order[7], "awaiting_payment")
+
+    def test_legacy_destination_charge_order_can_never_transfer_twice(self):
+        order_id = self.create_delivery_gated_order("cs_test_legacy_guard")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET payment_flow = 'legacy_destination_charge',
+                    payout_status = 'legacy_released'
+                WHERE id = ?
+                """,
+                (order_id,),
+            )
+            connection.commit()
+
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def reject_stripe_call(*_args, **_kwargs):
+            raise AssertionError("A legacy destination-charge order must never transfer again.")
+
+        app.stripe_request = reject_stripe_call
+        result = app.release_seller_transfer_for_order(order_id)
+
+        self.assertEqual(result["payment_flow"], "legacy_destination_charge")
+        self.assertEqual(result["payout_status"], "legacy_released")
+        self.assertEqual(result["stripe_transfer_id"], "")
+
+    def test_shippo_delivery_schedules_full_24_hour_window_idempotently(self):
+        order_id = self.create_delivery_gated_order("cs_test_delivery_schedule")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET payout_status = 'held_for_delivery',
+                    payout_release_at = NULL,
+                    tracking_status = 'UNKNOWN',
+                    shipping_status = 'label_ready',
+                    delivered_at = NULL
+                WHERE id = ?
+                """,
+                (order_id,),
+            )
+            connection.commit()
+
+        event = {
+            "transaction_id": "transaction_delivery",
+            "tracking_number": "TRACK123",
+            "carrier": "USPS",
+            "status": "DELIVERED",
+            "details": "Delivered at front door.",
+            "status_date": "2026-07-22T10:00:00Z",
+            "event_id": "track_event_123",
+            "substatus": "delivered",
+            "action_required": False,
+        }
+        before = datetime.now(timezone.utc)
+        first = app.apply_shippo_tracking_update(event)
+        second = app.apply_shippo_tracking_update(event)
+        after = datetime.now(timezone.utc)
+
+        release_at = datetime.strptime(
+            first["payout_release_at"], "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=timezone.utc)
+        self.assertGreaterEqual(
+            release_at,
+            before + timedelta(hours=24) - timedelta(seconds=1),
+        )
+        self.assertLessEqual(release_at, after + timedelta(hours=24, seconds=1))
+        self.assertEqual(first["tracking_status"], "DELIVERED")
+        self.assertEqual(first["shipping_status"], "delivered")
+        self.assertEqual(first["payout_status"], "release_scheduled")
+        self.assertEqual(second["payout_release_at"], first["payout_release_at"])
+        self.assertEqual(second["delivered_at"], first["delivered_at"])
+
+    def test_shippo_return_or_action_required_overrides_prior_delivery(self):
+        hold_events = (
+            {
+                "status": "RETURNED",
+                "details": "Package is being returned to the sender.",
+                "action_required": False,
+            },
+            {
+                "status": "DELIVERED",
+                "details": "Carrier needs address confirmation.",
+                "action_required": True,
+            },
+        )
+        for index, event_state in enumerate(hold_events, start=1):
+            with self.subTest(event_state=event_state):
+                order_id = self.create_delivery_gated_order(
+                    f"cs_test_delivery_hold_{index}"
+                )
+                transaction_id = f"transaction_delivery_hold_{index}"
+                tracking_number = f"TRACKHOLD{index}"
+                with sqlite3.connect(app.DB_PATH) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET shippo_transaction_id = ?, tracking_number = ?
+                        WHERE id = ?
+                        """,
+                        (transaction_id, tracking_number, order_id),
+                    )
+                    connection.commit()
+                event = {
+                    "transaction_id": transaction_id,
+                    "tracking_number": tracking_number,
+                    "carrier": "USPS",
+                    "status_date": "2026-07-23T12:00:00Z",
+                    "event_id": f"track_hold_{index}",
+                    "substatus": "carrier_attention",
+                    **event_state,
+                }
+
+                result = app.apply_shippo_tracking_update(event)
+
+                self.assertEqual(result["id"], order_id)
+                self.assertEqual(result["shipping_status"], "attention_needed")
+                self.assertEqual(result["payout_status"], "on_hold")
+                self.assertEqual(result["stripe_transfer_id"], "")
+                self.assertIn(event_state["details"], result["payout_error"])
+
+    def test_open_buyer_issue_freezes_due_seller_payout(self):
+        order_id = self.create_delivery_gated_order(
+            "cs_test_issue_hold",
+            buyer_issue_status="open",
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE orders SET payout_status = 'on_hold' WHERE id = ?",
+                (order_id,),
+            )
+            connection.commit()
+
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def reject_stripe_call(*_args, **_kwargs):
+            raise AssertionError("An open buyer issue must prevent all Stripe payout calls.")
+
+        app.stripe_request = reject_stripe_call
+        result = app.release_seller_transfer_for_order(order_id)
+
+        self.assertEqual(result["buyer_issue_status"], "open")
+        self.assertEqual(result["payout_status"], "on_hold")
+        self.assertEqual(result["stripe_transfer_id"], "")
+
+    def test_due_delivery_transfers_exact_product_proceeds_excluding_shipping(self):
+        order_id = self.create_delivery_gated_order("cs_test_exact_transfer")
+        calls = []
+
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def fake_stripe(method, path, data=None, idempotency_key=None):
+            calls.append((method, path, data or {}, idempotency_key))
+            if path == "/payment_intents/pi_test_delivery":
+                return {
+                    "id": "pi_test_delivery",
+                    "status": "succeeded",
+                    "latest_charge": "ch_test_delivery",
+                }
+            if path == "/transfers":
+                if method == "GET":
+                    return {"data": []}
+                return {"id": "tr_exact_13725"}
+            if path == "/charges/ch_test_delivery":
+                return {
+                    "id": "ch_test_delivery",
+                    "status": "succeeded",
+                    "paid": True,
+                    "refunded": False,
+                    "amount_refunded": 0,
+                    "disputed": False,
+                }
+            raise AssertionError(f"Unexpected Stripe request: {method} {path}")
+
+        app.stripe_request = fake_stripe
+        result = app.release_seller_transfer_for_order(order_id)
+
+        transfer_call = next(
+            call for call in calls if call[0] == "POST" and call[1] == "/transfers"
+        )
+        self.assertEqual(transfer_call[2]["amount"], 13725)
+        self.assertEqual(transfer_call[2]["source_transaction"], "ch_test_delivery")
+        self.assertEqual(transfer_call[2]["destination"], "acct_ready")
+        self.assertIn("ezpb-seller-transfer-", transfer_call[3])
+        self.assertEqual(result["payout_status"], "released")
+        self.assertEqual(result["stripe_transfer_id"], "tr_exact_13725")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            amounts = connection.execute(
+                """
+                SELECT amount_total_cents, shipping_amount_cents,
+                  platform_fee_cents, seller_proceeds_cents
+                FROM orders WHERE id = ?
+                """,
+                (order_id,),
+            ).fetchone()
+        self.assertEqual(amounts, (16000, 1000, 1275, 13725))
+
+    def test_seller_transfer_cannot_run_before_protection_window_is_due(self):
+        future = (
+            datetime.now(timezone.utc) + timedelta(hours=23)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        order_id = self.create_delivery_gated_order(
+            "cs_test_not_due",
+            release_at=future,
+        )
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def reject_stripe_call(*_args, **_kwargs):
+            raise AssertionError("Stripe must not be called before payout_release_at.")
+
+        app.stripe_request = reject_stripe_call
+        result = app.release_seller_transfer_for_order(
+            order_id,
+            admin_override=True,
+        )
+
+        self.assertEqual(result["payout_status"], "release_scheduled")
+        self.assertEqual(result["stripe_transfer_id"], "")
+
+    def test_hold_committed_during_release_blocks_transfer_and_is_preserved(self):
+        order_id = self.create_delivery_gated_order("cs_test_release_hold_race")
+        calls = []
+
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def fake_stripe(method, path, data=None, idempotency_key=None):
+            calls.append((method, path, data or {}, idempotency_key))
+            if path == "/payment_intents/pi_test_delivery":
+                return {
+                    "id": "pi_test_delivery",
+                    "status": "succeeded",
+                    "latest_charge": "ch_test_delivery",
+                }
+            if path == "/transfers" and method == "GET":
+                # Reproduce a refund/return/issue webhook committing after the
+                # payout claim but before the final Stripe transfer.
+                with sqlite3.connect(app.DB_PATH) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET payout_status = 'on_hold',
+                            buyer_issue_status = 'open',
+                            buyer_issue_reason = 'item_not_as_described',
+                            payout_error = 'Concurrent safety hold'
+                        WHERE id = ?
+                        """,
+                        (order_id,),
+                    )
+                    connection.commit()
+                return {"data": []}
+            if path == "/transfers" and method == "POST":
+                raise AssertionError(
+                    "A committed safety hold must block the Stripe transfer."
+                )
+            if path == "/charges/ch_test_delivery":
+                raise AssertionError(
+                    "Final local payout eligibility must be checked before Charge lookup."
+                )
+            raise AssertionError(f"Unexpected Stripe request: {method} {path}")
+
+        app.stripe_request = fake_stripe
+        result = app.release_seller_transfer_for_order(order_id)
+
+        self.assertEqual(result["payout_status"], "on_hold")
+        self.assertEqual(result["buyer_issue_status"], "open")
+        self.assertEqual(result["stripe_transfer_id"], "")
+        self.assertFalse(
+            any(method == "POST" and path == "/transfers" for method, path, *_ in calls)
+        )
+
+    def test_existing_stripe_transfer_is_adopted_and_retries_are_idempotent(self):
+        order_id = self.create_delivery_gated_order("cs_test_existing_transfer")
+        stripe_calls = []
+
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def fake_stripe(method, path, data=None, idempotency_key=None):
+            stripe_calls.append((method, path, data or {}, idempotency_key))
+            if path == "/payment_intents/pi_test_delivery":
+                return {
+                    "id": "pi_test_delivery",
+                    "status": "succeeded",
+                    "latest_charge": "ch_test_delivery",
+                }
+            if path == "/transfers" and method == "GET":
+                return {
+                    "data": [
+                        {
+                            "id": "tr_already_created",
+                            "amount": 13725,
+                            "transfer_group": data["transfer_group"],
+                            "metadata": {"order_id": str(order_id)},
+                        }
+                    ]
+                }
+            raise AssertionError(f"Unexpected Stripe request: {method} {path}")
+
+        app.stripe_request = fake_stripe
+        first = app.release_seller_transfer_for_order(order_id)
+        second = app.release_seller_transfer_for_order(order_id)
+
+        self.assertEqual(first["stripe_transfer_id"], "tr_already_created")
+        self.assertEqual(first["payout_status"], "released")
+        self.assertEqual(second["stripe_transfer_id"], "tr_already_created")
+        self.assertFalse(
+            any(method == "POST" and path == "/transfers" for method, path, *_ in stripe_calls)
+        )
+        self.assertEqual(
+            sum(method == "GET" and path == "/transfers" for method, path, *_ in stripe_calls),
+            1,
+        )
+
+    def test_refunded_or_disputed_charge_is_held_before_transfer(self):
+        invalid_charge_states = (
+            {"refunded": True, "amount_refunded": 16000, "disputed": False},
+            {"refunded": False, "amount_refunded": 0, "disputed": True},
+        )
+        for index, invalid_state in enumerate(invalid_charge_states, start=1):
+            with self.subTest(invalid_state=invalid_state):
+                order_id = self.create_delivery_gated_order(
+                    f"cs_test_invalid_charge_{index}"
+                )
+                app.shippo_api_request = lambda *_args, **_kwargs: {
+                    "carrier": "USPS",
+                    "tracking_status": {"status": "DELIVERED"},
+                }
+                calls = []
+
+                def fake_stripe(method, path, data=None, idempotency_key=None):
+                    calls.append((method, path, data or {}, idempotency_key))
+                    if path == "/payment_intents/pi_test_delivery":
+                        return {
+                            "id": "pi_test_delivery",
+                            "status": "succeeded",
+                            "latest_charge": "ch_test_delivery",
+                        }
+                    if path == "/transfers" and method == "GET":
+                        return {"data": []}
+                    if path == "/charges/ch_test_delivery":
+                        return {
+                            "id": "ch_test_delivery",
+                            "status": "succeeded",
+                            "paid": True,
+                            **invalid_state,
+                        }
+                    raise AssertionError(f"Unexpected Stripe request: {method} {path}")
+
+                app.stripe_request = fake_stripe
+                result = app.release_seller_transfer_for_order(order_id)
+
+                self.assertEqual(result["payout_status"], "on_hold")
+                self.assertEqual(result["stripe_transfer_id"], "")
+                self.assertIn("refunded, disputed", result["payout_error"])
+                self.assertFalse(
+                    any(
+                        method == "POST" and path == "/transfers"
+                        for method, path, *_ in calls
+                    )
+                )
 
     def test_expired_order_releases_only_its_own_reservation(self):
         listing_id = self.create_paid_order("cs_test_release")
