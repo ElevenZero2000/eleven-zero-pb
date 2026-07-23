@@ -315,6 +315,7 @@ US_STATE_REGION = {
     "PR": "territory",
 }
 ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
+MAX_API_JSON_BODY_BYTES = 10_000_000
 
 
 def cache_control_for_path(path: str) -> str:
@@ -5320,7 +5321,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         path = urlparse(self.path).path
-        self.send_header("Cache-Control", cache_control_for_path(path))
+        cache_control = getattr(self, "_cache_control_override", None)
+        self.send_header("Cache-Control", cache_control or cache_control_for_path(path))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "DENY")
@@ -5332,7 +5334,29 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def json_body(self) -> dict:
-        content_length = int(self.headers.get("Content-Length", "0"))
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            self.send_json(
+                {"error": "Invalid Content-Length header."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            raise ValueError("Invalid Content-Length")
+
+        if content_length < 0:
+            self.send_json(
+                {"error": "Invalid Content-Length header."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            raise ValueError("Invalid Content-Length")
+
+        if content_length > MAX_API_JSON_BODY_BYTES:
+            self.send_json(
+                {"error": "That request is too large. Use smaller images and try again."},
+                status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            raise ValueError("Request body too large")
+
         raw = self.rfile.read(content_length) if content_length else b"{}"
 
         try:
@@ -5353,12 +5377,21 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_bytes(self, body: bytes, content_type: str, status: int = HTTPStatus.OK):
+    def send_bytes(
+        self,
+        body: bytes,
+        content_type: str,
+        status: int = HTTPStatus.OK,
+        cache_control: str | None = None,
+    ):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if cache_control:
+            self._cache_control_override = cache_control
         self.end_headers()
         self.wfile.write(body)
+        self._cache_control_override = None
 
     def parse_cookies(self) -> SimpleCookie:
         cookie = SimpleCookie()
@@ -6481,7 +6514,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        self.send_bytes(payload, mime_type)
+        self.send_bytes(
+            payload,
+            mime_type,
+            cache_control=(
+                "public, max-age=86400, immutable" if is_public else "no-store"
+            ),
+        )
 
     def handle_profile_image(self, user: dict):
         self.handle_stored_profile_image(int(user["id"]), "profile_image_data")
@@ -9968,13 +10007,6 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         experience = str(body.get("experience", "")).strip()
         availability = str(body.get("availability", "")).strip()
         bio = str(body.get("bio", "")).strip()
-        try:
-            image_data = normalize_trainer_landscape_image_data(
-                body.get("trainerImage")
-            )
-        except ValueError as error:
-            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
-            return
 
         if not all([name, location, format_value, level, rate, email]):
             self.send_json(
@@ -9991,6 +10023,22 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "Trainer level is not valid."}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        client_key = f"trainer-create:{int(user['id'])}"
+        if not rate_limit_allows(client_key, 5, 3600):
+            self.send_json(
+                {"error": "Too many trainer profile attempts. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        try:
+            image_data = normalize_trainer_landscape_image_data(
+                body.get("trainerImage")
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if not experience:
             experience = "New trainer profile · Account verified"
 
@@ -10004,6 +10052,24 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
 
         with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT id FROM trainers WHERE user_id = ? LIMIT 1",
+                (int(user["id"]),),
+            ).fetchone()
+            if existing:
+                connection.rollback()
+                self.send_json(
+                    {
+                        "error": (
+                            "This account already has a trainer profile. "
+                            "Manage that profile from Account."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
             image_updated_at = utc_now()
             cursor = connection.execute(
                 """
