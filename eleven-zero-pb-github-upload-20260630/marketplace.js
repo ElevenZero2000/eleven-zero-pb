@@ -951,6 +951,16 @@ function getListingActionState(item) {
   const approvalStatus = item.approval_status || "approved";
   const saleStatus = item.sale_status || "available";
 
+  if (saleStatus === "reserved") {
+    return {
+      action: "disabled",
+      buttonLabel: "Checkout in progress",
+      statusLabel: "Checkout in progress",
+      reason: "Another buyer is checking out with this paddle. Please check back shortly.",
+      tone: "pending",
+    };
+  }
+
   if (saleStatus === "pending") {
     return {
       action: "disabled",
@@ -1145,7 +1155,14 @@ function renderListingCard(item) {
   const conditionLine = item.condition || "Condition listed";
   const specLine = [theme.label, formatThickness(item.thickness_mm)].filter(Boolean).join(" · ");
   const shippingLine = item.shipping_policy_label || item.shipping?.label || "Shipping at checkout";
-  const saleLabel = item.sale_status === "pending" ? "Sale pending" : item.sale_status === "sold" ? "Sold" : "";
+  const saleLabel =
+    item.sale_status === "reserved"
+      ? "Checkout in progress"
+      : item.sale_status === "pending"
+        ? "Sale pending"
+        : item.sale_status === "sold"
+          ? "Sold"
+          : "";
 
   return `
     <article class="product-card shop-product-card reveal is-visible" data-category="${ElevenZeroApp.escapeHtml(
