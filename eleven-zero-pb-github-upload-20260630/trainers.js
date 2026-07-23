@@ -29,6 +29,22 @@ const trainerReviewStatus = document.querySelector("[data-review-status]");
 const trainerReviewList = document.querySelector("[data-review-list]");
 const trainerReviewSelect = document.querySelector("[data-review-trainer-select]");
 const trainerLoadMore = document.querySelector("[data-trainer-load-more]");
+const trainerPhotoInput = document.querySelector("[data-trainer-photo-input]");
+const trainerPhotoDropzone = document.querySelector("[data-trainer-photo-dropzone]");
+const trainerPhotoPreview = document.querySelector("[data-trainer-photo-preview]");
+const trainerPhotoPreviewImage = document.querySelector("[data-trainer-photo-preview-image]");
+const trainerPhotoReplaceButton = document.querySelector("[data-trainer-photo-replace]");
+const trainerPhotoRemoveButton = document.querySelector("[data-trainer-photo-remove]");
+const trainerPhotoStatus = document.querySelector("[data-trainer-photo-status]");
+const trainerJoinSubmitButton = trainerJoinForm?.querySelector('button[type="submit"]');
+
+const TRAINER_PHOTO_MAX_SOURCE_BYTES = 10 * 1024 * 1024;
+const TRAINER_PHOTO_MAX_DATA_URL_LENGTH = 1_500_000;
+const TRAINER_PHOTO_DEFAULT_STATUS = "JPG, PNG, WebP or iPhone photo · 10 MB max";
+const TRAINER_PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+
+let trainerImageDraft = "";
+let trainerImageProcessing = false;
 
 const formatLabels = {
   private: "Private lessons",
@@ -50,6 +66,150 @@ function buildInitials(name) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || "")
     .join("");
+}
+
+function trainerPhotoFileExtension(file) {
+  const name = String(file?.name || "");
+  return name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+}
+
+function isSupportedTrainerPhoto(file) {
+  const type = String(file?.type || "").toLowerCase();
+  const extension = trainerPhotoFileExtension(file);
+  return (
+    ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(type) ||
+    TRAINER_PHOTO_EXTENSIONS.has(extension)
+  );
+}
+
+function readTrainerPhotoAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("That photo could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadTrainerPhoto(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("That photo could not be opened."));
+    image.src = source;
+  });
+}
+
+function renderTrainerPhotoCrop(image, width, height, quality) {
+  const targetRatio = width / height;
+  const sourceRatio = image.naturalWidth / image.naturalHeight;
+  let sourceWidth = image.naturalWidth;
+  let sourceHeight = image.naturalHeight;
+  let sourceX = 0;
+  let sourceY = 0;
+
+  if (sourceRatio > targetRatio) {
+    sourceWidth = image.naturalHeight * targetRatio;
+    sourceX = (image.naturalWidth - sourceWidth) / 2;
+  } else {
+    sourceHeight = image.naturalWidth / targetRatio;
+    sourceY = (image.naturalHeight - sourceHeight) / 2;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("That photo could not be prepared.");
+  }
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    width,
+    height
+  );
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function prepareTrainerPhoto(file) {
+  if (!file || !isSupportedTrainerPhoto(file)) {
+    throw new Error("Choose a JPG, PNG, WebP, or iPhone photo.");
+  }
+  if (file.size > TRAINER_PHOTO_MAX_SOURCE_BYTES) {
+    throw new Error("Choose a photo smaller than 10 MB.");
+  }
+
+  const source = await readTrainerPhotoAsDataUrl(file);
+  const image = await loadTrainerPhoto(source);
+  const steps = [
+    [1600, 1000, 0.82],
+    [1280, 800, 0.76],
+    [960, 600, 0.7],
+  ];
+
+  for (const [width, height, quality] of steps) {
+    const candidate = renderTrainerPhotoCrop(image, width, height, quality);
+    if (candidate.length <= TRAINER_PHOTO_MAX_DATA_URL_LENGTH) {
+      return candidate;
+    }
+  }
+
+  throw new Error("That photo is still too large. Try a smaller image.");
+}
+
+function setTrainerPhotoProcessing(isProcessing) {
+  trainerImageProcessing = isProcessing;
+  trainerPhotoDropzone?.setAttribute("aria-busy", String(isProcessing));
+  if (trainerJoinSubmitButton) {
+    trainerJoinSubmitButton.disabled = isProcessing;
+  }
+}
+
+function renderTrainerPhotoDraft() {
+  const hasPhoto = Boolean(trainerImageDraft);
+  if (trainerPhotoDropzone) trainerPhotoDropzone.hidden = hasPhoto;
+  if (trainerPhotoPreview) trainerPhotoPreview.hidden = !hasPhoto;
+
+  if (trainerPhotoPreviewImage) {
+    if (hasPhoto) {
+      trainerPhotoPreviewImage.src = trainerImageDraft;
+    } else {
+      trainerPhotoPreviewImage.removeAttribute("src");
+    }
+  }
+}
+
+function clearTrainerPhoto() {
+  trainerImageDraft = "";
+  if (trainerPhotoInput) trainerPhotoInput.value = "";
+  renderTrainerPhotoDraft();
+  ElevenZeroApp.setStatus(trainerPhotoStatus, TRAINER_PHOTO_DEFAULT_STATUS);
+}
+
+async function handleTrainerPhotoSelection(file) {
+  if (!file || trainerImageProcessing) return;
+
+  setTrainerPhotoProcessing(true);
+  ElevenZeroApp.setStatus(trainerPhotoStatus, "Preparing photo…", "warning");
+  try {
+    trainerImageDraft = await prepareTrainerPhoto(file);
+    renderTrainerPhotoDraft();
+    ElevenZeroApp.setStatus(trainerPhotoStatus, "Photo ready.", "success");
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainerPhotoStatus, error.message, "error");
+  } finally {
+    if (trainerPhotoInput) trainerPhotoInput.value = "";
+    setTrainerPhotoProcessing(false);
+  }
 }
 
 function slugTokens(value) {
@@ -175,44 +335,67 @@ function renderTrainerCard(trainer) {
   const tenureMonths = getMonthsOnPlatform(trainer.joined_at);
   const levelLabel = levelLabels[trainer.level] || "Player focus";
   const formatLabel = formatLabels[trainer.format] || "Coaching";
+  const imageUrl = String(trainer.imageUrl || "").trim();
   const contactHref = trainer.email
     ? `mailto:${ElevenZeroApp.escapeHtml(trainer.email)}`
     : "./auth.html?next=./trainers.html";
 
   return `
-    <article class="trainer-simple-card reveal is-visible" data-trainer-card>
-      <div class="trainer-simple-card-head">
-        <div class="trainer-avatar" aria-hidden="true">${ElevenZeroApp.escapeHtml(
+    <article class="trainer-profile-card reveal is-visible" data-trainer-card>
+      <div class="trainer-profile-media ${imageUrl ? "has-photo" : "is-fallback"}">
+        <span class="trainer-profile-photo-fallback" aria-hidden="true">${ElevenZeroApp.escapeHtml(
           trainer.initials
-        )}</div>
-        <div class="trainer-heading">
-          <h3>${ElevenZeroApp.escapeHtml(trainer.name)}</h3>
-          <p>${ElevenZeroApp.escapeHtml(trainer.location)}</p>
+        )}</span>
+        ${
+          imageUrl
+            ? `<img
+                class="trainer-profile-photo"
+                src="${ElevenZeroApp.escapeHtml(imageUrl)}"
+                alt="${ElevenZeroApp.escapeHtml(
+                  `Photo of ${trainer.name}, pickleball trainer in ${trainer.location}`
+                )}"
+                loading="lazy"
+                decoding="async"
+              />`
+            : ""
+        }
+        <div class="trainer-profile-media-badges">
+          <span class="trainer-profile-rate">${ElevenZeroApp.escapeHtml(trainer.rate)}</span>
+          <span class="trainer-profile-verified">${trainer.verified ? "Verified" : "New"}</span>
         </div>
-        <span class="trainer-rate">${ElevenZeroApp.escapeHtml(trainer.rate)}</span>
       </div>
 
-      <div class="trainer-simple-trust">
-        ${renderTrainerRatingPill(trainer)}
-        <div class="trainer-tenure-pill">
+      <div class="trainer-profile-body">
+        <header class="trainer-profile-heading">
+          <div>
+            <h3>${ElevenZeroApp.escapeHtml(trainer.name)}</h3>
+            <p>${ElevenZeroApp.escapeHtml(trainer.location)}</p>
+          </div>
+          ${renderTrainerRatingPill(trainer)}
+        </header>
+
+        <div class="trainer-profile-facts" aria-label="Trainer details">
           <span>${ElevenZeroApp.escapeHtml(formatTenureLong(tenureMonths))}</span>
+          <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
+          <span>${ElevenZeroApp.escapeHtml(levelLabel)}</span>
         </div>
-      </div>
 
-      <div class="trainer-simple-tags">
-        <span>${ElevenZeroApp.escapeHtml(levelLabel)}</span>
-        <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
-        <span>${trainer.verified ? "Verified profile" : "New profile"}</span>
-      </div>
+        <p class="trainer-profile-bio">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
 
-      <p class="trainer-simple-bio">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
+        <dl class="trainer-profile-details">
+          <div>
+            <dt>Experience</dt>
+            <dd>${ElevenZeroApp.escapeHtml(trainer.experience)}</dd>
+          </div>
+          <div>
+            <dt>Availability</dt>
+            <dd>${ElevenZeroApp.escapeHtml(trainer.availability)}</dd>
+          </div>
+        </dl>
 
-      <div class="trainer-simple-card-foot">
-        <div>
-          <strong>${ElevenZeroApp.escapeHtml(trainer.experience)}</strong>
-          <span>${ElevenZeroApp.escapeHtml(trainer.availability)}</span>
-        </div>
-        <a class="button button-dark" href="${contactHref}">Contact trainer</a>
+        <a class="button button-dark trainer-profile-contact" href="${contactHref}">
+          Contact trainer
+        </a>
       </div>
     </article>
   `;
@@ -285,6 +468,15 @@ function renderTrainerResults() {
   }
 
   trainerResults.innerHTML = displayed.map(renderTrainerCard).join("");
+  trainerResults.querySelectorAll(".trainer-profile-photo").forEach((image) => {
+    image.addEventListener(
+      "error",
+      () => {
+        image.remove();
+      },
+      { once: true }
+    );
+  });
   if (trainerLoadMore) {
     const hasMore = displayed.length < visible.length;
     trainerLoadMore.hidden = !hasMore;
@@ -399,14 +591,31 @@ async function handleTrainerJoin(event) {
     return;
   }
 
+  if (trainerImageProcessing) {
+    ElevenZeroApp.setStatus(trainerPhotoStatus, "Wait for the photo to finish.", "warning");
+    return;
+  }
+
+  if (!trainerImageDraft) {
+    ElevenZeroApp.setStatus(trainerPhotoStatus, "Add one trainer photo.", "error");
+    trainerPhotoDropzone?.focus();
+    return;
+  }
+
   const payload = Object.fromEntries(new FormData(trainerJoinForm).entries());
+  payload.trainerImage = trainerImageDraft;
 
   try {
+    if (trainerJoinSubmitButton) {
+      trainerJoinSubmitButton.disabled = true;
+      trainerJoinSubmitButton.textContent = "Submitting…";
+    }
     const response = await ElevenZeroApp.request("/api/trainers", {
       method: "POST",
       body: payload,
     });
     trainerJoinForm.reset();
+    clearTrainerPhoto();
     ElevenZeroApp.setStatus(
       trainerJoinStatus,
       response.message || `${payload.name} was submitted for Eleven Zero PB review.`,
@@ -415,6 +624,11 @@ async function handleTrainerJoin(event) {
     await loadTrainerData();
   } catch (error) {
     ElevenZeroApp.setStatus(trainerJoinStatus, error.message, "error");
+  } finally {
+    if (trainerJoinSubmitButton) {
+      trainerJoinSubmitButton.disabled = false;
+      trainerJoinSubmitButton.textContent = "Submit profile for review";
+    }
   }
 }
 
@@ -489,6 +703,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   trainerJoinForm?.addEventListener("submit", handleTrainerJoin);
+  trainerPhotoDropzone?.addEventListener("click", () => trainerPhotoInput?.click());
+  trainerPhotoInput?.addEventListener("change", (event) => {
+    handleTrainerPhotoSelection(event.target.files?.[0]);
+  });
+  trainerPhotoReplaceButton?.addEventListener("click", () => trainerPhotoInput?.click());
+  trainerPhotoRemoveButton?.addEventListener("click", clearTrainerPhoto);
+  trainerPhotoDropzone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    trainerPhotoDropzone.classList.add("is-dragging");
+  });
+  trainerPhotoDropzone?.addEventListener("dragleave", () => {
+    trainerPhotoDropzone.classList.remove("is-dragging");
+  });
+  trainerPhotoDropzone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    trainerPhotoDropzone.classList.remove("is-dragging");
+    handleTrainerPhotoSelection(event.dataTransfer?.files?.[0]);
+  });
   trainerReviewForm?.addEventListener("submit", handleTrainerReview);
   trainerLoadMore?.addEventListener("click", () => {
     trainerPageState.visibleLimit = trainerPageState.trainers.length;
