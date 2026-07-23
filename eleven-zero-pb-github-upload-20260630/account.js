@@ -7,6 +7,7 @@ const statTrainers = document.querySelector("[data-account-stat-trainers]");
 const statReviews = document.querySelector("[data-account-stat-reviews]");
 const accountListings = document.querySelector("[data-account-listings]");
 const accountTrainers = document.querySelector("[data-account-trainers]");
+const accountPurchases = document.querySelector("[data-account-purchases]");
 const accountSales = document.querySelector("[data-account-sales]");
 const sellerPill = document.querySelector("[data-seller-pill]");
 const sellerSummary = document.querySelector("[data-seller-summary]");
@@ -370,21 +371,185 @@ function formatCents(value) {
   }).format(amount);
 }
 
+function cleanStatus(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function getPayoutState(item, perspective = "seller") {
+  const payoutStatus = String(item.payout_status || "");
+  const trackingStatus = String(item.tracking_status || "").toUpperCase();
+  const hasOpenIssue = item.buyer_issue_status === "open";
+  const isBuyer = perspective === "buyer";
+
+  if (item.payment_flow === "legacy_destination_charge") {
+    return {
+      label: isBuyer ? "Order paid" : "Paid through previous checkout",
+      copy: isBuyer
+        ? "This order used the earlier Eleven Zero checkout flow."
+        : "Stripe routed these proceeds through the previous payout flow.",
+      tone: "ready",
+    };
+  }
+  if (hasOpenIssue || payoutStatus === "on_hold") {
+    return {
+      label: "Problem under review",
+      copy: isBuyer
+        ? "Your report is open. Seller proceeds remain on hold while Eleven Zero PB reviews it."
+        : "Seller proceeds are on hold while Eleven Zero PB reviews the buyer’s report.",
+      tone: "attention",
+    };
+  }
+  if (payoutStatus === "released" || item.stripe_transfer_id) {
+    return {
+      label: isBuyer ? "Order complete" : "Proceeds released",
+      copy: isBuyer
+        ? "The delivery protection period is complete."
+        : "Proceeds were released to your connected Stripe balance. Bank arrival follows your Stripe payout schedule.",
+      tone: "ready",
+    };
+  }
+  if (payoutStatus === "releasing") {
+    return {
+      label: "Releasing proceeds",
+      copy: isBuyer
+        ? "The order is complete and the seller transfer is processing."
+        : "Stripe is processing the transfer to your connected balance.",
+      tone: "ready",
+    };
+  }
+  if (payoutStatus === "attention_needed") {
+    return {
+      label: "Payout needs attention",
+      copy: isBuyer
+        ? "Eleven Zero PB is checking the seller transfer. Your payment remains recorded."
+        : "Eleven Zero PB has been notified and will retry or review this transfer.",
+      tone: "attention",
+    };
+  }
+  if (payoutStatus === "release_scheduled" || trackingStatus === "DELIVERED") {
+    const releaseDate = formatAdminActivityDate(item.payout_release_at);
+    return {
+      label: "Delivered · protection period",
+      copy: isBuyer
+        ? `Report a problem before proceeds are released${releaseDate ? ` on ${releaseDate}` : " after the 24-hour protection period"}.`
+        : `Delivery is confirmed. Proceeds release automatically${releaseDate ? ` after ${releaseDate}` : " after the 24-hour buyer protection period"}.`,
+      tone: "pending",
+    };
+  }
+  if (
+    ["TRANSIT", "OUT_FOR_DELIVERY"].includes(trackingStatus) ||
+    item.shipping_status === "in_transit" ||
+    item.shipped_at
+  ) {
+    return {
+      label: "Shipped · proceeds held",
+      copy: isBuyer
+        ? "The package is moving. Seller proceeds stay held until delivery is confirmed."
+        : "The package is moving. Proceeds stay held until delivery plus the buyer protection period.",
+      tone: "pending",
+    };
+  }
+  if (item.status === "paid") {
+    return {
+      label: isBuyer ? "Paid · preparing shipment" : "Paid · proceeds held",
+      copy: isBuyer
+        ? "The seller is preparing your prepaid-label shipment."
+        : "Print the prepaid label and ship the paddle. Proceeds remain held until delivery.",
+      tone: "pending",
+    };
+  }
+  return {
+    label: item.status === "expired" ? "Checkout expired" : "Awaiting payment",
+    copy: "No seller proceeds will be released until payment is confirmed.",
+    tone: "neutral",
+  };
+}
+
+function canBuyerReportIssue(item) {
+  return (
+    item.status === "paid" &&
+    item.payment_flow === "separate_charge_transfer" &&
+    item.buyer_issue_status !== "open" &&
+    !item.stripe_transfer_id &&
+    !["released", "releasing"].includes(item.payout_status)
+  );
+}
+
+function renderPurchaseItem(item) {
+  const title = [item.brand, item.model].filter(Boolean).join(" ") || "Paddle order";
+  const payoutState = getPayoutState(item, "buyer");
+  const shippingLine = [item.shipping_carrier, item.shipping_service].filter(Boolean).join(" · ");
+  const actions = [];
+
+  if (item.tracking_url) {
+    actions.push(
+      `<a href="${escapeAttr(item.tracking_url)}" target="_blank" rel="noopener noreferrer">Track package</a>`
+    );
+  }
+  if (item.listing_id) {
+    actions.push(`<a href="./listing.html?id=${escapeAttr(item.listing_id)}">View paddle</a>`);
+  }
+
+  const issueContent =
+    item.buyer_issue_status === "open"
+      ? `
+        <div class="order-issue-open" role="status">
+          <strong>Report received</strong>
+          <span>${escapeAttr(cleanStatus(item.buyer_issue_reason || "Order problem"))}</span>
+        </div>
+      `
+      : canBuyerReportIssue(item)
+        ? `
+          <details class="order-issue-disclosure">
+            <summary>Report a problem</summary>
+            <form class="order-issue-form" data-order-issue-form data-order-id="${escapeAttr(item.id)}" data-session-id="${escapeAttr(item.stripe_checkout_session_id)}">
+              <label>
+                <span>What happened?</span>
+                <select name="reason" required>
+                  <option value="">Choose one</option>
+                  <option value="damaged">Arrived damaged</option>
+                  <option value="not_as_described">Not as described</option>
+                  <option value="wrong_item">Wrong item</option>
+                  <option value="not_received">Not received</option>
+                  <option value="other">Something else</option>
+                </select>
+              </label>
+              <label>
+                <span>Tell us what happened</span>
+                <textarea name="details" rows="3" minlength="10" maxlength="1000" required></textarea>
+              </label>
+              <button class="button button-secondary" type="submit">Send report</button>
+              <p class="order-issue-status" aria-live="polite"></p>
+            </form>
+          </details>
+        `
+        : "";
+
+  return `
+    <article class="list-item order-history-item">
+      <div class="order-history-head">
+        <div>
+          <strong>${escapeAttr(title)}</strong>
+          <span>${escapeAttr(formatCents(item.amount_total_cents))}${item.seller_name ? ` · Sold by ${escapeAttr(item.seller_name)}` : ""}</span>
+        </div>
+        <span class="list-item-status list-item-status-${escapeAttr(payoutState.tone)}">${escapeAttr(payoutState.label)}</span>
+      </div>
+      <p class="order-state-copy">${escapeAttr(payoutState.copy)}</p>
+      ${shippingLine ? `<span>${escapeAttr(shippingLine)}</span>` : ""}
+      ${item.tracking_number ? `<span>Tracking · ${escapeAttr(item.tracking_number)}</span>` : ""}
+      ${actions.length ? `<div class="seller-sale-actions">${actions.join("")}</div>` : ""}
+      ${issueContent}
+    </article>
+  `;
+}
+
 function renderSaleItem(item) {
   const title = [item.brand, item.model].filter(Boolean).join(" ") || "Paddle order";
-  const isLabelReady = item.shipping_status === "label_ready" && item.shippo_label_url;
+  const isLabelReady = Boolean(item.shippo_label_url);
   const isPaid = item.status === "paid";
-  const statusLabel = item.sale_status === "sold"
-    ? "Sold"
-    : isLabelReady
-    ? "Label ready"
-    : isPaid && ["error", "attention_needed"].includes(item.shipping_status)
-      ? "Shipping help needed"
-      : isPaid
-        ? "Preparing label"
-        : item.status === "expired"
-          ? "Checkout expired"
-          : "Awaiting payment";
+  const payoutState = getPayoutState(item, "seller");
   const shippingLine = [item.shipping_carrier, item.shipping_service].filter(Boolean).join(" · ");
   const actions = [];
   const salePriceCents = Math.max(
@@ -420,24 +585,29 @@ function renderSaleItem(item) {
   }
 
   return `
-    <article class="list-item">
-      <strong>${ElevenZeroApp.escapeHtml(title)}</strong>
-      <span>${ElevenZeroApp.escapeHtml(formatCents(salePriceCents))} sale · ${ElevenZeroApp.escapeHtml(
+    <article class="list-item order-history-item">
+      <div class="order-history-head">
+        <div>
+          <strong>${ElevenZeroApp.escapeHtml(title)}</strong>
+          <span>${ElevenZeroApp.escapeHtml(formatCents(salePriceCents))} sale · ${ElevenZeroApp.escapeHtml(
         formatCents(item.platform_fee_cents)
       )} Eleven Zero fee</span>
+        </div>
+        <span class="list-item-status list-item-status-${escapeAttr(payoutState.tone)}">
+          ${escapeAttr(payoutState.label)}
+        </span>
+      </div>
       <span><strong>${ElevenZeroApp.escapeHtml(formatCents(proceedsCents))} estimated proceeds</strong></span>
+      <p class="order-state-copy">${escapeAttr(payoutState.copy)}</p>
       ${shippingLine ? `<span>${ElevenZeroApp.escapeHtml(shippingLine)}</span>` : ""}
-      <span class="list-item-status ${isLabelReady ? "list-item-status-ready" : "list-item-status-pending"}">
-        ${ElevenZeroApp.escapeHtml(statusLabel)}
-      </span>
       ${
         item.tracking_number
           ? `<span>Tracking · ${ElevenZeroApp.escapeHtml(item.tracking_number)}</span>`
           : ""
       }
       ${
-        item.shipping_error
-          ? `<span class="seller-sale-error">${ElevenZeroApp.escapeHtml(item.shipping_error)}</span>`
+        item.shipping_error || item.payout_error
+          ? `<span class="seller-sale-error">${ElevenZeroApp.escapeHtml(item.shipping_error || item.payout_error)}</span>`
           : ""
       }
       ${actions.length ? `<div class="seller-sale-actions">${actions.join("")}</div>` : ""}
@@ -521,7 +691,7 @@ function renderSellerProfile(profile) {
   if (profile.readyForPayouts) {
     if (sellerPill) sellerPill.textContent = "Payout ready";
     if (sellerSummary) {
-      sellerSummary.textContent = `This account is ready for Stripe payouts. Eleven Zero PB is set to keep a ${profile.platformFeePercent}% platform fee once live checkout is added.`;
+      sellerSummary.textContent = `Stripe is ready. Eleven Zero PB keeps a ${profile.platformFeePercent}% marketplace fee, then releases seller proceeds after confirmed delivery and the buyer protection period.`;
     }
     if (sellerConnectButton) sellerConnectButton.textContent = "Stripe ready";
     return;
@@ -537,7 +707,7 @@ function renderSellerProfile(profile) {
             } still need attention in Stripe.`
           : "Stripe still needs to finish a few checks before payouts go live.";
 
-      sellerSummary.textContent = `Your seller profile has started. ${outstanding} Eleven Zero PB is set to keep a ${profile.platformFeePercent}% platform fee when payments turn on.`;
+      sellerSummary.textContent = `Your seller profile has started. ${outstanding} The marketplace fee is ${profile.platformFeePercent}%; proceeds release after confirmed delivery.`;
     }
     if (sellerConnectButton) sellerConnectButton.textContent = "Continue Stripe onboarding";
     return;
@@ -545,7 +715,7 @@ function renderSellerProfile(profile) {
 
   if (sellerPill) sellerPill.textContent = "Not started";
   if (sellerSummary) {
-    sellerSummary.textContent = `Start Stripe onboarding so seller payouts can be connected to your Eleven Zero PB account. The current marketplace fee is set to ${profile.platformFeePercent}%.`;
+    sellerSummary.textContent = `Start Stripe onboarding before selling. The marketplace fee is ${profile.platformFeePercent}%, and proceeds release after confirmed delivery.`;
   }
   if (sellerConnectButton) sellerConnectButton.textContent = "Start Stripe onboarding";
 }
@@ -993,8 +1163,9 @@ function renderAdminReviews(target, items, type) {
 }
 
 function formatAdminActivityDate(value) {
+  if (!value) return "";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Recently";
+  if (Number.isNaN(date.getTime())) return "";
 
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -1003,6 +1174,41 @@ function formatAdminActivityDate(value) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function adminOrderControls(item) {
+  const orderId = Number(String(item.id || "").replace(/^purchase-/, ""));
+  if (!orderId || item.type !== "purchase") return "";
+  const issueIsOpen = item.buyer_issue_status === "open";
+  const isSeparateFlow = item.payment_flow === "separate_charge_transfer";
+  const isDelivered = String(item.tracking_status || "").toUpperCase() === "DELIVERED";
+  const isReleased = Boolean(item.stripe_transfer_id) || item.payout_status === "released";
+  const releaseAt = item.payout_release_at
+    ? new Date(item.payout_release_at).getTime()
+    : Number.NaN;
+  const releaseIsDue = Number.isFinite(releaseAt) && releaseAt <= Date.now();
+  const controls = [];
+
+  if (issueIsOpen) {
+    controls.push(
+      `<button type="button" data-admin-issue-action="resume" data-order-id="${escapeAttr(orderId)}">Resolve + resume</button>`,
+      `<button type="button" data-admin-issue-action="hold" data-order-id="${escapeAttr(orderId)}">Keep on hold</button>`
+    );
+  }
+  if (
+    isSeparateFlow &&
+    isDelivered &&
+    !issueIsOpen &&
+    !isReleased &&
+    releaseIsDue
+  ) {
+    controls.push(
+      `<button type="button" data-admin-release-payout="${escapeAttr(orderId)}">${
+        item.payout_status === "attention_needed" ? "Retry payout" : "Release proceeds"
+      }</button>`
+    );
+  }
+  return controls.join("");
 }
 
 function renderAdminCommerceNotifications(items) {
@@ -1033,6 +1239,8 @@ function renderAdminCommerceNotifications(items) {
       const sellerEmailStatus = item.seller_sale_email_status || "pending";
       const sellerEmailSent = sellerEmailStatus === "sent";
       const sessionId = item.stripe_checkout_session_id || "";
+      const payoutState = isPurchase ? getPayoutState(item, "seller") : null;
+      const orderControls = adminOrderControls(item);
       const purchaseActions = isPurchase
         ? `
             <div class="admin-notification-actions">
@@ -1051,6 +1259,7 @@ function renderAdminCommerceNotifications(items) {
                   ? `<button type="button" data-retry-shipping="${escapeAttr(sessionId)}">Retry label</button>`
                   : ""
               }
+              ${orderControls}
             </div>
           `
         : "";
@@ -1059,6 +1268,7 @@ function renderAdminCommerceNotifications(items) {
             confirmationSent ? "Buyer confirmation sent" : `Buyer email: ${confirmationStatus.replaceAll("_", " ")}`,
             sellerEmailSent ? "Seller confirmation sent" : `Seller email: ${sellerEmailStatus.replaceAll("_", " ")}`,
             item.shipping_status ? `Label: ${String(item.shipping_status).replaceAll("_", " ")}` : "",
+            payoutState ? `Payout: ${payoutState.label}` : "",
           ]
             .filter(Boolean)
             .join(" · ")
@@ -1071,7 +1281,16 @@ function renderAdminCommerceNotifications(items) {
             <strong>${escapeAttr(title)}</strong>
             <p>${escapeAttr(detail)}</p>
             ${fulfillmentNote ? `<span>${escapeAttr(fulfillmentNote)}</span>` : ""}
+            ${
+              item.buyer_issue_status === "open"
+                ? `<div class="admin-order-issue">
+                    <strong>Buyer report · ${escapeAttr(cleanStatus(item.buyer_issue_reason || "Problem"))}</strong>
+                    <p>${escapeAttr(item.buyer_issue_details || "No details provided.")}</p>
+                  </div>`
+                : ""
+            }
             ${item.shipping_error ? `<span class="admin-notification-error">${escapeAttr(item.shipping_error)}</span>` : ""}
+            ${item.payout_error ? `<span class="admin-notification-error">${escapeAttr(item.payout_error)}</span>` : ""}
             ${item.buyer_confirmation_error ? `<span class="admin-notification-error">${escapeAttr(item.buyer_confirmation_error)}</span>` : ""}
             ${item.seller_sale_email_error ? `<span class="admin-notification-error">${escapeAttr(item.seller_sale_email_error)}</span>` : ""}
             <span>${escapeAttr(formatAdminActivityDate(item.activity_at))}</span>
@@ -1354,6 +1573,99 @@ async function sendAdminSellerConfirmation(sessionId, button) {
   }
 }
 
+async function reportOrderIssue(form) {
+  const submitButton = form.querySelector('button[type="submit"]');
+  const statusNode = form.querySelector(".order-issue-status");
+  const formData = new FormData(form);
+  if (submitButton?.disabled) return;
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Sending…";
+  }
+
+  try {
+    ElevenZeroApp.setStatus(statusNode, "Sending your report…", "warning");
+    const response = await ElevenZeroApp.request("/api/account/orders/report-issue", {
+      method: "POST",
+      body: {
+        orderId: Number(form.dataset.orderId || 0),
+        sessionId: form.dataset.sessionId || "",
+        reason: formData.get("reason"),
+        details: String(formData.get("details") || "").trim(),
+      },
+    });
+    ElevenZeroApp.setStatus(statusNode, response.message || "Your report is open.", "success");
+    await loadDashboard();
+  } catch (error) {
+    ElevenZeroApp.setStatus(statusNode, error.message, "error");
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Send report";
+    }
+  }
+}
+
+async function resolveAdminOrderIssue(orderId, action, button) {
+  if (!orderId || button?.disabled) return;
+  const note = window.prompt(
+    action === "hold"
+      ? "Why should this payout stay on hold?"
+      : "Add a short resolution note:",
+    action === "hold" ? "Waiting for more information" : "Issue reviewed and resolved"
+  );
+  if (note === null) return;
+  if (note.trim().length < 5) {
+    setAdminStatus("Add at least 5 characters to the resolution note.", "error");
+    return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving…";
+  }
+  try {
+    setAdminStatus("Updating the buyer report and payout hold…", "warning");
+    const response = await ElevenZeroApp.request("/api/admin/orders/resolve-issue", {
+      method: "POST",
+      body: { orderId: Number(orderId), action, note: note.trim() },
+    });
+    await loadAdminDashboard();
+    setAdminStatus(response.message || "Order issue updated.", "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+    if (button) {
+      button.disabled = false;
+      button.textContent = action === "hold" ? "Keep on hold" : "Resolve + resume";
+    }
+  }
+}
+
+async function releaseAdminOrderPayout(orderId, button) {
+  if (!orderId || button?.disabled) return;
+  const confirmed = window.confirm(
+    "Release this seller’s proceeds now? Shippo delivery must already be confirmed."
+  );
+  if (!confirmed) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Releasing…";
+  }
+  try {
+    setAdminStatus("Confirming delivery and releasing seller proceeds…", "warning");
+    const response = await ElevenZeroApp.request("/api/admin/orders/release-payout", {
+      method: "POST",
+      body: { orderId: Number(orderId) },
+    });
+    await loadAdminDashboard();
+    setAdminStatus(response.message || "Seller proceeds released.", "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Retry payout";
+    }
+  }
+}
+
 async function retryShippingLabel(sessionId, button) {
   if (!sessionId || button?.disabled) return;
   if (button) {
@@ -1499,6 +1811,25 @@ function bindAdminPanel() {
       return;
     }
 
+    const issueButton = event.target.closest("[data-admin-issue-action]");
+    if (issueButton) {
+      await resolveAdminOrderIssue(
+        issueButton.dataset.orderId,
+        issueButton.dataset.adminIssueAction,
+        issueButton
+      );
+      return;
+    }
+
+    const payoutButton = event.target.closest("[data-admin-release-payout]");
+    if (payoutButton) {
+      await releaseAdminOrderPayout(
+        payoutButton.dataset.adminReleasePayout,
+        payoutButton
+      );
+      return;
+    }
+
     const shippingRetryButton = event.target.closest("[data-retry-shipping]");
     if (shippingRetryButton) {
       await retryShippingLabel(shippingRetryButton.dataset.retryShipping, shippingRetryButton);
@@ -1553,6 +1884,13 @@ async function loadDashboard() {
       renderTrainerItem,
       "No trainer profiles yet",
       "Publish your first trainer profile from the trainers page."
+    );
+    renderDashboardList(
+      accountPurchases,
+      response.recentPurchases || [],
+      renderPurchaseItem,
+      "No purchases yet",
+      "Paddles you buy will appear here with delivery updates."
     );
     renderDashboardList(
       accountSales,
@@ -1632,6 +1970,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   bindAdminPanel();
+  accountPurchases?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("[data-order-issue-form]");
+    if (!form) return;
+    event.preventDefault();
+    await reportOrderIssue(form);
+  });
   accountSales?.addEventListener("click", async (event) => {
     const soldButton = event.target.closest("[data-seller-mark-sold]");
     if (soldButton) {
