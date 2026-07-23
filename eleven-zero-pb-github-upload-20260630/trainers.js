@@ -40,8 +40,8 @@ const trainerJoinSubmitButton = trainerJoinForm?.querySelector('button[type="sub
 
 const TRAINER_PHOTO_MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 const TRAINER_PHOTO_MAX_DATA_URL_LENGTH = 1_500_000;
-const TRAINER_PHOTO_DEFAULT_STATUS = "JPG, PNG, WebP or iPhone photo · 10 MB max";
-const TRAINER_PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+const TRAINER_PHOTO_DEFAULT_STATUS = "JPG, PNG or WebP · 10 MB max";
+const TRAINER_PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
 
 let trainerImageDraft = "";
 let trainerImageProcessing = false;
@@ -77,7 +77,7 @@ function isSupportedTrainerPhoto(file) {
   const type = String(file?.type || "").toLowerCase();
   const extension = trainerPhotoFileExtension(file);
   return (
-    ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(type) ||
+    ["image/jpeg", "image/png", "image/webp"].includes(type) ||
     TRAINER_PHOTO_EXTENSIONS.has(extension)
   );
 }
@@ -142,7 +142,7 @@ function renderTrainerPhotoCrop(image, width, height, quality) {
 
 async function prepareTrainerPhoto(file) {
   if (!file || !isSupportedTrainerPhoto(file)) {
-    throw new Error("Choose a JPG, PNG, WebP, or iPhone photo.");
+    throw new Error("Choose a JPG, PNG, or WebP photo.");
   }
   if (file.size > TRAINER_PHOTO_MAX_SOURCE_BYTES) {
     throw new Error("Choose a photo smaller than 10 MB.");
