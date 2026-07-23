@@ -1111,6 +1111,60 @@ class ManagedShippingTests(unittest.TestCase):
         self.assertEqual(result["payout_status"], "release_scheduled")
         self.assertEqual(result["stripe_transfer_id"], "")
 
+    def test_hold_committed_during_release_blocks_transfer_and_is_preserved(self):
+        order_id = self.create_delivery_gated_order("cs_test_release_hold_race")
+        calls = []
+
+        app.shippo_api_request = lambda *_args, **_kwargs: {
+            "carrier": "USPS",
+            "tracking_status": {"status": "DELIVERED"},
+        }
+
+        def fake_stripe(method, path, data=None, idempotency_key=None):
+            calls.append((method, path, data or {}, idempotency_key))
+            if path == "/payment_intents/pi_test_delivery":
+                return {
+                    "id": "pi_test_delivery",
+                    "status": "succeeded",
+                    "latest_charge": "ch_test_delivery",
+                }
+            if path == "/transfers" and method == "GET":
+                # Reproduce a refund/return/issue webhook committing after the
+                # payout claim but before the final Stripe transfer.
+                with sqlite3.connect(app.DB_PATH) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET payout_status = 'on_hold',
+                            buyer_issue_status = 'open',
+                            buyer_issue_reason = 'item_not_as_described',
+                            payout_error = 'Concurrent safety hold'
+                        WHERE id = ?
+                        """,
+                        (order_id,),
+                    )
+                    connection.commit()
+                return {"data": []}
+            if path == "/transfers" and method == "POST":
+                raise AssertionError(
+                    "A committed safety hold must block the Stripe transfer."
+                )
+            if path == "/charges/ch_test_delivery":
+                raise AssertionError(
+                    "Final local payout eligibility must be checked before Charge lookup."
+                )
+            raise AssertionError(f"Unexpected Stripe request: {method} {path}")
+
+        app.stripe_request = fake_stripe
+        result = app.release_seller_transfer_for_order(order_id)
+
+        self.assertEqual(result["payout_status"], "on_hold")
+        self.assertEqual(result["buyer_issue_status"], "open")
+        self.assertEqual(result["stripe_transfer_id"], "")
+        self.assertFalse(
+            any(method == "POST" and path == "/transfers" for method, path, *_ in calls)
+        )
+
     def test_existing_stripe_transfer_is_adopted_and_retries_are_idempotent(self):
         order_id = self.create_delivery_gated_order("cs_test_existing_transfer")
         stripe_calls = []
