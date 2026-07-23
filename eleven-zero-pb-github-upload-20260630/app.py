@@ -606,6 +606,8 @@ def normalize_shipping_address(raw_address) -> dict:
     country = compact_whitespace(address.get("country", "US")).upper() or "US"
 
     return {
+        "name": compact_whitespace(address.get("name", "")),
+        "email": compact_whitespace(address.get("email", "")),
         "line1": compact_whitespace(address.get("line1", "")),
         "line2": compact_whitespace(address.get("line2", "")),
         "city": compact_whitespace(address.get("city", "")),
@@ -672,8 +674,10 @@ def shippo_is_configured() -> bool:
 
 
 def shipping_policy_from_row(row: sqlite3.Row | dict | None) -> dict:
-    mode_raw = str(row_value(row, "shipping_mode", "calculated") or "calculated").strip().lower()
-    mode = mode_raw if mode_raw in {"calculated", "flat", "free"} else "calculated"
+    # Eleven Zero PB provides one consistent, prepaid Shippo flow. Older
+    # free/flat listings are normalized during startup and also treated as
+    # calculated here so they cannot appear purchasable without a real label.
+    mode = "calculated"
     flat_usd = int(row_value(row, "shipping_flat_usd", 0) or 0)
     origin_zip = parse_zip_code(row_value(row, "shipping_origin_zip", ""))
     origin_street1 = compact_whitespace(row_value(row, "shipping_origin_street1", ""))
@@ -763,13 +767,14 @@ def build_shippo_rate_quote_for_listing(
             "email": SUPPORT_EMAIL or PRIMARY_OWNER_EMAIL,
         },
         "address_to": {
-            "name": "Eleven Zero PB buyer",
+            "name": address.get("name") or "Eleven Zero PB buyer",
             "street1": address["line1"],
             "street2": address["line2"],
             "city": address["city"],
             "state": address["state"],
             "zip": address["postalCode"],
             "country": address["country"],
+            **({"email": address["email"]} if address.get("email") else {}),
         },
         "parcels": [
             {
@@ -877,52 +882,28 @@ def build_shipping_quote_for_listing(listing_row: sqlite3.Row | dict, raw_addres
     price_cents = max(price_usd, 0) * 100
     destination_summary = f"{address['city']}, {address['state']} {address['postalCode']}"
 
-    if shipping_policy["mode"] == "free":
-        return {
-            "amount_cents": 0,
-            "amount_usd": 0,
-            "estimated_total_cents": price_cents,
-            "estimated_total_usd": round(price_cents / 100, 2),
-            "service_level": "Free shipping",
-            "label": "Free shipping",
-            "summary": f"Seller included shipping for {destination_summary}",
-            "destination_summary": destination_summary,
-            "destination_state": address["state"],
-            "postal_code": address["postalCode"],
-            "address": address,
-            "rate_kind": "free",
-            "is_estimate": False,
-            "provider_label": "Seller included shipping",
-            "policy_label": shipping_policy["label"],
-        }
-
-    if shipping_policy["mode"] == "flat":
-        amount_cents = max(0, shipping_policy["flatUsd"]) * 100
-        return {
-            "amount_cents": amount_cents,
-            "amount_usd": round(amount_cents / 100, 2),
-            "estimated_total_cents": price_cents + amount_cents,
-            "estimated_total_usd": round((price_cents + amount_cents) / 100, 2),
-            "service_level": "Flat shipping",
-            "label": "Flat shipping",
-            "summary": f"Seller-set flat shipping for {destination_summary}",
-            "destination_summary": destination_summary,
-            "destination_state": address["state"],
-            "postal_code": address["postalCode"],
-            "address": address,
-            "rate_kind": "flat",
-            "is_estimate": False,
-            "provider_label": "Seller-set flat shipping",
-            "policy_label": shipping_policy["label"],
-        }
-
     try:
         shippo_quote = build_shippo_rate_quote_for_listing(listing_row, address, shipping_policy, price_cents)
-    except ValueError:
+    except (RuntimeError, ValueError) as error:
+        if shippo_is_configured():
+            raise ValueError(
+                "A live prepaid shipping rate is unavailable right now. "
+                "Please check the address and try again."
+            ) from error
         shippo_quote = None
 
     if shippo_quote:
         return shippo_quote
+
+    if shippo_is_configured():
+        if not shipping_policy["carrierReady"]:
+            raise ValueError(
+                "This seller must finish the ship-from address before the paddle can be purchased."
+            )
+        raise ValueError(
+            "Shippo could not return a live prepaid shipping rate for this address. "
+            "Please check the address and try again."
+        )
 
     origin_location = compact_whitespace(row_value(listing_row, "location", "") or "")
     origin_state = extract_state_from_location(origin_location)
@@ -1054,9 +1035,12 @@ LISTING_APPROVAL_LABELS = {
 
 LISTING_SALE_LABELS = {
     "available": "Available",
+    "reserved": "Checkout in progress",
     "pending": "Sale pending",
     "sold": "Sold",
 }
+
+ADMIN_LISTING_SALE_STATUSES = {"available", "pending", "sold"}
 
 COURT_APPROVAL_LABELS = {
     "pending": "Pending review",
@@ -1695,8 +1679,9 @@ def build_purchase_confirmation_message(
                 *([f"Shipping to: {destination}"] if destination else []),
                 "",
                 "What happens next:",
-                "1. The seller prepares your prepaid shipping label.",
-                "2. Shipping and tracking updates stay connected to your Eleven Zero PB account.",
+                "1. Eleven Zero PB creates the seller's prepaid shipping label.",
+                "2. The seller packs and drops off your paddle.",
+                "3. Shipping and tracking updates stay connected to your Eleven Zero PB account.",
                 f"Order reference: {order_reference}",
                 "",
                 f"View your account: {account_url}",
@@ -1794,7 +1779,7 @@ def build_purchase_confirmation_message(
                   <tr>
                     <td style="padding:22px;">
                       <div style="color:#042814;font-size:16px;font-weight:800;">What happens next</div>
-                      <p style="margin:10px 0 0;color:#5d6f64;font-size:14px;line-height:1.65;">The seller prepares the prepaid shipping label. Tracking updates will remain connected to your account.</p>
+                      <p style="margin:10px 0 0;color:#5d6f64;font-size:14px;line-height:1.65;">Eleven Zero PB creates the prepaid shipping label, then the seller packs and drops off your paddle. Tracking updates remain connected to your account.</p>
                     </td>
                   </tr>
                 </table>
@@ -1954,6 +1939,245 @@ def send_purchase_confirmation_for_order(session_id: str) -> sqlite3.Row | None:
     return order_email_row(session_id)
 
 
+def build_seller_sale_confirmation_message(
+    order_row: sqlite3.Row,
+    title: str,
+    destination: str,
+) -> EmailMessage:
+    """Build the seller's immediate paid-sale notice before label creation."""
+    site_url = (SITE_URL or "https://11zeropb.com").rstrip("/")
+    account_url = f"{site_url}/account.html"
+    logo_path = APP_ROOT / "assets" / "logo-primary.png"
+    logo_src = "cid:eleven-zero-logo" if logo_path.exists() else f"{site_url}/assets/logo-primary.png"
+    seller_name = compact_whitespace(order_row["seller_name"] or "") or "there"
+    buyer_name = compact_whitespace(order_row["buyer_name"] or "") or "the buyer"
+    order_reference = f"EZPB-{order_row['id']}"
+    shipping_cents = int(order_row["shipping_amount_cents"] or 0)
+    sale_cents = max(int(order_row["amount_total_cents"] or 0) - shipping_cents, 0)
+    fee_cents = max(int(order_row["platform_fee_cents"] or 0), 0)
+    proceeds_cents = int(row_value(order_row, "seller_proceeds_cents", 0) or 0)
+    if proceeds_cents <= 0:
+        proceeds_cents = max(sale_cents - fee_cents, 0)
+    sale = sale_cents / 100
+    fee = fee_cents / 100
+    proceeds = proceeds_cents / 100
+
+    message = EmailMessage()
+    message["Subject"] = f"Your paddle sold — {title}"
+    message["From"] = f"Eleven Zero PB <{EMAIL_FROM}>"
+    message["To"] = compact_whitespace(order_row["seller_email"] or "")
+    message.set_content(
+        "\n".join(
+            [
+                f"Hi {seller_name},",
+                "",
+                f"Good news — {title} sold and the buyer's payment is confirmed.",
+                f"Sale price: ${sale:,.2f}",
+                f"Eleven Zero PB fee ({STRIPE_PLATFORM_FEE_PERCENT:g}%): -${fee:,.2f}",
+                f"Estimated proceeds: ${proceeds:,.2f}",
+                f"Buyer: {buyer_name}",
+                *([f"Ship to: {destination}"] if destination else []),
+                f"Order reference: {order_reference}",
+                "",
+                "What happens next:",
+                "1. Eleven Zero PB is creating the prepaid shipping label.",
+                "2. A separate email will include the label and packing instructions.",
+                "3. Your proceeds route to your connected Stripe balance. Bank payout timing depends on your Stripe account and bank.",
+                "",
+                f"Manage this sale: {account_url}",
+                "",
+                "Questions? Reply to this email and the Eleven Zero PB team will help.",
+                "",
+                "Eleven Zero PB",
+                site_url,
+            ]
+        )
+    )
+
+    safe_seller_name = escape(seller_name)
+    safe_buyer_name = escape(buyer_name)
+    safe_title = escape(title)
+    safe_destination = escape(destination)
+    safe_order_reference = escape(order_reference)
+    safe_account_url = escape(account_url, quote=True)
+    safe_site_url = escape(site_url, quote=True)
+    safe_support_email = escape(SUPPORT_EMAIL or EMAIL_FROM, quote=True)
+    destination_html = ""
+    if destination:
+        destination_html = f"""
+                        <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Ship to</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">{safe_destination}</td>
+                        </tr>"""
+
+    message.add_alternative(
+        f"""<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your paddle sold</title></head>
+  <body style="margin:0;padding:0;background:#f6f2e8;color:#042814;font-family:'Avenir Next','Segoe UI',Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Payment is confirmed for {safe_title}. Order {safe_order_reference}.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f6f2e8;">
+      <tr><td align="center" style="padding:28px 14px;">
+        <table role="presentation" width="620" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:620px;background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 18px 48px rgba(3,45,23,.12);">
+          <tr><td style="padding:26px 34px;background:#032d17;"><a href="{safe_site_url}"><img src="{logo_src}" width="210" alt="Eleven Zero PB" style="display:block;width:210px;max-width:100%;height:auto;border:0;"></a></td></tr>
+          <tr><td style="padding:38px 34px 18px;">
+            <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:#d9ffe5;color:#06552a;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">✓ Payment confirmed</span>
+            <h1 style="margin:20px 0 12px;color:#042814;font-size:34px;line-height:1.08;">Your paddle sold.</h1>
+            <p style="margin:0;color:#5d6f64;font-size:16px;line-height:1.65;">Hi {safe_seller_name}, <strong style="color:#042814;">{safe_title}</strong> has a confirmed buyer. We’re preparing the prepaid label now.</p>
+          </td></tr>
+          <tr><td style="padding:12px 34px 8px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #e4ebe6;border-radius:20px;">
+              <tr><td colspan="2" style="padding:22px;border-bottom:1px solid #e4ebe6;"><div style="color:#5d6f64;font-size:12px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;">Sale summary</div><div style="margin-top:8px;font-size:21px;font-weight:800;">{safe_title}</div></td></tr>
+              <tr><td colspan="2" style="padding:22px 22px 4px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr><td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Buyer</td><td align="right" style="padding:0 0 16px;font-size:14px;font-weight:700;">{safe_buyer_name}</td></tr>
+                {destination_html}
+                <tr><td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Sale price</td><td align="right" style="padding:0 0 16px;font-size:14px;font-weight:700;">${sale:,.2f}</td></tr>
+                <tr><td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Eleven Zero fee ({STRIPE_PLATFORM_FEE_PERCENT:g}%)</td><td align="right" style="padding:0 0 16px;font-size:14px;font-weight:700;">−${fee:,.2f}</td></tr>
+                <tr><td style="padding:17px 0 19px;border-top:1px solid #e4ebe6;font-size:16px;font-weight:800;">Estimated proceeds</td><td align="right" style="padding:17px 0 19px;border-top:1px solid #e4ebe6;font-size:22px;font-weight:900;">${proceeds:,.2f}</td></tr>
+              </table></td></tr>
+            </table>
+          </td></tr>
+          <tr><td style="padding:22px 34px 8px;"><div style="padding:22px;background:#f3fff6;border-radius:20px;color:#5d6f64;font-size:14px;line-height:1.65;"><strong style="display:block;margin-bottom:8px;color:#042814;font-size:16px;">What happens next</strong>We’ll email the prepaid label and packing instructions separately. Your proceeds route to your connected Stripe balance; bank payout timing depends on Stripe and your bank.</div></td></tr>
+          <tr><td align="center" style="padding:26px 34px 34px;"><a href="{safe_account_url}" style="display:inline-block;padding:15px 25px;border-radius:999px;background:#00ed64;color:#032d17;font-size:15px;font-weight:900;text-decoration:none;">Manage this sale</a><p style="margin:18px 0 0;color:#7b8b82;font-size:12px;">Order reference: <strong>{safe_order_reference}</strong></p></td></tr>
+          <tr><td align="center" style="padding:24px 34px;background:#032d17;color:#b8cabf;font-size:12px;line-height:1.7;">Questions? Reply or contact <a href="mailto:{safe_support_email}" style="color:#00ed64;text-decoration:none;">{safe_support_email}</a>.<br>Eleven Zero PB · Built for the pickleball community</td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>""",
+        subtype="html",
+    )
+
+    if logo_path.exists():
+        html_part = message.get_payload()[-1]
+        html_part.add_related(
+            logo_path.read_bytes(),
+            maintype="image",
+            subtype="png",
+            cid="<eleven-zero-logo>",
+            filename="eleven-zero-pb.png",
+            disposition="inline",
+        )
+    return message
+
+
+def send_seller_sale_confirmation_for_order(session_id: str) -> sqlite3.Row | None:
+    """Send the seller one immediate paid-sale notice, independently of Shippo."""
+    order_row = order_email_row(session_id)
+    if not order_row or (
+        order_row["status"] != "paid" and order_row["stripe_payment_status"] != "paid"
+    ):
+        return order_row
+    if order_row["seller_sale_email_sent_at"]:
+        return order_row
+
+    seller_email = compact_whitespace(order_row["seller_email"] or "")
+    if "@" not in seller_email:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_sale_email_status = 'error',
+                    seller_sale_email_error = 'The seller account does not have a valid email address.'
+                WHERE stripe_checkout_session_id = ?
+                  AND seller_sale_email_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+        return order_email_row(session_id)
+
+    if not transactional_email_is_configured():
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_sale_email_status = 'not_configured',
+                    seller_sale_email_error = 'Transactional email is not configured.'
+                WHERE stripe_checkout_session_id = ?
+                  AND seller_sale_email_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+        return order_email_row(session_id)
+
+    with closing(connect_db()) as connection:
+        claimed = connection.execute(
+            """
+            UPDATE orders
+            SET seller_sale_email_status = 'sending', seller_sale_email_error = ''
+            WHERE stripe_checkout_session_id = ?
+              AND seller_sale_email_sent_at IS NULL
+              AND seller_sale_email_status IN ('pending', 'error', 'not_configured')
+            """,
+            (session_id,),
+        )
+        connection.commit()
+        if claimed.rowcount != 1:
+            return order_email_row(session_id)
+
+    title = " ".join(
+        part for part in [order_row["brand"], order_row["model"]] if compact_whitespace(part)
+    ).strip() or "pickleball paddle"
+    try:
+        address = json.loads(order_row["shipping_address_json"] or "{}")
+    except json.JSONDecodeError:
+        address = {}
+    destination = ", ".join(
+        part
+        for part in [
+            compact_whitespace(address.get("city", "")),
+            " ".join(
+                part
+                for part in [
+                    compact_whitespace(address.get("state", "")),
+                    compact_whitespace(address.get("postalCode", "")),
+                ]
+                if part
+            ),
+        ]
+        if part
+    )
+    message = build_seller_sale_confirmation_message(order_row, title, destination)
+
+    try:
+        if SMTP_USE_SSL:
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20)
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        with server:
+            if SMTP_USE_TLS and not SMTP_USE_SSL:
+                server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(message)
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_sale_email_status = 'sent',
+                    seller_sale_email_sent_at = ?,
+                    seller_sale_email_error = ''
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (utc_now(), session_id),
+            )
+            connection.commit()
+    except (OSError, TypeError, ValueError, smtplib.SMTPException) as error:
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_sale_email_status = 'error', seller_sale_email_error = ?
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (compact_whitespace(str(error))[:500], session_id),
+            )
+            connection.commit()
+
+    return order_email_row(session_id)
+
+
 def build_seller_shipping_label_message(
     order_row: sqlite3.Row,
     title: str,
@@ -1973,6 +2197,15 @@ def build_seller_shipping_label_message(
     service = compact_whitespace(order_row["shipping_service"] or "")
     shipping_service = " · ".join(part for part in [carrier, service] if part) or "Prepaid shipping"
     order_reference = f"EZPB-{order_row['id']}"
+    shipping_cents = int(order_row["shipping_amount_cents"] or 0)
+    sale_cents = max(int(order_row["amount_total_cents"] or 0) - shipping_cents, 0)
+    fee_cents = max(int(order_row["platform_fee_cents"] or 0), 0)
+    proceeds_cents = int(row_value(order_row, "seller_proceeds_cents", 0) or 0)
+    if proceeds_cents <= 0:
+        proceeds_cents = max(sale_cents - fee_cents, 0)
+    sale = sale_cents / 100
+    fee = fee_cents / 100
+    proceeds = proceeds_cents / 100
 
     message = EmailMessage()
     message["Subject"] = f"Shipping label ready — {title}"
@@ -1989,6 +2222,9 @@ def build_seller_shipping_label_message(
                 f"Shipping service: {shipping_service}",
                 *([f"Tracking number: {tracking_number}"] if tracking_number else []),
                 f"Order reference: {order_reference}",
+                f"Sale price: ${sale:,.2f}",
+                f"Eleven Zero PB fee ({STRIPE_PLATFORM_FEE_PERCENT:g}%): -${fee:,.2f}",
+                f"Estimated proceeds: ${proceeds:,.2f}",
                 "",
                 f"Open and print the prepaid label: {label_url}",
                 "",
@@ -1999,6 +2235,8 @@ def build_seller_shipping_label_message(
                 "4. Attach the new label flat on the largest side. Keep the barcode uncovered.",
                 f"5. Drop the package off with {carrier or 'the carrier shown on the label'}.",
                 "6. Keep the drop-off receipt until delivery is confirmed.",
+                "",
+                "Your proceeds route to your connected Stripe balance. Bank payout timing depends on your Stripe account and bank.",
                 "",
                 *([f"Track the package: {tracking_url}"] if tracking_url else []),
                 f"Manage this order: {account_url}",
@@ -2099,10 +2337,23 @@ def build_seller_shipping_label_message(
                         </tr>
                         {tracking_html}
                         <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Sale price</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">${sale:,.2f}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:0 0 16px;color:#5d6f64;font-size:14px;">Eleven Zero fee ({STRIPE_PLATFORM_FEE_PERCENT:g}%)</td>
+                          <td align="right" style="padding:0 0 16px;color:#042814;font-size:14px;font-weight:700;">−${fee:,.2f}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:16px 0;border-top:1px solid #e4ebe6;color:#042814;font-size:15px;font-weight:800;">Estimated proceeds</td>
+                          <td align="right" style="padding:16px 0;border-top:1px solid #e4ebe6;color:#042814;font-size:18px;font-weight:900;">${proceeds:,.2f}</td>
+                        </tr>
+                        <tr>
                           <td style="padding:16px 0 18px;border-top:1px solid #e4ebe6;color:#5d6f64;font-size:14px;">Order reference</td>
                           <td align="right" style="padding:16px 0 18px;border-top:1px solid #e4ebe6;color:#042814;font-size:14px;font-weight:800;">{safe_order_reference}</td>
                         </tr>
                       </table>
+                      <p style="margin:16px 0 0;color:#65776c;font-size:12px;line-height:1.6;">Proceeds route to your connected Stripe balance. Bank payout timing depends on Stripe and your bank.</p>
                     </td>
                   </tr>
                 </table>
@@ -2284,18 +2535,174 @@ def mark_listing_sale_pending_for_order(session_id: str) -> None:
         connection.execute(
             """
             UPDATE listings
-            SET sale_status = 'pending'
+            SET sale_status = 'pending',
+                reserved_checkout_session_id = '',
+                reserved_until = NULL
             WHERE id = (
               SELECT listing_id
               FROM orders
               WHERE stripe_checkout_session_id = ?
                 AND (status = 'paid' OR stripe_payment_status = 'paid')
             )
-              AND sale_status = 'available'
+              AND (
+                sale_status = 'available'
+                OR sale_status = 'pending'
+                OR (
+                  sale_status = 'reserved'
+                  AND reserved_checkout_session_id = ?
+                )
+              )
             """,
-            (session_id,),
+            (session_id, session_id),
         )
         connection.commit()
+
+
+def release_listing_reservation_for_order(session_id: str) -> None:
+    """Release only the reservation owned by this exact unpaid order."""
+    with closing(connect_db()) as connection:
+        connection.execute(
+            """
+            UPDATE listings
+            SET sale_status = 'available',
+                reserved_checkout_session_id = '',
+                reserved_until = NULL
+            WHERE sale_status = 'reserved'
+              AND reserved_checkout_session_id = ?
+              AND id = (
+                SELECT listing_id
+                FROM orders
+                WHERE stripe_checkout_session_id = ?
+                  AND stripe_payment_status != 'paid'
+                  AND status IN ('expired', 'payment_failed')
+              )
+            """,
+            (session_id, session_id),
+        )
+        connection.commit()
+
+
+def reconcile_expired_listing_reservation(listing_row: sqlite3.Row | dict | None) -> bool:
+    """Confirm an overdue reservation with Stripe and repair local state.
+
+    Webhooks remain the primary path. This is a safe fallback for a missed
+    expiration webhook when another buyer later tries the listing.
+    """
+    if normalize_listing_sale_status(
+        row_value(listing_row, "sale_status", "available"), default="available"
+    ) != "reserved":
+        return False
+
+    session_id = compact_whitespace(
+        row_value(listing_row, "reserved_checkout_session_id", "")
+    )
+    reserved_until = compact_whitespace(row_value(listing_row, "reserved_until", ""))
+    if not session_id.startswith("cs_") or not reserved_until:
+        return False
+    try:
+        expiry = datetime.strptime(reserved_until, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return False
+    if datetime.now(timezone.utc) < expiry:
+        return False
+
+    try:
+        session = stripe_request("GET", f"/checkout/sessions/{session_id}")
+    except (RuntimeError, ValueError):
+        return False
+
+    payment_status = str(session.get("payment_status") or "unpaid")
+    session_status = str(session.get("status") or "open")
+    if payment_status == "paid":
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET stripe_payment_intent_id = ?,
+                    stripe_payment_status = 'paid',
+                    stripe_session_status = ?,
+                    status = 'paid',
+                    completed_at = COALESCE(completed_at, ?)
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (
+                    str(session.get("payment_intent") or ""),
+                    session_status,
+                    utc_now(),
+                    session_id,
+                ),
+            )
+            connection.commit()
+        finalize_paid_order(session_id)
+        return True
+
+    if session_status == "complete":
+        payment_intent_id = compact_whitespace(session.get("payment_intent", ""))
+        if payment_intent_id.startswith("pi_"):
+            try:
+                payment_intent = stripe_request(
+                    "GET", f"/payment_intents/{payment_intent_id}"
+                )
+            except (RuntimeError, ValueError):
+                return False
+
+            payment_intent_status = compact_whitespace(
+                payment_intent.get("status", "")
+            ).lower()
+            if payment_intent_status == "succeeded":
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET stripe_payment_intent_id = ?,
+                            stripe_payment_status = 'paid',
+                            stripe_session_status = 'complete',
+                            status = 'paid',
+                            completed_at = COALESCE(completed_at, ?)
+                        WHERE stripe_checkout_session_id = ?
+                        """,
+                        (payment_intent_id, utc_now(), session_id),
+                    )
+                    connection.commit()
+                finalize_paid_order(session_id)
+                return True
+
+            if payment_intent_status in {"canceled", "requires_payment_method"}:
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """
+                        UPDATE orders
+                        SET stripe_payment_intent_id = ?,
+                            stripe_payment_status = 'unpaid',
+                            stripe_session_status = 'complete',
+                            status = 'payment_failed'
+                        WHERE stripe_checkout_session_id = ?
+                        """,
+                        (payment_intent_id, session_id),
+                    )
+                    connection.commit()
+                release_listing_reservation_for_order(session_id)
+                return True
+
+    if session_status == "expired":
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET stripe_payment_status = ?,
+                    stripe_session_status = 'expired',
+                    status = 'expired'
+                WHERE stripe_checkout_session_id = ?
+                """,
+                (payment_status, session_id),
+            )
+            connection.commit()
+        release_listing_reservation_for_order(session_id)
+        return True
+
+    return False
 
 
 def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
@@ -2381,9 +2788,9 @@ def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
 
 def finalize_paid_order(session_id: str) -> sqlite3.Row | None:
     mark_listing_sale_pending_for_order(session_id)
-    order_row = purchase_shippo_label_for_order(session_id)
     send_purchase_confirmation_for_order(session_id)
-    return order_row
+    send_seller_sale_confirmation_for_order(session_id)
+    return purchase_shippo_label_for_order(session_id)
 
 
 def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
@@ -2638,6 +3045,8 @@ def init_database() -> None:
               image_data_json TEXT NOT NULL DEFAULT '[]',
               approval_status TEXT NOT NULL DEFAULT 'approved',
               sale_status TEXT NOT NULL DEFAULT 'available',
+              reserved_checkout_session_id TEXT NOT NULL DEFAULT '',
+              reserved_until TEXT,
               reviewed_at TEXT,
               created_at TEXT NOT NULL
             );
@@ -2699,7 +3108,12 @@ def init_database() -> None:
               seller_label_email_status TEXT NOT NULL DEFAULT 'pending',
               seller_label_email_sent_at TEXT,
               seller_label_email_error TEXT NOT NULL DEFAULT '',
+              seller_sale_email_status TEXT NOT NULL DEFAULT 'pending',
+              seller_sale_email_sent_at TEXT,
+              seller_sale_email_error TEXT NOT NULL DEFAULT '',
               platform_fee_cents INTEGER NOT NULL,
+              stripe_application_fee_cents INTEGER NOT NULL DEFAULT 0,
+              seller_proceeds_cents INTEGER NOT NULL DEFAULT 0,
               stripe_payment_status TEXT NOT NULL DEFAULT 'unpaid',
               stripe_session_status TEXT NOT NULL DEFAULT 'open',
               status TEXT NOT NULL DEFAULT 'open',
@@ -2755,7 +3169,6 @@ def init_database() -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_auth_tokens_lookup ON auth_tokens(purpose, token_hash, expires_at)"
         )
-
         add_column_if_missing(connection, "users", "stripe_account_id", "TEXT")
         add_column_if_missing(connection, "users", "profile_image_data", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "users", "profile_image_updated_at", "TEXT")
@@ -2792,6 +3205,8 @@ def init_database() -> None:
         add_column_if_missing(connection, "listings", "image_data_json", "TEXT NOT NULL DEFAULT '[]'")
         add_column_if_missing(connection, "listings", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "listings", "sale_status", "TEXT NOT NULL DEFAULT 'available'")
+        add_column_if_missing(connection, "listings", "reserved_checkout_session_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "listings", "reserved_until", "TEXT")
         add_column_if_missing(connection, "listings", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "trainers", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "trainers", "reviewed_at", "TEXT")
@@ -2814,11 +3229,53 @@ def init_database() -> None:
         add_column_if_missing(connection, "orders", "seller_label_email_status", "TEXT NOT NULL DEFAULT 'pending'")
         add_column_if_missing(connection, "orders", "seller_label_email_sent_at", "TEXT")
         add_column_if_missing(connection, "orders", "seller_label_email_error", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "seller_sale_email_status", "TEXT NOT NULL DEFAULT 'pending'")
+        add_column_if_missing(connection, "orders", "seller_sale_email_sent_at", "TEXT")
+        add_column_if_missing(connection, "orders", "seller_sale_email_error", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "orders", "stripe_application_fee_cents", "INTEGER NOT NULL DEFAULT 0")
+        add_column_if_missing(connection, "orders", "seller_proceeds_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "courts_directory", "address", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "affiliate_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "courts_directory", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "courts_directory", "reviewed_at", "TEXT")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_listings_checkout_reservation "
+            "ON listings(sale_status, reserved_checkout_session_id)"
+        )
+
+        # The live marketplace uses one managed, prepaid Shippo flow. Normalize
+        # legacy modes so buyers never receive a quote that cannot create a label.
+        connection.execute(
+            """
+            UPDATE listings
+            SET shipping_mode = 'calculated', shipping_flat_usd = 0
+            WHERE shipping_mode IS NULL OR shipping_mode != 'calculated'
+            """
+        )
+
+        # Backfill the exact Stripe split for older orders. The seller receives
+        # product price minus the marketplace fee; shipping stays on the platform
+        # to purchase the prepaid label.
+        connection.execute(
+            """
+            UPDATE orders
+            SET stripe_application_fee_cents = platform_fee_cents + shipping_amount_cents
+            WHERE stripe_application_fee_cents = 0
+              AND (platform_fee_cents > 0 OR shipping_amount_cents > 0)
+            """
+        )
+        connection.execute(
+            """
+            UPDATE orders
+            SET seller_proceeds_cents = MAX(
+              amount_total_cents - shipping_amount_cents - platform_fee_cents,
+              0
+            )
+            WHERE seller_proceeds_cents = 0
+              AND amount_total_cents > 0
+            """
+        )
 
         # Keep older paid orders consistent with the current sale-state model.
         # This safely repairs listings created before sale_status existed without
@@ -2826,8 +3283,10 @@ def init_database() -> None:
         connection.execute(
             """
             UPDATE listings
-            SET sale_status = 'pending'
-            WHERE sale_status = 'available'
+            SET sale_status = 'pending',
+                reserved_checkout_session_id = '',
+                reserved_until = NULL
+            WHERE sale_status IN ('available', 'reserved')
               AND id IN (
                 SELECT listing_id
                 FROM orders
@@ -3451,7 +3910,9 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
         row_value(row, "sale_status", "available"), default="available"
     )
 
-    if sale_status == "pending":
+    if sale_status == "reserved":
+        reason = "Another buyer is checking out with this paddle. Please check back shortly."
+    elif sale_status == "pending":
         reason = "A buyer has purchased this paddle. The sale is pending final confirmation."
     elif sale_status == "sold":
         reason = "This paddle has been sold."
@@ -4107,6 +4568,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_admin_send_order_confirmation(body)
             return
 
+        if parsed.path == "/api/admin/orders/send-seller-confirmation":
+            user = self.require_user()
+            if not self.require_admin(user):
+                return
+            self.handle_admin_send_seller_confirmation(body)
+            return
+
         if parsed.path == "/api/admin/listings/delete":
             user = self.require_user()
             if not self.require_admin(user):
@@ -4189,6 +4657,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not user:
                 return
             self.handle_retry_shipping_label(user, body)
+            return
+
+        if parsed.path == "/api/account/listings/mark-sold":
+            user = self.require_user()
+            if not user:
+                return
+            self.handle_owner_mark_listing_sold(user, body)
             return
 
         if parsed.path == "/api/checkout/create-session":
@@ -4316,6 +4791,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     ),
                 )
                 connection.commit()
+            release_listing_reservation_for_order(session_id)
 
         self.send_json({"received": True})
 
@@ -4347,6 +4823,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.image_data_json,
                   listings.approval_status,
                   listings.sale_status,
+                  listings.reserved_checkout_session_id,
+                  listings.reserved_until,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -4367,6 +4845,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.created_at DESC
                 """
             ).fetchall()
+
+        reconciled = False
+        for row in rows:
+            if reconcile_expired_listing_reservation(row):
+                reconciled = True
+        if reconciled:
+            return ElevenZeroHandler.fetch_listings(self)
 
         return [serialize_listing_row(row) for row in rows]
 
@@ -4472,6 +4957,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.image_data_json,
                   listings.approval_status,
                   listings.sale_status,
+                  listings.reserved_checkout_session_id,
+                  listings.reserved_until,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -4492,6 +4979,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not row:
             return None
+
+        if reconcile_expired_listing_reservation(row):
+            return ElevenZeroHandler.fetch_listing_by_id(self, listing_id, viewer)
 
         approval_status = normalize_listing_approval_status(
             row_value(row, "approval_status", "approved"), default="approved"
@@ -4641,7 +5131,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
     def fetch_user_account_row(self, user_id: int) -> sqlite3.Row | None:
         with closing(connect_db()) as connection:
-            return connection.execute(
+            row = connection.execute(
                 """
                 SELECT
                   id,
@@ -4701,6 +5191,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   listings.image_data_json,
                   listings.approval_status,
                   listings.sale_status,
+                  listings.reserved_checkout_session_id,
+                  listings.reserved_until,
                   listings.reviewed_at,
                   listings.created_at,
                   users.name AS seller_name,
@@ -4717,6 +5209,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """,
                 (listing_id,),
             ).fetchone()
+
+        if reconcile_expired_listing_reservation(row):
+            return ElevenZeroHandler.fetch_listing_checkout_row(self, listing_id)
+
+        return row
 
     def fetch_order_row(self, session_id: str) -> sqlite3.Row | None:
         with closing(connect_db()) as connection:
@@ -4892,6 +5389,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if not listing_row:
             self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
             return
+        if reconcile_expired_listing_reservation(listing_row):
+            listing_row = self.fetch_listing_checkout_row(int(listing_id_raw))
+            if not listing_row:
+                self.send_json(
+                    {"error": "That listing could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
 
         listing = serialize_listing_row(listing_row)
         checkout_state = listing_checkout_state_from_row(listing_row)
@@ -4906,14 +5411,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
 
         if sale_status != "available":
+            unavailable_message = {
+                "reserved": "Another buyer is checking out with this paddle. Please check back shortly.",
+                "pending": "This paddle has a sale pending and is no longer available.",
+                "sold": "This paddle has already been sold.",
+            }.get(sale_status, "This paddle is not available right now.")
             self.send_json(
-                {
-                    "error": (
-                        "This paddle has a sale pending and is no longer available."
-                        if sale_status == "pending"
-                        else "This paddle has already been sold."
-                    )
-                },
+                {"error": unavailable_message},
                 status=HTTPStatus.CONFLICT,
             )
             return
@@ -4967,10 +5471,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        raw_shipping_address = body.get("shippingAddress")
+        shipping_address = dict(raw_shipping_address) if isinstance(raw_shipping_address, dict) else {}
+        shipping_address["name"] = compact_whitespace(user.get("name", "")) or "Eleven Zero PB buyer"
+        shipping_address["email"] = compact_whitespace(user.get("email", ""))
+
         try:
             shipping_quote = build_shipping_quote_for_listing(
                 listing_row,
-                body.get("shippingAddress", {}),
+                shipping_address,
             )
         except ValueError as error:
             self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
@@ -4999,12 +5508,19 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             max(0, int(round(total_cents * STRIPE_PLATFORM_FEE_PERCENT / 100))),
         )
         stripe_application_fee_cents = platform_fee_cents + shipping_cents
+        seller_proceeds_cents = max(total_cents - platform_fee_cents, 0)
+        checkout_expires_at = int(time.time()) + (31 * 60)
+        reservation_expires_at = (
+            datetime.now(timezone.utc) + timedelta(minutes=31)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         product_name = f"{listing['brand']} {listing['model']}".strip()
+        verified_address = shipping_quote["address"]
         payload = {
             "mode": "payment",
             "success_url": self.checkout_success_url(),
             "cancel_url": self.checkout_cancel_url(),
+            "expires_at": str(checkout_expires_at),
             "customer_email": user["email"],
             "client_reference_id": f"ezpb-{listing['id']}-{user['id']}-{secrets.token_hex(4)}",
             "line_items[0][quantity]": "1",
@@ -5021,8 +5537,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             # Eleven Zero. The product proceeds still route to the connected seller.
             "payment_intent_data[application_fee_amount]": str(stripe_application_fee_cents),
             "payment_intent_data[transfer_data][destination]": seller_profile["connectedAccountId"],
-            "shipping_address_collection[allowed_countries][0]": "US",
+            "payment_intent_data[shipping][name]": verified_address["name"],
+            "payment_intent_data[shipping][address][line1]": verified_address["line1"],
+            "payment_intent_data[shipping][address][city]": verified_address["city"],
+            "payment_intent_data[shipping][address][state]": verified_address["state"],
+            "payment_intent_data[shipping][address][postal_code]": verified_address["postalCode"],
+            "payment_intent_data[shipping][address][country]": verified_address["country"],
             "phone_number_collection[enabled]": "true",
+            "custom_text[submit][message]": (
+                "Shipping uses the delivery address you confirmed on Eleven Zero PB."
+            ),
             "metadata[platform]": "Eleven Zero PB",
             "metadata[listing_id]": str(listing["id"]),
             "metadata[buyer_user_id]": str(user["id"]),
@@ -5030,6 +5554,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             "metadata[shipping_summary]": shipping_quote["summary"],
             "metadata[shipping_postal_code]": shipping_quote["postal_code"],
         }
+        if verified_address.get("line2"):
+            payload["payment_intent_data[shipping][address][line2]"] = verified_address["line2"]
 
         try:
             session = stripe_request("POST", "/checkout/sessions", payload)
@@ -5046,54 +5572,103 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        with closing(connect_db()) as connection:
-            connection.execute(
-                """
-                INSERT INTO orders (
-                  listing_id,
-                  buyer_user_id,
-                  seller_user_id,
-                  stripe_checkout_session_id,
-                  stripe_payment_intent_id,
-                  amount_total_cents,
-                  shipping_amount_cents,
-                  shipping_label,
-                  shipping_address_json,
-                  shippo_rate_id,
-                  shippo_shipment_id,
-                  shipping_carrier,
-                  shipping_service,
-                  shipping_status,
-                  platform_fee_cents,
-                  stripe_payment_status,
-                  stripe_session_status,
-                  status,
-                  created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    listing["id"],
-                    user["id"],
-                    seller_user_id,
-                    session_id,
-                    str(session.get("payment_intent") or ""),
-                    final_total_cents,
-                    shipping_cents,
-                    shipping_quote["label"],
-                    json.dumps(shipping_quote["address"], separators=(",", ":")),
-                    shipping_quote.get("shippo_rate_id", ""),
-                    shipping_quote.get("shippo_shipment_id", ""),
-                    shipping_quote.get("carrier", ""),
-                    shipping_quote.get("service", ""),
-                    "pending" if shipping_quote.get("shippo_rate_id") else "manual",
-                    platform_fee_cents,
-                    str(session.get("payment_status") or "unpaid"),
-                    str(session.get("status") or "open"),
-                    "open",
-                    utc_now(),
-                ),
+        reservation_claimed = False
+        try:
+            with closing(connect_db()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                claimed = connection.execute(
+                    """
+                    UPDATE listings
+                    SET sale_status = 'reserved',
+                        reserved_checkout_session_id = ?,
+                        reserved_until = ?
+                    WHERE id = ?
+                      AND approval_status = 'approved'
+                      AND sale_status = 'available'
+                    """,
+                    (session_id, reservation_expires_at, listing["id"]),
+                )
+                if claimed.rowcount != 1:
+                    connection.rollback()
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO orders (
+                          listing_id,
+                          buyer_user_id,
+                          seller_user_id,
+                          stripe_checkout_session_id,
+                          stripe_payment_intent_id,
+                          amount_total_cents,
+                          shipping_amount_cents,
+                          shipping_label,
+                          shipping_address_json,
+                          shippo_rate_id,
+                          shippo_shipment_id,
+                          shipping_carrier,
+                          shipping_service,
+                          shipping_status,
+                          platform_fee_cents,
+                          stripe_application_fee_cents,
+                          seller_proceeds_cents,
+                          stripe_payment_status,
+                          stripe_session_status,
+                          status,
+                          created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            listing["id"],
+                            user["id"],
+                            seller_user_id,
+                            session_id,
+                            str(session.get("payment_intent") or ""),
+                            final_total_cents,
+                            shipping_cents,
+                            shipping_quote["label"],
+                            json.dumps(verified_address, separators=(",", ":")),
+                            shipping_quote.get("shippo_rate_id", ""),
+                            shipping_quote.get("shippo_shipment_id", ""),
+                            shipping_quote.get("carrier", ""),
+                            shipping_quote.get("service", ""),
+                            "pending",
+                            platform_fee_cents,
+                            stripe_application_fee_cents,
+                            seller_proceeds_cents,
+                            str(session.get("payment_status") or "unpaid"),
+                            str(session.get("status") or "open"),
+                            "open",
+                            utc_now(),
+                        ),
+                    )
+                    connection.commit()
+                    reservation_claimed = True
+        except sqlite3.DatabaseError:
+            try:
+                stripe_request("POST", f"/checkout/sessions/{session_id}/expire", {})
+            except (RuntimeError, ValueError):
+                pass
+            self.send_json(
+                {"error": "Checkout could not reserve this paddle. Please try again."},
+                status=HTTPStatus.BAD_GATEWAY,
             )
-            connection.commit()
+            return
+
+        if not reservation_claimed:
+            try:
+                stripe_request("POST", f"/checkout/sessions/{session_id}/expire", {})
+            except (RuntimeError, ValueError):
+                pass
+            self.send_json(
+                {
+                    "error": (
+                        "Another buyer started checkout for this paddle. "
+                        "Please check back shortly."
+                    )
+                },
+                status=HTTPStatus.CONFLICT,
+            )
+            return
 
         self.send_json(
             {
@@ -5250,6 +5825,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if order_status == "paid":
             finalize_paid_order(session_id)
             order_row = self.fetch_order_row(session_id) or order_row
+        elif order_status == "expired":
+            release_listing_reservation_for_order(session_id)
 
         listing_title = " ".join(part for part in [order_row["brand"], order_row["model"]] if part).strip()
 
@@ -5304,6 +5881,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        send_seller_sale_confirmation_for_order(session_id)
+
         if order_row["shippo_label_url"]:
             order_row = send_seller_shipping_label_email_for_order(session_id) or order_row
             self.send_json(
@@ -5347,6 +5926,102 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "labelUrl": refreshed_order["shippo_label_url"],
                 "trackingNumber": refreshed_order["tracking_number"],
                 "trackingUrl": refreshed_order["tracking_url"],
+            }
+        )
+
+    def handle_owner_mark_listing_sold(self, user: dict, body: dict):
+        try:
+            listing_id = int(body.get("id") or 0)
+        except (TypeError, ValueError):
+            listing_id = 0
+        if listing_id <= 0:
+            self.send_json(
+                {"error": "Choose a valid paddle to mark sold."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            listing_row = connection.execute(
+                """
+                SELECT id, user_id, brand, model, sale_status
+                FROM listings
+                WHERE id = ?
+                """,
+                (listing_id,),
+            ).fetchone()
+            if not listing_row:
+                self.send_json({"error": "Listing not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+            if int(listing_row["user_id"] or 0) != int(user["id"]):
+                self.send_json(
+                    {"error": "Only the seller who posted this paddle can mark it sold."},
+                    status=HTTPStatus.FORBIDDEN,
+                )
+                return
+            if listing_row["sale_status"] == "sold":
+                self.send_json(
+                    {
+                        "ok": True,
+                        "listingId": listing_id,
+                        "saleStatus": "sold",
+                        "message": "This paddle is already marked sold.",
+                    }
+                )
+                return
+            if listing_row["sale_status"] != "pending":
+                self.send_json(
+                    {
+                        "error": (
+                            "A confirmed paid order must be pending before you can mark this paddle sold."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            updated = connection.execute(
+                """
+                UPDATE listings
+                SET sale_status = 'sold',
+                    reserved_checkout_session_id = '',
+                    reserved_until = NULL
+                WHERE id = ?
+                  AND user_id = ?
+                  AND sale_status = 'pending'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM orders
+                    WHERE orders.listing_id = listings.id
+                      AND orders.seller_user_id = ?
+                      AND (
+                        orders.status = 'paid'
+                        OR orders.stripe_payment_status = 'paid'
+                      )
+                  )
+                """,
+                (listing_id, user["id"], user["id"]),
+            )
+            connection.commit()
+
+        if updated.rowcount != 1:
+            self.send_json(
+                {"error": "A confirmed paid order is required before marking this paddle sold."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
+        title = " ".join(
+            part
+            for part in [listing_row["brand"], listing_row["model"]]
+            if compact_whitespace(part)
+        ).strip() or "Paddle"
+        self.send_json(
+            {
+                "ok": True,
+                "listingId": listing_id,
+                "saleStatus": "sold",
+                "message": f"{title} is now marked sold.",
             }
         )
 
@@ -5429,9 +6104,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             recent_sales = connection.execute(
                 """
                 SELECT
+                  orders.listing_id,
                   orders.stripe_checkout_session_id,
                   orders.amount_total_cents,
                   orders.shipping_amount_cents,
+                  orders.platform_fee_cents,
+                  orders.seller_proceeds_cents,
                   orders.shipping_carrier,
                   orders.shipping_service,
                   orders.shippo_label_url,
@@ -5439,10 +6117,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   orders.tracking_url,
                   orders.shipping_status,
                   orders.shipping_error,
+                  orders.seller_sale_email_status,
+                  orders.seller_sale_email_sent_at,
+                  orders.seller_sale_email_error,
                   orders.status,
                   orders.created_at,
                   listings.brand,
-                  listings.model
+                  listings.model,
+                  listings.sale_status
                 FROM orders
                 LEFT JOIN listings ON listings.id = orders.listing_id
                 WHERE orders.seller_user_id = ?
@@ -5636,6 +6318,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   orders.buyer_confirmation_status,
                   orders.buyer_confirmation_error,
                   orders.buyer_confirmation_sent_at,
+                  orders.seller_sale_email_status,
+                  orders.seller_sale_email_error,
+                  orders.seller_sale_email_sent_at,
                   COALESCE(orders.completed_at, orders.created_at) AS activity_at,
                   listings.brand,
                   listings.model,
@@ -6137,7 +6822,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        if requested_status not in LISTING_SALE_LABELS:
+        if requested_status not in ADMIN_LISTING_SALE_STATUSES:
             self.send_json(
                 {"error": "Choose available, sale pending, or sold for this listing."},
                 status=HTTPStatus.BAD_REQUEST,
@@ -6225,6 +6910,62 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "error": (
                     compact_whitespace(row_value(result, "buyer_confirmation_error", ""))
                     or "The purchase confirmation could not be sent."
+                )
+            },
+            status=HTTPStatus.BAD_GATEWAY,
+        )
+
+    def handle_admin_send_seller_confirmation(self, body: dict):
+        session_id = compact_whitespace(body.get("sessionId", ""))
+        if not session_id.startswith("cs_"):
+            self.send_json(
+                {"error": "Choose a valid paid order before notifying its seller."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        order_row = order_email_row(session_id)
+        if not order_row:
+            self.send_json({"error": "That order could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+        if order_row["status"] != "paid" and order_row["stripe_payment_status"] != "paid":
+            self.send_json(
+                {"error": "The payment must be confirmed before notifying the seller."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+        if order_row["seller_sale_email_sent_at"]:
+            self.send_json({"ok": True, "message": "The seller sale email was already sent."})
+            return
+        if not transactional_email_is_configured():
+            self.send_json(
+                {"error": "Seller email is ready, but transactional email is not configured."},
+                status=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET seller_sale_email_status = 'pending', seller_sale_email_error = ''
+                WHERE stripe_checkout_session_id = ?
+                  AND seller_sale_email_sent_at IS NULL
+                """,
+                (session_id,),
+            )
+            connection.commit()
+
+        result = send_seller_sale_confirmation_for_order(session_id)
+        if result and result["seller_sale_email_status"] == "sent":
+            self.send_json({"ok": True, "message": "Sale confirmation sent to the seller."})
+            return
+
+        self.send_json(
+            {
+                "error": (
+                    compact_whitespace(row_value(result, "seller_sale_email_error", ""))
+                    or "The seller sale confirmation could not be sent."
                 )
             },
             status=HTTPStatus.BAD_GATEWAY,

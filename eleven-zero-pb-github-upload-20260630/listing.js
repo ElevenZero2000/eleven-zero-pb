@@ -424,6 +424,16 @@ function getListingActionState(item) {
   const approvalStatus = item.approval_status || "approved";
   const saleStatus = item.sale_status || "available";
 
+  if (saleStatus === "reserved") {
+    return {
+      action: "disabled",
+      buttonLabel: "Checkout in progress",
+      statusLabel: "Checkout in progress",
+      reason: "Another buyer is checking out with this paddle. Please check back shortly.",
+      tone: "pending",
+    };
+  }
+
   if (saleStatus === "pending") {
     return {
       action: "disabled",
@@ -521,6 +531,16 @@ function getProductCartEntryState(item) {
   const isOwner = currentUserId && sellerUserId && currentUserId === sellerUserId;
   const approvalStatus = item.approval_status || "approved";
   const saleStatus = item.sale_status || "available";
+
+  if (saleStatus === "reserved") {
+    return {
+      action: "disabled",
+      buttonLabel: "Checkout in progress",
+      statusLabel: "Checkout in progress",
+      reason: "Another buyer is checking out with this paddle. Please check back shortly.",
+      tone: "pending",
+    };
+  }
 
   if (saleStatus === "pending") {
     return {
