@@ -324,6 +324,7 @@ function getListingStatusTone(status) {
 function getListingStatusLabel(item) {
   if (item.sale_status === "sold") return "Sold";
   if (item.sale_status === "pending") return "Sale pending";
+  if (item.sale_status === "reserved") return "Checkout in progress";
   if (item.approval_label) return item.approval_label;
   if (item.approval_status === "approved") return "Live";
   if (item.approval_status === "rejected") return "Needs changes";
@@ -331,7 +332,7 @@ function getListingStatusLabel(item) {
 }
 
 function renderListingItem(item) {
-  const statusTone = item.sale_status === "sold" ? "neutral" : item.sale_status === "pending" ? "pending" : getListingStatusTone(item.approval_status);
+  const statusTone = item.sale_status === "sold" ? "neutral" : ["pending", "reserved"].includes(item.sale_status) ? "pending" : getListingStatusTone(item.approval_status);
   const statusLabel = getListingStatusLabel(item);
   return `
     <article class="list-item">
@@ -372,17 +373,26 @@ function formatCents(value) {
 function renderSaleItem(item) {
   const title = [item.brand, item.model].filter(Boolean).join(" ") || "Paddle order";
   const isLabelReady = item.shipping_status === "label_ready" && item.shippo_label_url;
-  const statusLabel = isLabelReady
+  const isPaid = item.status === "paid";
+  const statusLabel = item.sale_status === "sold"
+    ? "Sold"
+    : isLabelReady
     ? "Label ready"
-    : item.status === "paid" && ["error", "attention_needed"].includes(item.shipping_status)
+    : isPaid && ["error", "attention_needed"].includes(item.shipping_status)
       ? "Shipping help needed"
-      : item.status === "paid"
+      : isPaid
         ? "Preparing label"
         : item.status === "expired"
           ? "Checkout expired"
           : "Awaiting payment";
   const shippingLine = [item.shipping_carrier, item.shipping_service].filter(Boolean).join(" · ");
   const actions = [];
+  const salePriceCents = Math.max(
+    Number(item.amount_total_cents || 0) - Number(item.shipping_amount_cents || 0),
+    0
+  );
+  const proceedsCents = Number(item.seller_proceeds_cents || 0) ||
+    Math.max(salePriceCents - Number(item.platform_fee_cents || 0), 0);
 
   if (isLabelReady) {
     actions.push(
@@ -394,20 +404,28 @@ function renderSaleItem(item) {
       `<a href="${ElevenZeroApp.escapeHtml(item.tracking_url)}" target="_blank" rel="noopener noreferrer">Track package</a>`
     );
   }
-  if (item.status === "paid" && ["error", "attention_needed"].includes(item.shipping_status)) {
+  if (isPaid && ["error", "attention_needed"].includes(item.shipping_status)) {
     actions.push(
       `<button class="seller-sale-retry" type="button" data-retry-shipping="${ElevenZeroApp.escapeHtml(
         item.stripe_checkout_session_id
       )}">Retry prepaid label</button>`
     );
   }
+  if (isPaid && item.sale_status === "pending" && item.listing_id) {
+    actions.push(
+      `<button class="seller-sale-retry" type="button" data-seller-mark-sold="${ElevenZeroApp.escapeHtml(
+        item.listing_id
+      )}">Mark paddle sold</button>`
+    );
+  }
 
   return `
     <article class="list-item">
       <strong>${ElevenZeroApp.escapeHtml(title)}</strong>
-      <span>${ElevenZeroApp.escapeHtml(formatCents(item.amount_total_cents))} total · ${ElevenZeroApp.escapeHtml(
-        formatCents(item.shipping_amount_cents)
-      )} shipping</span>
+      <span>${ElevenZeroApp.escapeHtml(formatCents(salePriceCents))} sale · ${ElevenZeroApp.escapeHtml(
+        formatCents(item.platform_fee_cents)
+      )} Eleven Zero fee</span>
+      <span><strong>${ElevenZeroApp.escapeHtml(formatCents(proceedsCents))} estimated proceeds</strong></span>
       ${shippingLine ? `<span>${ElevenZeroApp.escapeHtml(shippingLine)}</span>` : ""}
       <span class="list-item-status ${isLabelReady ? "list-item-status-ready" : "list-item-status-pending"}">
         ${ElevenZeroApp.escapeHtml(statusLabel)}
@@ -652,7 +670,7 @@ function renderAdminListings(items) {
   adminListings.innerHTML = items
     .map(
       (item) => {
-        const statusTone = item.sale_status === "sold" ? "neutral" : item.sale_status === "pending" ? "pending" : getListingStatusTone(item.approval_status);
+        const statusTone = item.sale_status === "sold" ? "neutral" : ["pending", "reserved"].includes(item.sale_status) ? "pending" : getListingStatusTone(item.approval_status);
         const statusLabel = getListingStatusLabel(item);
 
         return `
@@ -1012,6 +1030,8 @@ function renderAdminCommerceNotifications(items) {
       const listingId = Number(item.listing_id || 0);
       const confirmationStatus = item.buyer_confirmation_status || "pending";
       const confirmationSent = confirmationStatus === "sent";
+      const sellerEmailStatus = item.seller_sale_email_status || "pending";
+      const sellerEmailSent = sellerEmailStatus === "sent";
       const sessionId = item.stripe_checkout_session_id || "";
       const purchaseActions = isPurchase
         ? `
@@ -1020,6 +1040,11 @@ function renderAdminCommerceNotifications(items) {
                 confirmationSent
                   ? '<span class="admin-notification-state is-ready">Buyer email sent</span>'
                   : `<button type="button" data-admin-send-confirmation="${escapeAttr(sessionId)}">Send buyer confirmation</button>`
+              }
+              ${
+                sellerEmailSent
+                  ? '<span class="admin-notification-state is-ready">Seller email sent</span>'
+                  : `<button type="button" data-admin-send-seller-confirmation="${escapeAttr(sessionId)}">Send seller confirmation</button>`
               }
               ${
                 ["error", "attention_needed"].includes(item.shipping_status)
@@ -1032,6 +1057,7 @@ function renderAdminCommerceNotifications(items) {
       const fulfillmentNote = isPurchase
         ? [
             confirmationSent ? "Buyer confirmation sent" : `Buyer email: ${confirmationStatus.replaceAll("_", " ")}`,
+            sellerEmailSent ? "Seller confirmation sent" : `Seller email: ${sellerEmailStatus.replaceAll("_", " ")}`,
             item.shipping_status ? `Label: ${String(item.shipping_status).replaceAll("_", " ")}` : "",
           ]
             .filter(Boolean)
@@ -1047,6 +1073,7 @@ function renderAdminCommerceNotifications(items) {
             ${fulfillmentNote ? `<span>${escapeAttr(fulfillmentNote)}</span>` : ""}
             ${item.shipping_error ? `<span class="admin-notification-error">${escapeAttr(item.shipping_error)}</span>` : ""}
             ${item.buyer_confirmation_error ? `<span class="admin-notification-error">${escapeAttr(item.buyer_confirmation_error)}</span>` : ""}
+            ${item.seller_sale_email_error ? `<span class="admin-notification-error">${escapeAttr(item.seller_sale_email_error)}</span>` : ""}
             <span>${escapeAttr(formatAdminActivityDate(item.activity_at))}</span>
             ${purchaseActions}
           </div>
@@ -1301,6 +1328,32 @@ async function sendAdminPurchaseConfirmation(sessionId, button) {
   }
 }
 
+async function sendAdminSellerConfirmation(sessionId, button) {
+  if (!sessionId || button?.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Sending…";
+  }
+  try {
+    setAdminStatus("Sending the seller sale confirmation…", "warning");
+    const response = await ElevenZeroApp.request(
+      "/api/admin/orders/send-seller-confirmation",
+      {
+        method: "POST",
+        body: { sessionId },
+      }
+    );
+    await loadAdminDashboard();
+    setAdminStatus(response.message || "Seller confirmation sent.", "success");
+  } catch (error) {
+    setAdminStatus(error.message, "error");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Send seller confirmation";
+    }
+  }
+}
+
 async function retryShippingLabel(sessionId, button) {
   if (!sessionId || button?.disabled) return;
   if (button) {
@@ -1318,6 +1371,32 @@ async function retryShippingLabel(sessionId, button) {
   } catch (error) {
     ElevenZeroApp.setStatus(accountStatus, error.message, "error");
     await loadDashboard();
+  }
+}
+
+async function markSellerListingSold(listingId, button) {
+  if (!listingId || button?.disabled) return;
+  const confirmed = window.confirm(
+    "Mark this paddle sold? It will remain out of the shop."
+  );
+  if (!confirmed) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Marking…";
+  }
+  try {
+    const response = await ElevenZeroApp.request("/api/account/listings/mark-sold", {
+      method: "POST",
+      body: { id: Number(listingId) },
+    });
+    await loadDashboard();
+    ElevenZeroApp.setStatus(accountStatus, response.message || "Paddle marked sold.", "success");
+  } catch (error) {
+    ElevenZeroApp.setStatus(accountStatus, error.message, "error");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Mark paddle sold";
+    }
   }
 }
 
@@ -1405,6 +1484,17 @@ function bindAdminPanel() {
       await sendAdminPurchaseConfirmation(
         confirmationButton.dataset.adminSendConfirmation,
         confirmationButton
+      );
+      return;
+    }
+
+    const sellerConfirmationButton = event.target.closest(
+      "[data-admin-send-seller-confirmation]"
+    );
+    if (sellerConfirmationButton) {
+      await sendAdminSellerConfirmation(
+        sellerConfirmationButton.dataset.adminSendSellerConfirmation,
+        sellerConfirmationButton
       );
       return;
     }
@@ -1543,6 +1633,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   bindAdminPanel();
   accountSales?.addEventListener("click", async (event) => {
+    const soldButton = event.target.closest("[data-seller-mark-sold]");
+    if (soldButton) {
+      await markSellerListingSold(soldButton.dataset.sellerMarkSold, soldButton);
+      return;
+    }
     const retryButton = event.target.closest("[data-retry-shipping]");
     if (!retryButton) return;
     await retryShippingLabel(retryButton.dataset.retryShipping, retryButton);
