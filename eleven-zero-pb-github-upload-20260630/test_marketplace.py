@@ -91,6 +91,10 @@ class MarketplaceSafetyTests(unittest.TestCase):
             "experience": "PPR-certified coach",
             "availability": "Weekday evenings",
             "bio": "Demo profile for platform testing and trainer flow review.",
+            "certificationOrg": "Professional Pickleball Registry",
+            "certificationName": "PPR Coach Certification",
+            "certificationId": "PPR-DEMO-001",
+            "certificationUrl": "https://example.com/verify/PPR-DEMO-001",
             "trainerImage": self.trainer_image_data(),
         }
         payload.update(overrides)
@@ -428,6 +432,37 @@ class MarketplaceSafetyTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(trainer_count, 0)
 
+    def test_new_trainer_requires_meaningful_certification(self):
+        user_id = self.create_user("trainer-cert-required@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-cert-required@example.com"},
+            self.trainer_payload(certificationOrg="N/A"),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("certification organization", captured["payload"]["error"])
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-cert-required@example.com"},
+            self.trainer_payload(certificationName="none"),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("certification name", captured["payload"]["error"])
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_count = connection.execute(
+                "SELECT COUNT(*) FROM trainers WHERE user_id = ?", (user_id,)
+            ).fetchone()[0]
+        self.assertEqual(trainer_count, 0)
+
     def test_new_trainer_rejects_portrait_image(self):
         user_id = self.create_user("trainer-portrait@example.com")
         captured = {}
@@ -466,6 +501,15 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
         item = captured["payload"]["item"]
         self.assertTrue(item["imageUrl"].startswith("/api/trainers/"))
+        self.assertEqual(
+            item["certificationOrg"], "Professional Pickleball Registry"
+        )
+        self.assertEqual(item["certificationName"], "PPR Coach Certification")
+        self.assertEqual(item["certificationId"], "PPR-DEMO-001")
+        self.assertEqual(
+            item["certificationUrl"],
+            "https://example.com/verify/PPR-DEMO-001",
+        )
         self.assertNotIn("image_data", item)
         self.assertNotIn("data:image", json.dumps(captured["payload"]))
         self.assertEqual(item["approval_status"], "pending")
@@ -488,6 +532,56 @@ class MarketplaceSafetyTests(unittest.TestCase):
         with Image.open(BytesIO(normalized_payload)) as normalized:
             self.assertGreater(normalized.width, normalized.height)
             self.assertNotIn("exif", normalized.info)
+
+    def test_trainer_certification_serialization_keeps_credential_id_private(self):
+        user_id = self.create_user("trainer-cert-privacy@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_trainer(
+            StubHandler(),
+            {"id": user_id, "email": "trainer-cert-privacy@example.com"},
+            self.trainer_payload(),
+        )
+        owner_item = captured["payload"]["item"]
+        trainer_id = owner_item["id"]
+        self.assertEqual(owner_item["certificationId"], "PPR-DEMO-001")
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE trainers SET approval_status = 'approved' WHERE id = ?",
+                (trainer_id,),
+            )
+            connection.commit()
+
+        public_item = app.ElevenZeroHandler.fetch_trainers(None)[0]
+        self.assertEqual(
+            public_item["certificationOrg"], "Professional Pickleball Registry"
+        )
+        self.assertEqual(
+            public_item["certificationName"], "PPR Coach Certification"
+        )
+        self.assertEqual(
+            public_item["certificationUrl"],
+            "https://example.com/verify/PPR-DEMO-001",
+        )
+        self.assertNotIn("certificationId", public_item)
+        self.assertNotIn("image_data", public_item)
+
+        admin_item = next(
+            item
+            for item in app.ElevenZeroHandler.build_admin_dashboard(object())[
+                "trainers"
+            ]
+            if item["id"] == trainer_id
+        )
+        self.assertEqual(admin_item["certificationId"], "PPR-DEMO-001")
+        self.assertNotIn("image_data", admin_item)
+        self.assertNotIn("data:image", json.dumps(admin_item))
 
     def test_account_can_create_only_one_trainer_profile(self):
         user_id = self.create_user("trainer-single@example.com")
@@ -714,6 +808,181 @@ class MarketplaceSafetyTests(unittest.TestCase):
         public_items = app.ElevenZeroHandler.fetch_trainers(None)
         self.assertEqual(public_items[0]["id"], trainer_id)
         self.assertEqual(public_items[0]["imageUrl"], "")
+
+    def test_admin_requires_certification_for_pending_approval_but_allows_approved_legacy(self):
+        owner_id = self.create_user("trainer-cert-review@example.com")
+        image_data = app.normalize_trainer_landscape_image_data(
+            self.trainer_image_data()
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            pending_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, image_data,
+                  image_updated_at, approval_status
+                ) VALUES (?, 'Pending Certification Coach', 'Arlington, VA',
+                  'private', 'beginner', '$75/hr',
+                  'trainer-cert-review@example.com', 'Five years',
+                  'Pending biography', 'Evenings', '2026-07-23', ?,
+                  '2026-07-23T12:00:00Z', 'pending')
+                """,
+                (owner_id, image_data),
+            ).lastrowid
+            legacy_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, approval_status
+                ) VALUES (?, 'Approved Legacy Coach', 'Alexandria, VA',
+                  'private', 'beginner', '$70/hr',
+                  'legacy-cert-review@example.com', 'Seven years',
+                  'Legacy biography', 'Weekends', '2025-01-01', 'approved')
+                """,
+                (owner_id,),
+            ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        handler = StubHandler()
+        app.ElevenZeroHandler.handle_admin_trainer_review(
+            handler, {"id": pending_id, "status": "approved"}
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertIn("certification organization", captured["payload"]["error"])
+
+        app.ElevenZeroHandler.handle_admin_trainer_review(
+            handler, {"id": legacy_id, "status": "approved"}
+        )
+        self.assertEqual(captured["status"], 200)
+        legacy_item = next(
+            item
+            for item in app.ElevenZeroHandler.fetch_trainers(None)
+            if item["id"] == legacy_id
+        )
+        self.assertEqual(legacy_item["certificationOrg"], "")
+        self.assertEqual(legacy_item["certificationName"], "")
+        self.assertNotIn("certificationId", legacy_item)
+
+    def test_admin_trainer_update_validates_certification_and_preserves_approved_legacy(self):
+        owner_id = self.create_user("trainer-cert-update@example.com")
+        image_data = app.normalize_trainer_landscape_image_data(
+            self.trainer_image_data()
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            pending_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, image_data,
+                  image_updated_at, approval_status
+                ) VALUES (?, 'Pending Update Coach', 'Arlington, VA',
+                  'private', 'beginner', '$75/hr',
+                  'trainer-cert-update@example.com', 'Five years',
+                  'Pending biography', 'Evenings', '2026-07-23', ?,
+                  '2026-07-23T12:00:00Z', 'pending')
+                """,
+                (owner_id, image_data),
+            ).lastrowid
+            legacy_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, approval_status
+                ) VALUES (?, 'Legacy Update Coach', 'Alexandria, VA',
+                  'private', 'beginner', '$70/hr',
+                  'legacy-cert-update@example.com', 'Seven years',
+                  'Legacy biography', 'Weekends', '2025-01-01', 'approved')
+                """,
+                (owner_id,),
+            ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        base_payload = {
+            "name": "Updated Coach",
+            "location": "Arlington, VA",
+            "format": "private",
+            "level": "beginner",
+            "rate": "$80/hr",
+            "email": "updated@example.com",
+            "experience": "Five years",
+            "availability": "Weekday evenings",
+            "bio": "Updated trainer biography.",
+            "verified": False,
+        }
+        handler = StubHandler()
+        app.ElevenZeroHandler.handle_admin_trainer_update(
+            handler, {**base_payload, "id": pending_id}
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("certification organization", captured["payload"]["error"])
+
+        app.ElevenZeroHandler.handle_admin_trainer_update(
+            handler,
+            {
+                **base_payload,
+                "id": pending_id,
+                "certificationOrg": "Professional Pickleball Registry",
+                "certificationName": "PPR Coach Certification",
+                "certificationId": "PPR-ADMIN-001",
+                "certificationUrl": "javascript:alert(1)",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("http:// or https://", captured["payload"]["error"])
+
+        app.ElevenZeroHandler.handle_admin_trainer_update(
+            handler,
+            {
+                **base_payload,
+                "id": pending_id,
+                "certificationOrg": "Professional Pickleball Registry",
+                "certificationName": "PPR Coach Certification",
+                "certificationId": "PPR-ADMIN-001",
+                "certificationUrl": "https://example.com/verify/PPR-ADMIN-001",
+            },
+        )
+        self.assertEqual(captured["status"], 200)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            certification = connection.execute(
+                """
+                SELECT
+                  certification_organization,
+                  certification_name,
+                  certification_credential_id,
+                  certification_verification_url
+                FROM trainers
+                WHERE id = ?
+                """,
+                (pending_id,),
+            ).fetchone()
+        self.assertEqual(
+            certification,
+            (
+                "Professional Pickleball Registry",
+                "PPR Coach Certification",
+                "PPR-ADMIN-001",
+                "https://example.com/verify/PPR-ADMIN-001",
+            ),
+        )
+
+        app.ElevenZeroHandler.handle_admin_trainer_update(
+            handler, {**base_payload, "id": legacy_id}
+        )
+        self.assertEqual(captured["status"], 200)
 
     def test_admin_dashboard_exposes_trainer_image_url_without_raw_image(self):
         owner_id = self.create_user("trainer-admin-preview@example.com")

@@ -1096,6 +1096,92 @@ COURT_APPROVAL_LABELS = {
     "rejected": "Needs changes",
 }
 
+TRAINER_CERTIFICATION_TEXT_MAX_LENGTH = 120
+TRAINER_CERTIFICATION_CREDENTIAL_MAX_LENGTH = 120
+TRAINER_CERTIFICATION_URL_MAX_LENGTH = 500
+TRAINER_CERTIFICATION_PLACEHOLDERS = {
+    "n a",
+    "na",
+    "no",
+    "none",
+    "not applicable",
+    "not certified",
+    "other",
+    "self",
+    "self taught",
+    "unknown",
+}
+
+
+def meaningful_trainer_certification_text(value: str) -> bool:
+    normalized = compact_whitespace(value)
+    comparison = " ".join(
+        part
+        for part in "".join(
+            character.lower() if character.isalnum() else " "
+            for character in normalized
+        ).split()
+    )
+    return (
+        3 <= len(normalized) <= TRAINER_CERTIFICATION_TEXT_MAX_LENGTH
+        and sum(character.isalnum() for character in normalized) >= 2
+        and comparison not in TRAINER_CERTIFICATION_PLACEHOLDERS
+    )
+
+
+def normalize_trainer_certification_fields(
+    organization_value,
+    name_value,
+    credential_id_value="",
+    verification_url_value="",
+    *,
+    required: bool = True,
+) -> tuple[str, str, str, str]:
+    organization = compact_whitespace(organization_value)
+    certification_name = compact_whitespace(name_value)
+    credential_id = compact_whitespace(credential_id_value)
+    verification_url = str(verification_url_value or "").strip()
+
+    has_certification = bool(organization or certification_name)
+    if required or has_certification:
+        if not meaningful_trainer_certification_text(
+            organization
+        ) or not meaningful_trainer_certification_text(certification_name):
+            raise ValueError(
+                "Add the certification organization and certification name."
+            )
+
+    if credential_id and not has_certification:
+        raise ValueError(
+            "Add the certification organization and certification name before a credential ID."
+        )
+    if len(credential_id) > TRAINER_CERTIFICATION_CREDENTIAL_MAX_LENGTH:
+        raise ValueError("Certification credential ID is too long.")
+
+    if verification_url:
+        if not has_certification:
+            raise ValueError(
+                "Add the certification organization and certification name before a verification URL."
+            )
+        if (
+            len(verification_url) > TRAINER_CERTIFICATION_URL_MAX_LENGTH
+            or any(character.isspace() for character in verification_url)
+        ):
+            raise ValueError("Enter a valid certification verification URL.")
+
+        parsed_url = urlparse(verification_url)
+        if (
+            parsed_url.scheme.lower() not in {"http", "https"}
+            or not parsed_url.hostname
+            or parsed_url.username
+            or parsed_url.password
+        ):
+            raise ValueError(
+                "Certification verification URL must start with http:// or https://."
+            )
+
+    return organization, certification_name, credential_id, verification_url
+
 
 def normalize_listing_approval_status(value: str, default: str = "pending") -> str:
     normalized = compact_whitespace(value).lower()
@@ -1316,6 +1402,9 @@ def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
             "user_id": row["user_id"],
             "owner_name": row["owner_name"],
             "owner_email": row["owner_email"],
+            "certificationId": row_value(
+                row, "certification_credential_id", ""
+            ),
             "approval_status": approval_status,
             "approval_label": LISTING_APPROVAL_LABELS.get(
                 approval_status, "Pending review"
@@ -4037,6 +4126,10 @@ def init_database() -> None:
               experience TEXT NOT NULL,
               bio TEXT NOT NULL,
               availability TEXT NOT NULL,
+              certification_organization TEXT NOT NULL DEFAULT '',
+              certification_name TEXT NOT NULL DEFAULT '',
+              certification_credential_id TEXT NOT NULL DEFAULT '',
+              certification_verification_url TEXT NOT NULL DEFAULT '',
               joined_at TEXT NOT NULL,
               rating REAL NOT NULL DEFAULT 0,
               review_count INTEGER NOT NULL DEFAULT 0,
@@ -4234,6 +4327,10 @@ def init_database() -> None:
         add_column_if_missing(connection, "trainers", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "trainers", "image_data", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "trainers", "image_updated_at", "TEXT")
+        add_column_if_missing(connection, "trainers", "certification_organization", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "trainers", "certification_name", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "trainers", "certification_credential_id", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "trainers", "certification_verification_url", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_amount_cents", "INTEGER NOT NULL DEFAULT 0")
         add_column_if_missing(connection, "orders", "shipping_label", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "orders", "shipping_address_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -5036,6 +5133,11 @@ def serialize_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
         "experience": row["experience"],
         "bio": row["bio"],
         "availability": row["availability"],
+        "certificationOrg": row_value(row, "certification_organization", ""),
+        "certificationName": row_value(row, "certification_name", ""),
+        "certificationUrl": row_value(
+            row, "certification_verification_url", ""
+        ),
         "joined_at": row["joined_at"],
         "rating": row["rating"],
         "review_count": row["review_count"],
@@ -5053,6 +5155,9 @@ def serialize_owner_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
     )
     payload.update(
         {
+            "certificationId": row_value(
+                row, "certification_credential_id", ""
+            ),
             "approval_status": approval_status,
             "approval_label": LISTING_APPROVAL_LABELS.get(
                 approval_status, "Pending review"
@@ -6639,6 +6744,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   experience,
                   bio,
                   availability,
+                  certification_organization,
+                  certification_name,
+                  certification_credential_id,
+                  certification_verification_url,
                   joined_at,
                   rating,
                   review_count,
@@ -8111,6 +8220,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   experience,
                   bio,
                   availability,
+                  certification_organization,
+                  certification_name,
+                  certification_credential_id,
+                  certification_verification_url,
                   joined_at,
                   rating,
                   review_count,
@@ -8578,6 +8691,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   trainers.experience,
                   trainers.bio,
                   trainers.availability,
+                  trainers.certification_organization,
+                  trainers.certification_name,
+                  trainers.certification_credential_id,
+                  trainers.certification_verification_url,
                   trainers.joined_at,
                   trainers.rating,
                   trainers.review_count,
@@ -9287,6 +9404,82 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         with closing(connect_db()) as connection:
+            existing = connection.execute(
+                """
+                SELECT
+                  approval_status,
+                  certification_organization,
+                  certification_name,
+                  certification_credential_id,
+                  certification_verification_url
+                FROM trainers
+                WHERE id = ?
+                """,
+                (trainer_id,),
+            ).fetchone()
+            if not existing:
+                self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            certification_keys = {
+                "certificationOrg": (
+                    "certification_organization",
+                    "certificationOrganization",
+                ),
+                "certificationName": ("certification_name",),
+                "certificationId": (
+                    "certification_credential_id",
+                    "certificationCredentialId",
+                ),
+                "certificationUrl": (
+                    "certification_verification_url",
+                    "certificationVerificationUrl",
+                ),
+            }
+            certification_values = {}
+            for api_key, (database_key, *aliases) in certification_keys.items():
+                supplied_key = next(
+                    (key for key in (api_key, *aliases) if key in body),
+                    None,
+                )
+                certification_values[api_key] = (
+                    body.get(supplied_key)
+                    if supplied_key
+                    else row_value(existing, database_key, "")
+                )
+            existing_has_certification = bool(
+                compact_whitespace(existing["certification_organization"])
+                or compact_whitespace(existing["certification_name"])
+            )
+            submitted_has_certification = any(
+                compact_whitespace(value)
+                for value in certification_values.values()
+            )
+            certification_required = (
+                existing["approval_status"] != "approved"
+                or existing_has_certification
+                or submitted_has_certification
+            )
+            try:
+                (
+                    certification_organization,
+                    certification_name,
+                    certification_credential_id,
+                    certification_verification_url,
+                ) = normalize_trainer_certification_fields(
+                    certification_values["certificationOrg"],
+                    certification_values["certificationName"],
+                    certification_values["certificationId"],
+                    certification_values["certificationUrl"],
+                    required=certification_required,
+                )
+            except ValueError as error:
+                self.send_json(
+                    {"error": str(error)},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
             cursor = connection.execute(
                 """
                 UPDATE trainers
@@ -9300,7 +9493,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   verified = ?,
                   experience = ?,
                   bio = ?,
-                  availability = ?
+                  availability = ?,
+                  certification_organization = ?,
+                  certification_name = ?,
+                  certification_credential_id = ?,
+                  certification_verification_url = ?
                 WHERE id = ?
                 """,
                 (
@@ -9314,14 +9511,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     experience,
                     bio,
                     availability,
+                    certification_organization,
+                    certification_name,
+                    certification_credential_id,
+                    certification_verification_url,
                     trainer_id,
                 ),
             )
             connection.commit()
-
-        if cursor.rowcount <= 0:
-            self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
-            return
 
         self.send_json({"ok": True, "message": f"{name} was updated."})
 
@@ -9339,7 +9536,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         with closing(connect_db()) as connection:
             row = connection.execute(
                 """
-                SELECT name, approval_status, image_data
+                SELECT
+                  name,
+                  approval_status,
+                  image_data,
+                  certification_organization,
+                  certification_name
                 FROM trainers
                 WHERE id = ?
                 """,
@@ -9358,6 +9560,28 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                         "error": (
                             "Add one approved landscape trainer photo before "
                             "publishing this profile."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if (
+                requested_status == "approved"
+                and row["approval_status"] != "approved"
+                and (
+                    not meaningful_trainer_certification_text(
+                        row["certification_organization"]
+                    )
+                    or not meaningful_trainer_certification_text(
+                        row["certification_name"]
+                    )
+                )
+            ):
+                self.send_json(
+                    {
+                        "error": (
+                            "Add the trainer certification organization and "
+                            "certification name before publishing this profile."
                         )
                     },
                     status=HTTPStatus.CONFLICT,
@@ -10007,6 +10231,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         experience = str(body.get("experience", "")).strip()
         availability = str(body.get("availability", "")).strip()
         bio = str(body.get("bio", "")).strip()
+        try:
+            (
+                certification_organization,
+                certification_name,
+                certification_credential_id,
+                certification_verification_url,
+            ) = normalize_trainer_certification_fields(
+                body.get(
+                    "certificationOrg",
+                    body.get("certificationOrganization"),
+                ),
+                body.get("certificationName"),
+                body.get(
+                    "certificationId",
+                    body.get("certificationCredentialId"),
+                ),
+                body.get(
+                    "certificationUrl",
+                    body.get("certificationVerificationUrl"),
+                ),
+                required=True,
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
 
         if not all([name, location, format_value, level, rate, email]):
             self.send_json(
@@ -10076,8 +10325,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 INSERT INTO trainers (
                   user_id, name, location, format, level, rate, email,
                   verified, experience, bio, availability, joined_at, rating, review_count,
-                  image_data, image_updated_at, approval_status, reviewed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, ?, ?, 'pending', NULL)
+                  image_data, image_updated_at, certification_organization,
+                  certification_name, certification_credential_id,
+                  certification_verification_url, approval_status, reviewed_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?,
+                  'pending', NULL
+                )
                 """,
                 (
                     user["id"],
@@ -10093,6 +10347,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     datetime.now().date().isoformat(),
                     image_data,
                     image_updated_at,
+                    certification_organization,
+                    certification_name,
+                    certification_credential_id,
+                    certification_verification_url,
                 ),
             )
             connection.commit()

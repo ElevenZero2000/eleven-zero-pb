@@ -12169,6 +12169,65 @@ body.account-admin-mode {
   color: #9d2c1c;
 }
 
+.trainers-page .trainer-certification-fieldset {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 14px;
+  min-width: 0;
+  margin: 4px 0 0;
+  padding: 18px;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.trainers-page .trainer-certification-fieldset legend {
+  display: flex;
+  padding: 0 7px;
+  align-items: center;
+  gap: 9px;
+  color: var(--forest);
+  font-weight: 850;
+}
+
+.trainers-page .trainer-certification-fieldset legend small {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(8, 233, 90, 0.12);
+  color: rgba(3, 45, 23, 0.72);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-certification-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.trainers-page .trainer-certification-grid [hidden] {
+  display: none;
+}
+
+.trainers-page .trainer-certification-grid label:first-child,
+.trainers-page .trainer-certification-grid label[data-certification-org-other-field] {
+  grid-column: 1 / -1;
+}
+
+.trainers-page .trainer-field-optional {
+  color: rgba(18, 18, 18, 0.48);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.trainers-page .trainer-certification-fieldset > p {
+  margin: 0;
+  color: rgba(18, 18, 18, 0.52);
+  font-size: 0.73rem;
+  line-height: 1.45;
+}
+
 .trainers-page .trainer-profile-card {
   display: flex;
   min-width: 0;
@@ -12297,6 +12356,47 @@ body.account-admin-mode {
   font-weight: 750;
 }
 
+.trainers-page .trainer-profile-certification {
+  display: grid;
+  gap: 3px;
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(8, 233, 90, 0.09), rgba(121, 184, 232, 0.08));
+}
+
+.trainers-page .trainer-profile-certification p {
+  margin: 0;
+  color: rgba(18, 18, 18, 0.48);
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trainers-page .trainer-profile-certification strong {
+  color: var(--forest);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.trainers-page .trainer-profile-certification span {
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.trainers-page .trainer-profile-certification a {
+  width: fit-content;
+  margin-top: 3px;
+  color: var(--forest);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-underline-offset: 3px;
+}
+
 .trainers-page .trainer-profile-bio {
   margin: 18px 0 0;
   color: rgba(18, 18, 18, 0.72);
@@ -12364,6 +12464,30 @@ body.account-admin-mode {
   font-weight: 750;
 }
 
+.admin-certification-editor {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 18px;
+  background: rgba(3, 45, 23, 0.035);
+}
+
+.admin-certification-editor legend {
+  padding: 0 7px;
+  color: var(--forest);
+  font-size: 0.85rem;
+  font-weight: 850;
+}
+
+.admin-certification-editor > p {
+  margin: 0;
+  color: rgba(18, 18, 18, 0.55);
+  font-size: 0.76rem;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .trainers-page .trainer-profile-card:hover {
     transform: translateY(-3px);
@@ -12391,6 +12515,16 @@ body.account-admin-mode {
   .trainers-page .trainer-photo-preview,
   .trainers-page .trainer-profile-media {
     aspect-ratio: 3 / 2;
+  }
+
+  .trainers-page .trainer-certification-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trainers-page .trainer-certification-grid label,
+  .trainers-page .trainer-certification-grid label:first-child,
+  .trainers-page .trainer-certification-grid label[data-certification-org-other-field] {
+    grid-column: auto;
   }
 
   .trainers-page .trainer-profile-card {

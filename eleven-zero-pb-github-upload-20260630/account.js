@@ -1092,6 +1092,39 @@ function renderAdminTrainers(items) {
                   </div>`
                 : ""
             }
+            <fieldset class="admin-certification-editor">
+              <legend>Certification details</legend>
+              <div class="admin-field-grid">
+                <label>
+                  Certifying organization
+                  <input name="certificationOrg" value="${escapeAttr(
+                    item.certificationOrg || ""
+                  )}" />
+                </label>
+                <label>
+                  Certification or credential
+                  <input name="certificationName" value="${escapeAttr(
+                    item.certificationName || ""
+                  )}" />
+                </label>
+                <label>
+                  Credential ID
+                  <input name="certificationId" value="${escapeAttr(
+                    item.certificationId || ""
+                  )}" />
+                </label>
+                <label>
+                  Public verification URL
+                  <input
+                    type="url"
+                    name="certificationUrl"
+                    value="${escapeAttr(item.certificationUrl || "")}"
+                    placeholder="https://"
+                  />
+                </label>
+              </div>
+              <p>Review these details before approving the trainer profile.</p>
+            </fieldset>
             <div class="admin-field-grid">
               <label>Name <input name="name" value="${escapeAttr(item.name)}" /></label>
               <label>Location <input name="location" value="${escapeAttr(item.location)}" /></label>
