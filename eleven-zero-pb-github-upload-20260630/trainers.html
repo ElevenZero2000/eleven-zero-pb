@@ -8,7 +8,7 @@
       name="description"
       content="Find pickleball trainers, leave reviews, and join the Eleven Zero PB coaching network."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260723trainerphoto1" />
+    <link rel="stylesheet" href="./styles.css?v=20260723trainercert1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="trainers-page" data-nav="trainers">
@@ -273,6 +273,69 @@
                   Contact email
                   <input type="email" name="email" placeholder="coach@example.com" />
                 </label>
+                <fieldset class="trainer-certification-fieldset">
+                  <legend>
+                    <span>Certification</span>
+                    <small>Required</small>
+                  </legend>
+                  <div class="trainer-certification-grid">
+                    <label>
+                      Certifying organization
+                      <select
+                        name="certificationOrg"
+                        data-certification-org
+                        aria-label="Certifying organization"
+                        required
+                      >
+                        <option value="" selected disabled>Choose organization</option>
+                        <option value="PPR">Professional Pickleball Registry (PPR)</option>
+                        <option value="PCI">Pickleball Coaching International (PCI)</option>
+                        <option value="RSPA">Racquet Sports Professionals Association (RSPA)</option>
+                        <option value="IPTPA">
+                          International Pickleball Teaching Professional Association (IPTPA)
+                        </option>
+                        <option value="Other">Other organization</option>
+                      </select>
+                    </label>
+                    <label data-certification-org-other-field hidden>
+                      Organization name
+                      <input
+                        type="text"
+                        name="certificationOrgOther"
+                        data-certification-org-other
+                        placeholder="Enter the organization"
+                        disabled
+                      />
+                    </label>
+                    <label>
+                      Certification or credential
+                      <input
+                        type="text"
+                        name="certificationName"
+                        placeholder="Ex: Level 1 Coach"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Credential ID <span class="trainer-field-optional">Optional</span>
+                      <input type="text" name="certificationId" autocomplete="off" />
+                    </label>
+                    <label>
+                      Public verification URL <span class="trainer-field-optional">Optional</span>
+                      <input
+                        type="url"
+                        name="certificationUrl"
+                        placeholder="https://"
+                        inputmode="url"
+                        autocomplete="url"
+                      />
+                    </label>
+                  </div>
+                  <p>
+                    Organizations are listed for convenience only and are not endorsed by
+                    Eleven Zero PB.
+                  </p>
+                </fieldset>
                 <button class="button button-dark" type="submit">Submit profile for review</button>
                 <div class="seller-status" aria-live="polite" data-trainer-join-status>
                   Sign in to create a trainer profile.
@@ -309,7 +372,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./trainers.js?v=20260723trainerphoto1"></script>
+    <script src="./trainers.js?v=20260723trainercert1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>
