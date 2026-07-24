@@ -37,6 +37,13 @@ const trainerPhotoReplaceButton = document.querySelector("[data-trainer-photo-re
 const trainerPhotoRemoveButton = document.querySelector("[data-trainer-photo-remove]");
 const trainerPhotoStatus = document.querySelector("[data-trainer-photo-status]");
 const trainerJoinSubmitButton = trainerJoinForm?.querySelector('button[type="submit"]');
+const certificationOrgSelect = trainerJoinForm?.querySelector("[data-certification-org]");
+const certificationOrgOtherField = trainerJoinForm?.querySelector(
+  "[data-certification-org-other-field]"
+);
+const certificationOrgOtherInput = trainerJoinForm?.querySelector(
+  "[data-certification-org-other]"
+);
 
 const TRAINER_PHOTO_MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 const TRAINER_PHOTO_MAX_DATA_URL_LENGTH = 1_500_000;
@@ -195,6 +202,30 @@ function clearTrainerPhoto() {
   ElevenZeroApp.setStatus(trainerPhotoStatus, TRAINER_PHOTO_DEFAULT_STATUS);
 }
 
+function syncOtherCertificationOrganization() {
+  const usesOtherOrganization = certificationOrgSelect?.value === "Other";
+  if (certificationOrgOtherField) {
+    certificationOrgOtherField.hidden = !usesOtherOrganization;
+  }
+  if (certificationOrgOtherInput) {
+    certificationOrgOtherInput.disabled = !usesOtherOrganization;
+    certificationOrgOtherInput.required = usesOtherOrganization;
+    if (!usesOtherOrganization) certificationOrgOtherInput.value = "";
+  }
+}
+
+function safeCredentialUrl(value) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return "";
+
+  try {
+    const parsed = new URL(candidate);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
 async function handleTrainerPhotoSelection(file) {
   if (!file || trainerImageProcessing) return;
 
@@ -283,6 +314,8 @@ function matchesSearch(trainer, query) {
     trainer.experience,
     trainer.level,
     trainer.format,
+    trainer.certificationOrg,
+    trainer.certificationName,
   ]
     .join(" ")
     .toLowerCase();
@@ -336,6 +369,10 @@ function renderTrainerCard(trainer) {
   const levelLabel = levelLabels[trainer.level] || "Player focus";
   const formatLabel = formatLabels[trainer.format] || "Coaching";
   const imageUrl = String(trainer.imageUrl || "").trim();
+  const certificationOrg = String(trainer.certificationOrg || "").trim();
+  const certificationName = String(trainer.certificationName || "").trim();
+  const certificationUrl = safeCredentialUrl(trainer.certificationUrl);
+  const hasCertification = Boolean(certificationOrg || certificationName);
   const contactHref = trainer.email
     ? `mailto:${ElevenZeroApp.escapeHtml(trainer.email)}`
     : "./auth.html?next=./trainers.html";
@@ -379,6 +416,25 @@ function renderTrainerCard(trainer) {
           <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
           <span>${ElevenZeroApp.escapeHtml(levelLabel)}</span>
         </div>
+
+        ${
+          hasCertification
+            ? `<section class="trainer-profile-certification" aria-label="Trainer certification">
+                <p>Certification</p>
+                <strong>${ElevenZeroApp.escapeHtml(
+                  certificationName || "Credential listed"
+                )}</strong>
+                ${certificationOrg ? `<span>${ElevenZeroApp.escapeHtml(certificationOrg)}</span>` : ""}
+                ${
+                  certificationUrl
+                    ? `<a href="${ElevenZeroApp.escapeHtml(
+                        certificationUrl
+                      )}" target="_blank" rel="noreferrer">View credential</a>`
+                    : ""
+                }
+              </section>`
+            : ""
+        }
 
         <p class="trainer-profile-bio">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
 
@@ -603,6 +659,26 @@ async function handleTrainerJoin(event) {
   }
 
   const payload = Object.fromEntries(new FormData(trainerJoinForm).entries());
+  const otherCertificationOrg = String(payload.certificationOrgOther || "").trim();
+  if (payload.certificationOrg === "Other") {
+    payload.certificationOrg = otherCertificationOrg;
+  }
+  delete payload.certificationOrgOther;
+  payload.certificationOrg = String(payload.certificationOrg || "").trim();
+  payload.certificationName = String(payload.certificationName || "").trim();
+  payload.certificationId = String(payload.certificationId || "").trim();
+  payload.certificationUrl = String(payload.certificationUrl || "").trim();
+
+  if (!payload.certificationOrg || !payload.certificationName) {
+    ElevenZeroApp.setStatus(
+      trainerJoinStatus,
+      "Add your certifying organization and credential name.",
+      "error"
+    );
+    certificationOrgSelect?.focus();
+    return;
+  }
+
   payload.trainerImage = trainerImageDraft;
 
   try {
@@ -616,6 +692,7 @@ async function handleTrainerJoin(event) {
     });
     trainerJoinForm.reset();
     clearTrainerPhoto();
+    syncOtherCertificationOrganization();
     ElevenZeroApp.setStatus(
       trainerJoinStatus,
       response.message || `${payload.name} was submitted for Eleven Zero PB review.`,
@@ -658,6 +735,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
   await loadTrainerData();
   openTrainerPanelFromHash();
+  syncOtherCertificationOrganization();
 
   trainerForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -709,6 +787,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   trainerPhotoReplaceButton?.addEventListener("click", () => trainerPhotoInput?.click());
   trainerPhotoRemoveButton?.addEventListener("click", clearTrainerPhoto);
+  certificationOrgSelect?.addEventListener("change", syncOtherCertificationOrganization);
   trainerPhotoDropzone?.addEventListener("dragover", (event) => {
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
