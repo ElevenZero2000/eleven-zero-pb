@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -315,11 +316,13 @@ US_STATE_REGION = {
     "PR": "territory",
 }
 ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
-MAX_API_JSON_BODY_BYTES = 10_000_000
+MAX_API_JSON_BODY_BYTES = 26_000_000
 
 
 def cache_control_for_path(path: str) -> str:
     if re.fullmatch(r"/api/listings/\d+/images/\d+", path):
+        return "public, max-age=86400"
+    if re.fullmatch(r"/api/trainers/\d+/images/\d+", path):
         return "public, max-age=86400"
 
     if path.startswith("/api/"):
@@ -1402,6 +1405,7 @@ def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
             "user_id": row["user_id"],
             "owner_name": row["owner_name"],
             "owner_email": row["owner_email"],
+            "email": row_value(row, "email", ""),
             "certificationId": row_value(
                 row, "certification_credential_id", ""
             ),
@@ -1410,6 +1414,14 @@ def serialize_admin_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
                 approval_status, "Pending review"
             ),
             "reviewed_at": row_value(row, "reviewed_at"),
+            "mediaReviewStatus": row_value(
+                row, "media_review_status", "approved"
+            ),
+            "mediaSubmittedAt": row_value(row, "media_submitted_at"),
+            "pendingImageUrl": trainer_pending_cover_url(row),
+            "pendingGalleryImageUrls": trainer_gallery_image_urls(
+                row, pending=True
+            ),
         }
     )
     return payload
@@ -4134,7 +4146,12 @@ def init_database() -> None:
               rating REAL NOT NULL DEFAULT 0,
               review_count INTEGER NOT NULL DEFAULT 0,
               image_data TEXT NOT NULL DEFAULT '',
+              gallery_image_data_json TEXT NOT NULL DEFAULT '[]',
               image_updated_at TEXT,
+              pending_image_data TEXT NOT NULL DEFAULT '',
+              pending_gallery_image_data_json TEXT NOT NULL DEFAULT '[]',
+              media_review_status TEXT NOT NULL DEFAULT 'approved',
+              media_submitted_at TEXT,
               approval_status TEXT NOT NULL DEFAULT 'approved',
               reviewed_at TEXT
             );
@@ -4147,6 +4164,46 @@ def init_database() -> None:
               rating INTEGER NOT NULL,
               comment TEXT NOT NULL,
               created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS trainer_client_relationships (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              trainer_id INTEGER NOT NULL REFERENCES trainers(id) ON DELETE CASCADE,
+              client_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              status TEXT NOT NULL DEFAULT 'pending',
+              intro_message TEXT NOT NULL DEFAULT '',
+              requested_at TEXT NOT NULL,
+              responded_at TEXT,
+              started_at TEXT,
+              updated_at TEXT NOT NULL,
+              UNIQUE (trainer_id, client_user_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS trainer_messages (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              relationship_id INTEGER NOT NULL REFERENCES trainer_client_relationships(id) ON DELETE CASCADE,
+              sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              body TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              read_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS trainer_lessons (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              relationship_id INTEGER NOT NULL REFERENCES trainer_client_relationships(id) ON DELETE CASCADE,
+              proposed_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              starts_at TEXT NOT NULL,
+              ends_at TEXT NOT NULL,
+              duration_minutes INTEGER NOT NULL,
+              timezone TEXT NOT NULL,
+              location TEXT NOT NULL,
+              note TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'proposed',
+              confirmed_at TEXT,
+              cancelled_at TEXT,
+              cancelled_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS orders (
@@ -4284,6 +4341,22 @@ def init_database() -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_auth_tokens_lookup ON auth_tokens(purpose, token_hash, expires_at)"
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trainer_relationships_trainer_status "
+            "ON trainer_client_relationships(trainer_id, status)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trainer_relationships_client_status "
+            "ON trainer_client_relationships(client_user_id, status)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trainer_messages_relationship_id "
+            "ON trainer_messages(relationship_id, id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trainer_lessons_relationship_start "
+            "ON trainer_lessons(relationship_id, starts_at)"
+        )
         add_column_if_missing(connection, "users", "stripe_account_id", "TEXT")
         add_column_if_missing(connection, "users", "profile_image_data", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "users", "profile_image_updated_at", "TEXT")
@@ -4326,7 +4399,12 @@ def init_database() -> None:
         add_column_if_missing(connection, "trainers", "approval_status", "TEXT NOT NULL DEFAULT 'approved'")
         add_column_if_missing(connection, "trainers", "reviewed_at", "TEXT")
         add_column_if_missing(connection, "trainers", "image_data", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "trainers", "gallery_image_data_json", "TEXT NOT NULL DEFAULT '[]'")
         add_column_if_missing(connection, "trainers", "image_updated_at", "TEXT")
+        add_column_if_missing(connection, "trainers", "pending_image_data", "TEXT NOT NULL DEFAULT ''")
+        add_column_if_missing(connection, "trainers", "pending_gallery_image_data_json", "TEXT NOT NULL DEFAULT '[]'")
+        add_column_if_missing(connection, "trainers", "media_review_status", "TEXT NOT NULL DEFAULT 'approved'")
+        add_column_if_missing(connection, "trainers", "media_submitted_at", "TEXT")
         add_column_if_missing(connection, "trainers", "certification_organization", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "trainers", "certification_name", "TEXT NOT NULL DEFAULT ''")
         add_column_if_missing(connection, "trainers", "certification_credential_id", "TEXT NOT NULL DEFAULT ''")
@@ -5101,6 +5179,40 @@ def normalize_trainer_landscape_image_data(value) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def trainer_gallery_image_data(value) -> list[str]:
+    """Load already-normalized trainer gallery data without exposing it."""
+    if isinstance(value, list):
+        candidates = value
+    else:
+        try:
+            candidates = json.loads(str(value or "[]"))
+        except (TypeError, json.JSONDecodeError):
+            candidates = []
+    if not isinstance(candidates, list):
+        return []
+    return [
+        candidate.strip()
+        for candidate in candidates[:5]
+        if isinstance(candidate, str)
+        and candidate.strip().startswith("data:image/")
+    ]
+
+
+def normalize_trainer_gallery_images(value) -> list[str]:
+    if value is None or value == "":
+        return []
+    if not isinstance(value, list):
+        raise ValueError("Trainer gallery photos must be submitted as a list.")
+    if len(value) > 5:
+        raise ValueError("Add no more than five additional trainer photos.")
+    normalized = []
+    for candidate in value:
+        image = normalize_trainer_landscape_image_data(candidate)
+        if image not in normalized:
+            normalized.append(image)
+    return normalized
+
+
 def trainer_image_url(row: sqlite3.Row | dict | None) -> str:
     trainer_id = int(row_value(row, "id", 0) or 0)
     image_present = bool(row_value(row, "image_present", 0)) or bool(
@@ -5117,6 +5229,46 @@ def trainer_image_url(row: sqlite3.Row | dict | None) -> str:
     return f"/api/trainers/{trainer_id}/image?v={quote(version, safe='')}"
 
 
+def trainer_gallery_image_urls(
+    row: sqlite3.Row | dict | None, *, pending: bool = False
+) -> list[str]:
+    if not row:
+        return []
+    trainer_id = int(row_value(row, "id", 0) or 0)
+    if trainer_id <= 0:
+        return []
+    field = (
+        "pending_gallery_image_data_json"
+        if pending
+        else "gallery_image_data_json"
+    )
+    images = trainer_gallery_image_data(row_value(row, field, "[]"))
+    version = str(
+        row_value(row, "media_submitted_at" if pending else "image_updated_at", "")
+        or row_value(row, "joined_at", "")
+        or "current"
+    )
+    prefix = "pending-images" if pending else "images"
+    return [
+        f"/api/trainers/{trainer_id}/{prefix}/{index}?v={quote(version, safe='')}"
+        for index in range(1, len(images) + 1)
+    ]
+
+
+def trainer_pending_cover_url(row: sqlite3.Row | dict | None) -> str:
+    trainer_id = int(row_value(row, "id", 0) or 0)
+    if (
+        trainer_id <= 0
+        or not str(row_value(row, "pending_image_data", "") or "").strip()
+    ):
+        return ""
+    version = str(row_value(row, "media_submitted_at", "") or "pending")
+    return (
+        f"/api/trainers/{trainer_id}/pending-images/0"
+        f"?v={quote(version, safe='')}"
+    )
+
+
 def serialize_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
     if not row:
         return None
@@ -5128,7 +5280,6 @@ def serialize_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
         "format": row["format"],
         "level": row["level"],
         "rate": row["rate"],
-        "email": row["email"],
         "verified": bool(row["verified"]),
         "experience": row["experience"],
         "bio": row["bio"],
@@ -5142,6 +5293,7 @@ def serialize_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
         "rating": row["rating"],
         "review_count": row["review_count"],
         "imageUrl": trainer_image_url(row),
+        "galleryImageUrls": trainer_gallery_image_urls(row),
     }
 
 
@@ -5155,6 +5307,7 @@ def serialize_owner_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
     )
     payload.update(
         {
+            "email": row_value(row, "email", ""),
             "certificationId": row_value(
                 row, "certification_credential_id", ""
             ),
@@ -5163,9 +5316,134 @@ def serialize_owner_trainer_row(row: sqlite3.Row | dict | None) -> dict | None:
                 approval_status, "Pending review"
             ),
             "reviewed_at": row_value(row, "reviewed_at"),
+            "mediaReviewStatus": row_value(
+                row, "media_review_status", "approved"
+            ),
+            "mediaSubmittedAt": row_value(row, "media_submitted_at"),
+            "pendingImageUrl": trainer_pending_cover_url(row),
+            "pendingGalleryImageUrls": trainer_gallery_image_urls(
+                row, pending=True
+            ),
         }
     )
     return payload
+
+
+def normalize_trainer_lesson_schedule(
+    starts_at_value,
+    duration_value,
+    timezone_value,
+    location_value,
+    note_value="",
+) -> tuple[str, str, int, str, str, str]:
+    raw_starts_at = str(starts_at_value or "").strip()
+    if not raw_starts_at:
+        raise ValueError("Choose a class date and start time.")
+    try:
+        parsed = datetime.fromisoformat(raw_starts_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Enter a valid class start time.") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("Class start time must include its UTC offset.")
+    starts_at = parsed.astimezone(timezone.utc).replace(microsecond=0)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    if starts_at < now + timedelta(minutes=5):
+        raise ValueError("Choose a class time at least five minutes in the future.")
+    if starts_at > now + timedelta(days=366):
+        raise ValueError("Classes can be scheduled up to one year ahead.")
+
+    try:
+        duration_minutes = int(str(duration_value or "").strip())
+    except (TypeError, ValueError) as error:
+        raise ValueError("Choose a valid class duration.") from error
+    if duration_minutes < 15 or duration_minutes > 480:
+        raise ValueError("Class duration must be between 15 minutes and 8 hours.")
+
+    timezone_name = str(timezone_value or "").strip()
+    if not timezone_name or len(timezone_name) > 64:
+        raise ValueError("Choose a valid timezone.")
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("Choose a valid timezone.") from error
+
+    location = compact_whitespace(location_value)
+    if not location or len(location) > 200:
+        raise ValueError("Add a class location under 200 characters.")
+    note = compact_whitespace(note_value)
+    if len(note) > 1000:
+        raise ValueError("Class note must be under 1,000 characters.")
+
+    ends_at = starts_at + timedelta(minutes=duration_minutes)
+    return (
+        starts_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        ends_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        duration_minutes,
+        timezone_name,
+        location,
+        note,
+    )
+
+
+def serialize_trainer_client_request(
+    row: sqlite3.Row | dict, viewer_id: int
+) -> dict:
+    trainer_owner_id = int(row_value(row, "trainer_owner_id", 0) or 0)
+    is_trainer = viewer_id == trainer_owner_id
+    status = str(row_value(row, "status", "pending") or "pending")
+    return {
+        "id": int(row["id"]),
+        "trainerId": int(row["trainer_id"]),
+        "trainerName": row_value(row, "trainer_name", "Trainer"),
+        "clientName": row_value(row, "client_name", "Player"),
+        "status": status,
+        "introMessage": row_value(row, "intro_message", ""),
+        "createdAt": row_value(row, "requested_at"),
+        "respondedAt": row_value(row, "responded_at"),
+        "canAccept": bool(is_trainer and status == "pending"),
+        "canDecline": bool(is_trainer and status == "pending"),
+    }
+
+
+def serialize_trainer_relationship(
+    row: sqlite3.Row | dict, viewer_id: int
+) -> dict:
+    trainer_owner_id = int(row_value(row, "trainer_owner_id", 0) or 0)
+    status = str(row_value(row, "status", "") or "")
+    return {
+        "id": int(row["id"]),
+        "trainerId": int(row["trainer_id"]),
+        "trainerName": row_value(row, "trainer_name", "Trainer"),
+        "clientName": row_value(row, "client_name", "Player"),
+        "role": "trainer" if viewer_id == trainer_owner_id else "client",
+        "status": status,
+        "startedAt": row_value(row, "started_at"),
+        "canMessage": status == "active",
+        "canSchedule": status == "active",
+    }
+
+
+def serialize_trainer_lesson(
+    row: sqlite3.Row | dict, viewer_id: int
+) -> dict:
+    proposed_by = int(row_value(row, "proposed_by_user_id", 0) or 0)
+    status = str(row_value(row, "status", "proposed") or "proposed")
+    return {
+        "id": int(row["id"]),
+        "relationshipId": int(row["relationship_id"]),
+        "trainerName": row_value(row, "trainer_name", "Trainer"),
+        "clientName": row_value(row, "client_name", "Player"),
+        "proposedByName": row_value(row, "proposed_by_name", ""),
+        "startsAt": row["starts_at"],
+        "durationMinutes": int(row["duration_minutes"]),
+        "timezone": row["timezone"],
+        "location": row["location"],
+        "note": row["note"],
+        "status": status,
+        "createdAt": row["created_at"],
+        "canConfirm": bool(status == "proposed" and viewer_id != proposed_by),
+        "canCancel": status in {"proposed", "confirmed"},
+    }
 
 
 def normalize_listing_image_payload(raw_images) -> list[str]:
@@ -5769,10 +6047,34 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        trainer_gallery_image_match = re.fullmatch(
+            r"/api/trainers/(\d+)/images/(\d+)", parsed.path
+        )
+        if trainer_gallery_image_match:
+            self.handle_trainer_gallery_image(
+                int(trainer_gallery_image_match.group(1)),
+                int(trainer_gallery_image_match.group(2)),
+                self.current_user(),
+            )
+            return
+
+        trainer_pending_image_match = re.fullmatch(
+            r"/api/trainers/(\d+)/pending-images/(\d+)", parsed.path
+        )
+        if trainer_pending_image_match:
+            self.handle_trainer_gallery_image(
+                int(trainer_pending_image_match.group(1)),
+                int(trainer_pending_image_match.group(2)),
+                self.current_user(),
+                pending=True,
+            )
+            return
+
         trainer_detail_match = re.fullmatch(r"/api/trainers/(\d+)", parsed.path)
         if trainer_detail_match:
             trainer_id = int(trainer_detail_match.group(1))
-            item = self.fetch_trainer_by_id(trainer_id, self.current_user())
+            viewer = self.current_user()
+            item = self.fetch_trainer_by_id(trainer_id, viewer)
             if not item:
                 self.send_json(
                     {"error": "That trainer profile could not be found."},
@@ -5784,6 +6086,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 {
                     "item": item,
                     "reviews": self.fetch_reviews(str(trainer_id)),
+                    "viewerState": ElevenZeroHandler.fetch_trainer_viewer_state(
+                        self, trainer_id, viewer
+                    ),
                 }
             )
             return
@@ -5864,6 +6169,30 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not user:
                 return
             self.send_json(self.build_dashboard(user["id"]))
+            return
+
+        if parsed.path == "/api/account/trainer-hub":
+            user = self.require_user()
+            if not user:
+                return
+            self.send_json(self.build_trainer_hub(int(user["id"])))
+            return
+
+        trainer_relationship_match = re.fullmatch(
+            r"/api/trainer-client/relationships/(\d+)", parsed.path
+        )
+        if trainer_relationship_match:
+            user = self.require_user()
+            if not user:
+                return
+            query = parse_qs(parsed.query or "")
+            after_id_raw = str(query.get("afterId", ["0"])[0]).strip()
+            after_id = int(after_id_raw) if after_id_raw.isdigit() else 0
+            self.handle_trainer_relationship_detail(
+                user,
+                int(trainer_relationship_match.group(1)),
+                after_id,
+            )
             return
 
         if parsed.path == "/api/admin/dashboard":
@@ -5969,6 +6298,48 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not self.require_verified_user(user):
                 return
             self.handle_replace_trainer_image(user, body)
+            return
+
+        if parsed.path == "/api/account/trainers/images":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_replace_trainer_image(user, body)
+            return
+
+        if parsed.path == "/api/trainer-client/requests":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_create_trainer_client_request(user, body)
+            return
+
+        if parsed.path == "/api/trainer-client/requests/action":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_trainer_client_request_action(user, body)
+            return
+
+        if parsed.path == "/api/trainer-client/messages":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_create_trainer_message(user, body)
+            return
+
+        if parsed.path == "/api/trainer-client/lessons":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_create_trainer_lesson(user, body)
+            return
+
+        if parsed.path == "/api/trainer-client/lessons/action":
+            user = self.require_user()
+            if not self.require_verified_user(user):
+                return
+            self.handle_trainer_lesson_action(user, body)
             return
 
         if parsed.path == "/api/courts-directory":
@@ -6601,10 +6972,29 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_bytes(payload, match.group(1))
 
     def handle_trainer_image(self, trainer_id: int, viewer: dict | None):
+        ElevenZeroHandler.handle_trainer_gallery_image(
+            self, trainer_id, 0, viewer
+        )
+
+    def handle_trainer_gallery_image(
+        self,
+        trainer_id: int,
+        image_index: int,
+        viewer: dict | None,
+        *,
+        pending: bool = False,
+    ):
         with closing(connect_db()) as connection:
             row = connection.execute(
                 """
-                SELECT id, user_id, approval_status, image_data
+                SELECT
+                  id,
+                  user_id,
+                  approval_status,
+                  image_data,
+                  gallery_image_data_json,
+                  pending_image_data,
+                  pending_gallery_image_data_json
                 FROM trainers
                 WHERE id = ?
                 """,
@@ -6622,15 +7012,46 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         owner_id = int(row["user_id"] or 0)
         is_public = row["approval_status"] == "approved" and owner_id > 0
-        if not is_public and not viewer_is_admin and viewer_id != owner_id:
+        if pending:
+            is_public = False
+        if (
+            (pending or not is_public)
+            and not viewer_is_admin
+            and viewer_id != owner_id
+        ):
             self.send_json(
                 {"error": "That trainer photo could not be found."},
                 status=HTTPStatus.NOT_FOUND,
             )
             return
 
+        if image_index < 0 or image_index > 5:
+            self.send_json(
+                {"error": "That trainer photo could not be found."},
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
+
+        if image_index == 0:
+            image_data = row[
+                "pending_image_data" if pending else "image_data"
+            ]
+        else:
+            gallery = trainer_gallery_image_data(
+                row[
+                    "pending_gallery_image_data_json"
+                    if pending
+                    else "gallery_image_data_json"
+                ]
+            )
+            image_data = (
+                gallery[image_index - 1]
+                if image_index <= len(gallery)
+                else ""
+            )
+
         try:
-            mime_type, payload = decode_trainer_image_data(row["image_data"])
+            mime_type, payload = decode_trainer_image_data(image_data)
         except ValueError:
             self.send_json(
                 {"error": "That trainer photo could not be found."},
@@ -6770,7 +7191,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   joined_at,
                   rating,
                   review_count,
+                  gallery_image_data_json,
                   image_updated_at,
+                  pending_image_data,
+                  pending_gallery_image_data_json,
+                  media_review_status,
+                  media_submitted_at,
                   CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   approval_status,
                   reviewed_at
@@ -6804,11 +7230,17 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   availability,
                   certification_organization,
                   certification_name,
+                  certification_credential_id,
                   certification_verification_url,
                   joined_at,
                   rating,
                   review_count,
+                  gallery_image_data_json,
                   image_updated_at,
+                  pending_image_data,
+                  pending_gallery_image_data_json,
+                  media_review_status,
+                  media_submitted_at,
                   CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   approval_status
                 FROM trainers
@@ -6827,11 +7259,68 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         trainer_owner_id = int(row["user_id"] or 0)
         is_public = approval_status == "approved" and trainer_owner_id > 0
+        viewer_is_owner = (
+            viewer_id > 0
+            and trainer_owner_id > 0
+            and viewer_id == trainer_owner_id
+        )
 
-        if not is_public and not viewer_is_admin and viewer_id != trainer_owner_id:
+        if not is_public and not viewer_is_admin and not viewer_is_owner:
             return None
 
+        if viewer_is_admin or viewer_is_owner:
+            return serialize_owner_trainer_row(row)
         return serialize_trainer_row(row)
+
+    def fetch_trainer_viewer_state(
+        self, trainer_id: int, viewer: dict | None
+    ) -> dict:
+        """Return only the signed-in viewer's relationship to this trainer."""
+        state = {
+            "isOwner": False,
+            "relationshipStatus": None,
+            "relationshipId": None,
+        }
+        if not viewer:
+            return state
+
+        viewer_id = int(viewer.get("id") or 0)
+        if viewer_id <= 0:
+            return state
+
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                  trainers.user_id AS trainer_owner_id,
+                  relationships.id AS relationship_id,
+                  relationships.status AS relationship_status
+                FROM trainers
+                LEFT JOIN trainer_client_relationships AS relationships
+                  ON relationships.trainer_id = trainers.id
+                 AND relationships.client_user_id = ?
+                WHERE trainers.id = ?
+                """,
+                (viewer_id, trainer_id),
+            ).fetchone()
+
+        if not row:
+            return state
+
+        state["isOwner"] = (
+            int(row["trainer_owner_id"] or 0) == viewer_id
+        )
+        if state["isOwner"]:
+            return state
+
+        relationship_status = str(
+            row["relationship_status"] or ""
+        ).strip()
+        if relationship_status in {"pending", "active", "declined"}:
+            state["relationshipStatus"] = relationship_status
+            if relationship_status == "active":
+                state["relationshipId"] = int(row["relationship_id"])
+        return state
 
     def fetch_directory_courts(self) -> list[dict]:
         with closing(connect_db()) as connection:
@@ -8209,6 +8698,795 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             status=HTTPStatus.BAD_GATEWAY,
         )
 
+    def fetch_trainer_relationship_participant(
+        self,
+        connection: sqlite3.Connection,
+        relationship_id: int,
+        user_id: int,
+        *,
+        active_only: bool = True,
+    ) -> sqlite3.Row | None:
+        status_clause = "AND relationships.status = 'active'" if active_only else ""
+        return connection.execute(
+            f"""
+            SELECT
+              relationships.*,
+              trainers.user_id AS trainer_owner_id,
+              trainers.name AS trainer_name,
+              clients.name AS client_name
+            FROM trainer_client_relationships AS relationships
+            JOIN trainers ON trainers.id = relationships.trainer_id
+            JOIN users AS clients ON clients.id = relationships.client_user_id
+            WHERE relationships.id = ?
+              AND (
+                relationships.client_user_id = ?
+                OR trainers.user_id = ?
+              )
+              {status_clause}
+            """,
+            (relationship_id, user_id, user_id),
+        ).fetchone()
+
+    def build_trainer_hub(self, user_id: int) -> dict:
+        request_select = """
+            SELECT
+              relationships.*,
+              trainers.user_id AS trainer_owner_id,
+              trainers.name AS trainer_name,
+              clients.name AS client_name
+            FROM trainer_client_relationships AS relationships
+            JOIN trainers ON trainers.id = relationships.trainer_id
+            JOIN users AS clients ON clients.id = relationships.client_user_id
+        """
+        lesson_select = """
+            SELECT
+              lessons.*,
+              relationships.trainer_id,
+              trainers.user_id AS trainer_owner_id,
+              trainers.name AS trainer_name,
+              clients.name AS client_name,
+              proposers.name AS proposed_by_name
+            FROM trainer_lessons AS lessons
+            JOIN trainer_client_relationships AS relationships
+              ON relationships.id = lessons.relationship_id
+            JOIN trainers ON trainers.id = relationships.trainer_id
+            JOIN users AS clients ON clients.id = relationships.client_user_id
+            JOIN users AS proposers ON proposers.id = lessons.proposed_by_user_id
+        """
+        with closing(connect_db()) as connection:
+            incoming = connection.execute(
+                request_select
+                + """
+                WHERE trainers.user_id = ?
+                  AND relationships.status = 'pending'
+                ORDER BY relationships.requested_at DESC, relationships.id DESC
+                LIMIT 50
+                """,
+                (user_id,),
+            ).fetchall()
+            outgoing = connection.execute(
+                request_select
+                + """
+                WHERE relationships.client_user_id = ?
+                ORDER BY relationships.requested_at DESC, relationships.id DESC
+                LIMIT 50
+                """,
+                (user_id,),
+            ).fetchall()
+            relationships = connection.execute(
+                request_select
+                + """
+                WHERE relationships.status = 'active'
+                  AND (
+                    relationships.client_user_id = ?
+                    OR trainers.user_id = ?
+                  )
+                ORDER BY relationships.started_at DESC, relationships.id DESC
+                LIMIT 100
+                """,
+                (user_id, user_id),
+            ).fetchall()
+            lessons = connection.execute(
+                lesson_select
+                + """
+                WHERE relationships.status = 'active'
+                  AND (
+                    relationships.client_user_id = ?
+                    OR trainers.user_id = ?
+                  )
+                ORDER BY lessons.starts_at ASC, lessons.id ASC
+                LIMIT 100
+                """,
+                (user_id, user_id),
+            ).fetchall()
+            unread_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM trainer_messages AS messages
+                JOIN trainer_client_relationships AS relationships
+                  ON relationships.id = messages.relationship_id
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                WHERE relationships.status = 'active'
+                  AND (
+                    relationships.client_user_id = ?
+                    OR trainers.user_id = ?
+                  )
+                  AND messages.sender_user_id != ?
+                  AND messages.read_at IS NULL
+                """,
+                (user_id, user_id, user_id),
+            ).fetchone()[0]
+
+        return {
+            "incomingRequests": [
+                serialize_trainer_client_request(row, user_id) for row in incoming
+            ],
+            "outgoingRequests": [
+                serialize_trainer_client_request(row, user_id) for row in outgoing
+            ],
+            "relationships": [
+                serialize_trainer_relationship(row, user_id)
+                for row in relationships
+            ],
+            "lessons": [
+                serialize_trainer_lesson(row, user_id) for row in lessons
+            ],
+            "unreadCount": int(unread_count or 0),
+        }
+
+    def handle_trainer_relationship_detail(
+        self, user: dict, relationship_id: int, after_id: int = 0
+    ):
+        user_id = int(user["id"])
+        with closing(connect_db()) as connection:
+            relationship = self.fetch_trainer_relationship_participant(
+                connection, relationship_id, user_id
+            )
+            if not relationship:
+                self.send_json(
+                    {"error": "That trainer conversation could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+
+            messages = connection.execute(
+                """
+                SELECT
+                  messages.id,
+                  messages.sender_user_id,
+                  senders.name AS sender_name,
+                  messages.body,
+                  messages.created_at
+                FROM trainer_messages AS messages
+                JOIN users AS senders ON senders.id = messages.sender_user_id
+                WHERE messages.relationship_id = ?
+                  AND messages.id > ?
+                ORDER BY messages.id ASC
+                LIMIT 200
+                """,
+                (relationship_id, max(after_id, 0)),
+            ).fetchall()
+            lessons = connection.execute(
+                """
+                SELECT
+                  lessons.*,
+                  trainers.name AS trainer_name,
+                  clients.name AS client_name,
+                  proposers.name AS proposed_by_name
+                FROM trainer_lessons AS lessons
+                JOIN trainer_client_relationships AS relationships
+                  ON relationships.id = lessons.relationship_id
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                JOIN users AS clients ON clients.id = relationships.client_user_id
+                JOIN users AS proposers ON proposers.id = lessons.proposed_by_user_id
+                WHERE lessons.relationship_id = ?
+                ORDER BY lessons.starts_at ASC, lessons.id ASC
+                LIMIT 100
+                """,
+                (relationship_id,),
+            ).fetchall()
+            connection.execute(
+                """
+                UPDATE trainer_messages
+                SET read_at = COALESCE(read_at, ?)
+                WHERE relationship_id = ?
+                  AND sender_user_id != ?
+                  AND read_at IS NULL
+                """,
+                (utc_now(), relationship_id, user_id),
+            )
+            connection.commit()
+
+        self.send_json(
+            {
+                "relationship": serialize_trainer_relationship(
+                    relationship, user_id
+                ),
+                "messages": [
+                    {
+                        "id": int(row["id"]),
+                        "senderUserId": int(row["sender_user_id"]),
+                        "senderName": row["sender_name"],
+                        "isMine": int(row["sender_user_id"]) == user_id,
+                        "body": row["body"],
+                        "createdAt": row["created_at"],
+                    }
+                    for row in messages
+                ],
+                "lessons": [
+                    serialize_trainer_lesson(row, user_id) for row in lessons
+                ],
+            }
+        )
+
+    def handle_create_trainer_client_request(self, user: dict, body: dict):
+        try:
+            trainer_id = int(body.get("trainerId") or 0)
+        except (TypeError, ValueError):
+            trainer_id = 0
+        intro_message = str(body.get("introMessage", "") or "").strip()
+        if trainer_id <= 0:
+            self.send_json(
+                {"error": "Choose a valid trainer."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if len(intro_message) > 500 or any(
+            ord(character) < 32 and character not in "\n\r\t"
+            for character in intro_message
+        ):
+            self.send_json(
+                {"error": "Intro message must be under 500 characters."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        user_id = int(user["id"])
+        if not rate_limit_allows(f"trainer-request:{user_id}", 8, 3600):
+            self.send_json(
+                {"error": "Too many trainer requests. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            trainer = connection.execute(
+                """
+                SELECT id, user_id, name
+                FROM trainers
+                WHERE id = ?
+                  AND approval_status = 'approved'
+                  AND user_id IS NOT NULL
+                """,
+                (trainer_id,),
+            ).fetchone()
+            if not trainer:
+                connection.rollback()
+                self.send_json(
+                    {"error": "That trainer is not accepting client requests."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            if int(trainer["user_id"]) == user_id:
+                connection.rollback()
+                self.send_json(
+                    {"error": "You cannot request yourself as a trainer."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            existing = connection.execute(
+                """
+                SELECT id, status
+                FROM trainer_client_relationships
+                WHERE trainer_id = ? AND client_user_id = ?
+                """,
+                (trainer_id, user_id),
+            ).fetchone()
+            if existing and existing["status"] in {"pending", "active"}:
+                connection.rollback()
+                message = (
+                    "Your request is already waiting for this trainer."
+                    if existing["status"] == "pending"
+                    else "You are already connected with this trainer."
+                )
+                self.send_json({"error": message}, status=HTTPStatus.CONFLICT)
+                return
+
+            now = utc_now()
+            if existing:
+                relationship_id = int(existing["id"])
+                connection.execute(
+                    """
+                    UPDATE trainer_client_relationships
+                    SET status = 'pending',
+                        intro_message = ?,
+                        requested_at = ?,
+                        responded_at = NULL,
+                        started_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (intro_message, now, now, relationship_id),
+                )
+            else:
+                relationship_id = connection.execute(
+                    """
+                    INSERT INTO trainer_client_relationships (
+                      trainer_id,
+                      client_user_id,
+                      status,
+                      intro_message,
+                      requested_at,
+                      updated_at
+                    ) VALUES (?, ?, 'pending', ?, ?, ?)
+                    """,
+                    (trainer_id, user_id, intro_message, now, now),
+                ).lastrowid
+            row = connection.execute(
+                """
+                SELECT
+                  relationships.*,
+                  trainers.user_id AS trainer_owner_id,
+                  trainers.name AS trainer_name,
+                  clients.name AS client_name
+                FROM trainer_client_relationships AS relationships
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                JOIN users AS clients ON clients.id = relationships.client_user_id
+                WHERE relationships.id = ?
+                """,
+                (relationship_id,),
+            ).fetchone()
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "request": serialize_trainer_client_request(row, user_id),
+                "message": "Client request sent to the trainer.",
+            },
+            status=HTTPStatus.CREATED,
+        )
+
+    def handle_trainer_client_request_action(self, user: dict, body: dict):
+        try:
+            request_id = int(body.get("requestId") or 0)
+        except (TypeError, ValueError):
+            request_id = 0
+        action = str(body.get("action", "") or "").strip().lower()
+        if request_id <= 0 or action not in {"accept", "decline"}:
+            self.send_json(
+                {"error": "Choose a pending request and accept or decline it."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        user_id = int(user["id"])
+        next_status = "active" if action == "accept" else "declined"
+        now = utc_now()
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT
+                  relationships.id,
+                  relationships.status,
+                  trainers.user_id AS trainer_owner_id
+                FROM trainer_client_relationships AS relationships
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                WHERE relationships.id = ?
+                  AND trainers.user_id = ?
+                """,
+                (request_id, user_id),
+            ).fetchone()
+            if not row:
+                connection.rollback()
+                self.send_json(
+                    {"error": "That client request could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            if row["status"] != "pending":
+                connection.rollback()
+                self.send_json(
+                    {"error": "That client request has already been answered."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            cursor = connection.execute(
+                """
+                UPDATE trainer_client_relationships
+                SET status = ?,
+                    responded_at = ?,
+                    started_at = CASE WHEN ? = 'active' THEN ? ELSE NULL END,
+                    updated_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (next_status, now, next_status, now, now, request_id),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                self.send_json(
+                    {"error": "That client request changed. Refresh and try again."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            relationship = self.fetch_trainer_relationship_participant(
+                connection, request_id, user_id, active_only=False
+            )
+            connection.commit()
+
+        payload = {
+            "ok": True,
+            "status": next_status,
+            "message": (
+                "Client request accepted. Messaging and scheduling are now open."
+                if next_status == "active"
+                else "Client request declined."
+            ),
+        }
+        if next_status == "active":
+            payload["relationship"] = serialize_trainer_relationship(
+                relationship, user_id
+            )
+        self.send_json(payload)
+
+    def handle_create_trainer_message(self, user: dict, body: dict):
+        try:
+            relationship_id = int(body.get("relationshipId") or 0)
+        except (TypeError, ValueError):
+            relationship_id = 0
+        message_body = str(body.get("body", "") or "").strip()
+        if relationship_id <= 0:
+            self.send_json(
+                {"error": "Choose a trainer conversation."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if (
+            not message_body
+            or len(message_body) > 2000
+            or any(
+                ord(character) < 32 and character not in "\n\r\t"
+                for character in message_body
+            )
+        ):
+            self.send_json(
+                {"error": "Message must be between 1 and 2,000 characters."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        user_id = int(user["id"])
+        if not rate_limit_allows(f"trainer-message:{user_id}", 30, 60):
+            self.send_json(
+                {"error": "You are sending messages too quickly. Please wait."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            relationship = self.fetch_trainer_relationship_participant(
+                connection, relationship_id, user_id
+            )
+            if not relationship:
+                self.send_json(
+                    {"error": "That trainer conversation could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            created_at = utc_now()
+            message_id = connection.execute(
+                """
+                INSERT INTO trainer_messages (
+                  relationship_id, sender_user_id, body, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (relationship_id, user_id, message_body, created_at),
+            ).lastrowid
+            sender_name = (
+                relationship["trainer_name"]
+                if user_id == int(relationship["trainer_owner_id"])
+                else relationship["client_name"]
+            )
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "message": {
+                    "id": int(message_id),
+                    "senderUserId": user_id,
+                    "senderName": sender_name,
+                    "isMine": True,
+                    "body": message_body,
+                    "createdAt": created_at,
+                },
+            },
+            status=HTTPStatus.CREATED,
+        )
+
+    def trainer_has_confirmed_lesson_overlap(
+        self,
+        connection: sqlite3.Connection,
+        trainer_id: int,
+        starts_at: str,
+        ends_at: str,
+        *,
+        excluding_lesson_id: int = 0,
+    ) -> bool:
+        return bool(
+            connection.execute(
+                """
+                SELECT 1
+                FROM trainer_lessons AS lessons
+                JOIN trainer_client_relationships AS relationships
+                  ON relationships.id = lessons.relationship_id
+                WHERE relationships.trainer_id = ?
+                  AND lessons.status = 'confirmed'
+                  AND lessons.id != ?
+                  AND lessons.starts_at < ?
+                  AND lessons.ends_at > ?
+                LIMIT 1
+                """,
+                (trainer_id, excluding_lesson_id, ends_at, starts_at),
+            ).fetchone()
+        )
+
+    def handle_create_trainer_lesson(self, user: dict, body: dict):
+        try:
+            relationship_id = int(body.get("relationshipId") or 0)
+        except (TypeError, ValueError):
+            relationship_id = 0
+        if relationship_id <= 0:
+            self.send_json(
+                {"error": "Choose an active trainer relationship."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            (
+                starts_at,
+                ends_at,
+                duration_minutes,
+                timezone_name,
+                location,
+                note,
+            ) = normalize_trainer_lesson_schedule(
+                body.get("startsAt"),
+                body.get("durationMinutes"),
+                body.get("timezone"),
+                body.get("location"),
+                body.get("note", ""),
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        user_id = int(user["id"])
+        if not rate_limit_allows(f"trainer-lesson:{user_id}", 20, 3600):
+            self.send_json(
+                {"error": "Too many class changes. Please wait and try again."},
+                status=HTTPStatus.TOO_MANY_REQUESTS,
+            )
+            return
+
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            relationship = self.fetch_trainer_relationship_participant(
+                connection, relationship_id, user_id
+            )
+            if not relationship:
+                connection.rollback()
+                self.send_json(
+                    {"error": "That trainer relationship could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            trainer_id = int(relationship["trainer_id"])
+            if self.trainer_has_confirmed_lesson_overlap(
+                connection, trainer_id, starts_at, ends_at
+            ):
+                connection.rollback()
+                self.send_json(
+                    {"error": "That trainer already has a confirmed class at this time."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            now = utc_now()
+            lesson_id = connection.execute(
+                """
+                INSERT INTO trainer_lessons (
+                  relationship_id,
+                  proposed_by_user_id,
+                  starts_at,
+                  ends_at,
+                  duration_minutes,
+                  timezone,
+                  location,
+                  note,
+                  status,
+                  created_at,
+                  updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)
+                """,
+                (
+                    relationship_id,
+                    user_id,
+                    starts_at,
+                    ends_at,
+                    duration_minutes,
+                    timezone_name,
+                    location,
+                    note,
+                    now,
+                    now,
+                ),
+            ).lastrowid
+            row = connection.execute(
+                """
+                SELECT
+                  lessons.*,
+                  trainers.name AS trainer_name,
+                  clients.name AS client_name,
+                  proposers.name AS proposed_by_name
+                FROM trainer_lessons AS lessons
+                JOIN trainer_client_relationships AS relationships
+                  ON relationships.id = lessons.relationship_id
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                JOIN users AS clients ON clients.id = relationships.client_user_id
+                JOIN users AS proposers ON proposers.id = lessons.proposed_by_user_id
+                WHERE lessons.id = ?
+                """,
+                (lesson_id,),
+            ).fetchone()
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "lesson": serialize_trainer_lesson(row, user_id),
+                "message": "Class time proposed. The other person can confirm it.",
+            },
+            status=HTTPStatus.CREATED,
+        )
+
+    def handle_trainer_lesson_action(self, user: dict, body: dict):
+        try:
+            lesson_id = int(body.get("lessonId") or 0)
+        except (TypeError, ValueError):
+            lesson_id = 0
+        action = str(body.get("action", "") or "").strip().lower()
+        if lesson_id <= 0 or action not in {"confirm", "cancel"}:
+            self.send_json(
+                {"error": "Choose a class and confirm or cancel it."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        user_id = int(user["id"])
+        with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT
+                  lessons.*,
+                  relationships.trainer_id,
+                  relationships.client_user_id,
+                  relationships.status AS relationship_status,
+                  trainers.user_id AS trainer_owner_id,
+                  trainers.name AS trainer_name,
+                  clients.name AS client_name,
+                  proposers.name AS proposed_by_name
+                FROM trainer_lessons AS lessons
+                JOIN trainer_client_relationships AS relationships
+                  ON relationships.id = lessons.relationship_id
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                JOIN users AS clients ON clients.id = relationships.client_user_id
+                JOIN users AS proposers ON proposers.id = lessons.proposed_by_user_id
+                WHERE lessons.id = ?
+                  AND (
+                    relationships.client_user_id = ?
+                    OR trainers.user_id = ?
+                  )
+                """,
+                (lesson_id, user_id, user_id),
+            ).fetchone()
+            if not row or row["relationship_status"] != "active":
+                connection.rollback()
+                self.send_json(
+                    {"error": "That class could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+
+            now = utc_now()
+            if action == "confirm":
+                if row["status"] != "proposed":
+                    connection.rollback()
+                    self.send_json(
+                        {"error": "That class is no longer waiting for confirmation."},
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+                if int(row["proposed_by_user_id"]) == user_id:
+                    connection.rollback()
+                    self.send_json(
+                        {"error": "The other person must confirm this class."},
+                        status=HTTPStatus.FORBIDDEN,
+                    )
+                    return
+                if self.trainer_has_confirmed_lesson_overlap(
+                    connection,
+                    int(row["trainer_id"]),
+                    row["starts_at"],
+                    row["ends_at"],
+                    excluding_lesson_id=lesson_id,
+                ):
+                    connection.rollback()
+                    self.send_json(
+                        {"error": "That trainer already has a confirmed class at this time."},
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+                connection.execute(
+                    """
+                    UPDATE trainer_lessons
+                    SET status = 'confirmed', confirmed_at = ?, updated_at = ?
+                    WHERE id = ? AND status = 'proposed'
+                    """,
+                    (now, now, lesson_id),
+                )
+                next_status = "confirmed"
+            else:
+                if row["status"] not in {"proposed", "confirmed"}:
+                    connection.rollback()
+                    self.send_json(
+                        {"error": "That class has already been cancelled."},
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+                connection.execute(
+                    """
+                    UPDATE trainer_lessons
+                    SET status = 'cancelled',
+                        cancelled_at = ?,
+                        cancelled_by_user_id = ?,
+                        updated_at = ?
+                    WHERE id = ? AND status IN ('proposed', 'confirmed')
+                    """,
+                    (now, user_id, now, lesson_id),
+                )
+                next_status = "cancelled"
+
+            updated = connection.execute(
+                """
+                SELECT
+                  lessons.*,
+                  trainers.name AS trainer_name,
+                  clients.name AS client_name,
+                  proposers.name AS proposed_by_name
+                FROM trainer_lessons AS lessons
+                JOIN trainer_client_relationships AS relationships
+                  ON relationships.id = lessons.relationship_id
+                JOIN trainers ON trainers.id = relationships.trainer_id
+                JOIN users AS clients ON clients.id = relationships.client_user_id
+                JOIN users AS proposers ON proposers.id = lessons.proposed_by_user_id
+                WHERE lessons.id = ?
+                """,
+                (lesson_id,),
+            ).fetchone()
+            connection.commit()
+
+        self.send_json(
+            {
+                "ok": True,
+                "lesson": serialize_trainer_lesson(updated, user_id),
+                "message": (
+                    "Class confirmed."
+                    if next_status == "confirmed"
+                    else "Class cancelled."
+                ),
+            }
+        )
+
     def build_dashboard(self, user_id: int) -> dict:
         with closing(connect_db()) as connection:
             user = connection.execute(
@@ -8296,7 +9574,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   joined_at,
                   rating,
                   review_count,
+                  gallery_image_data_json,
                   image_updated_at,
+                  pending_image_data,
+                  pending_gallery_image_data_json,
+                  media_review_status,
+                  media_submitted_at,
                   CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   approval_status,
                   reviewed_at
@@ -8767,7 +10050,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   trainers.joined_at,
                   trainers.rating,
                   trainers.review_count,
+                  trainers.gallery_image_data_json,
                   trainers.image_updated_at,
+                  trainers.pending_image_data,
+                  trainers.pending_gallery_image_data_json,
+                  trainers.media_review_status,
+                  trainers.media_submitted_at,
                   CASE WHEN length(trim(trainers.image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   trainers.approval_status,
                   trainers.reviewed_at,
@@ -9609,6 +10897,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   name,
                   approval_status,
                   image_data,
+                  pending_image_data,
+                  pending_gallery_image_data_json,
+                  media_review_status,
+                  media_submitted_at,
                   certification_organization,
                   certification_name
                 FROM trainers
@@ -9618,6 +10910,72 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchone()
             if not row:
                 self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+            if (
+                row["approval_status"] == "approved"
+                and row["media_review_status"] == "pending"
+                and requested_status == "pending"
+            ):
+                self.send_json(
+                    {
+                        "error": (
+                            "This trainer profile is already live while its new "
+                            "photos await review. Approve or reject the photo set."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            if (
+                row["approval_status"] == "approved"
+                and row["media_review_status"] == "pending"
+                and requested_status in {"approved", "rejected"}
+            ):
+                if requested_status == "approved":
+                    if not str(row["pending_image_data"] or "").strip():
+                        self.send_json(
+                            {"error": "The pending trainer photo set is incomplete."},
+                            status=HTTPStatus.CONFLICT,
+                        )
+                        return
+                    connection.execute(
+                        """
+                        UPDATE trainers
+                        SET
+                          image_data = pending_image_data,
+                          gallery_image_data_json = pending_gallery_image_data_json,
+                          image_updated_at = COALESCE(media_submitted_at, ?),
+                          pending_image_data = '',
+                          pending_gallery_image_data_json = '[]',
+                          media_review_status = 'approved',
+                          media_submitted_at = NULL,
+                          reviewed_at = ?
+                        WHERE id = ?
+                        """,
+                        (utc_now(), utc_now(), trainer_id),
+                    )
+                    action_message = (
+                        f"{row['name']}'s new trainer photos are now live."
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE trainers
+                        SET
+                          pending_image_data = '',
+                          pending_gallery_image_data_json = '[]',
+                          media_review_status = 'rejected',
+                          media_submitted_at = NULL
+                        WHERE id = ?
+                        """,
+                        (trainer_id,),
+                    )
+                    action_message = (
+                        f"{row['name']}'s current photos remain live; "
+                        "the replacement set needs changes."
+                    )
+                connection.commit()
+                self.send_json({"ok": True, "message": action_message})
                 return
             if (
                 requested_status == "approved"
@@ -10353,6 +11711,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             image_data = normalize_trainer_landscape_image_data(
                 body.get("trainerImage")
             )
+            gallery_images = normalize_trainer_gallery_images(
+                body.get("trainerGalleryImages", [])
+            )
         except ValueError as error:
             self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -10394,11 +11755,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 INSERT INTO trainers (
                   user_id, name, location, format, level, rate, email,
                   verified, experience, bio, availability, joined_at, rating, review_count,
-                  image_data, image_updated_at, certification_organization,
+                  image_data, gallery_image_data_json, image_updated_at, certification_organization,
                   certification_name, certification_credential_id,
                   certification_verification_url, approval_status, reviewed_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?,
                   'pending', NULL
                 )
                 """,
@@ -10415,6 +11776,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     availability,
                     datetime.now().date().isoformat(),
                     image_data,
+                    json.dumps(gallery_images, separators=(",", ":")),
                     image_updated_at,
                     certification_organization,
                     certification_name,
@@ -10458,13 +11820,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             image_data = normalize_trainer_landscape_image_data(
                 body.get("trainerImage")
             )
+            gallery_images = normalize_trainer_gallery_images(
+                body.get("trainerGalleryImages", [])
+            )
         except ValueError as error:
             self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
             return
 
         with closing(connect_db()) as connection:
             row = connection.execute(
-                "SELECT id, user_id FROM trainers WHERE id = ?",
+                "SELECT id, user_id, approval_status FROM trainers WHERE id = ?",
                 (trainer_id,),
             ).fetchone()
             if not row or int(row["user_id"] or 0) != int(user["id"]):
@@ -10475,18 +11840,43 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 return
 
             image_updated_at = utc_now()
-            connection.execute(
-                """
-                UPDATE trainers
-                SET
-                  image_data = ?,
-                  image_updated_at = ?,
-                  approval_status = 'pending',
-                  reviewed_at = NULL
-                WHERE id = ?
-                """,
-                (image_data, image_updated_at, trainer_id),
-            )
+            if row["approval_status"] == "approved":
+                connection.execute(
+                    """
+                    UPDATE trainers
+                    SET
+                      pending_image_data = ?,
+                      pending_gallery_image_data_json = ?,
+                      media_review_status = 'pending',
+                      media_submitted_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        image_data,
+                        json.dumps(gallery_images, separators=(",", ":")),
+                        image_updated_at,
+                        trainer_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE trainers
+                    SET
+                      image_data = ?,
+                      gallery_image_data_json = ?,
+                      image_updated_at = ?,
+                      approval_status = 'pending',
+                      reviewed_at = NULL
+                    WHERE id = ?
+                    """,
+                    (
+                        image_data,
+                        json.dumps(gallery_images, separators=(",", ":")),
+                        image_updated_at,
+                        trainer_id,
+                    ),
+                )
             connection.commit()
             updated = connection.execute(
                 "SELECT * FROM trainers WHERE id = ?",
@@ -10498,8 +11888,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "ok": True,
                 "item": serialize_owner_trainer_row(updated),
                 "message": (
-                    "Trainer photo updated. The full profile is back in review "
-                    "before it appears publicly."
+                    "Trainer photos submitted for review. Approved photos stay "
+                    "live until the new set is approved."
                 ),
             }
         )
