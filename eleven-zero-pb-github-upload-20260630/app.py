@@ -5769,6 +5769,25 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        trainer_detail_match = re.fullmatch(r"/api/trainers/(\d+)", parsed.path)
+        if trainer_detail_match:
+            trainer_id = int(trainer_detail_match.group(1))
+            item = self.fetch_trainer_by_id(trainer_id, self.current_user())
+            if not item:
+                self.send_json(
+                    {"error": "That trainer profile could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+
+            self.send_json(
+                {
+                    "item": item,
+                    "reviews": self.fetch_reviews(str(trainer_id)),
+                }
+            )
+            return
+
         if parsed.path.startswith("/api/listings/"):
             listing_id = parsed.path.rsplit("/", 1)[-1].strip()
             if not listing_id.isdigit():
@@ -6763,6 +6782,56 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             ).fetchall()
 
         return [serialize_trainer_row(row) for row in rows]
+
+    def fetch_trainer_by_id(
+        self, trainer_id: int, viewer: dict | None = None
+    ) -> dict | None:
+        with closing(connect_db()) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                  id,
+                  user_id,
+                  name,
+                  location,
+                  format,
+                  level,
+                  rate,
+                  email,
+                  verified,
+                  experience,
+                  bio,
+                  availability,
+                  certification_organization,
+                  certification_name,
+                  certification_verification_url,
+                  joined_at,
+                  rating,
+                  review_count,
+                  image_updated_at,
+                  CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
+                  approval_status
+                FROM trainers
+                WHERE id = ?
+                """,
+                (trainer_id,),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        approval_status = normalize_listing_approval_status(
+            row_value(row, "approval_status", "pending"), default="pending"
+        )
+        viewer_id = int(viewer.get("id") or 0) if viewer else 0
+        viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
+        trainer_owner_id = int(row["user_id"] or 0)
+        is_public = approval_status == "approved" and trainer_owner_id > 0
+
+        if not is_public and not viewer_is_admin and viewer_id != trainer_owner_id:
+            return None
+
+        return serialize_trainer_row(row)
 
     def fetch_directory_courts(self) -> list[dict]:
         with closing(connect_db()) as connection:

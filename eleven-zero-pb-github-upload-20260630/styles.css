@@ -12570,3 +12570,625 @@ body.account-admin-mode {
     font-size: 1.82rem;
   }
 }
+
+/* Trainer directory links and full trainer profiles */
+.trainers-page .trainer-profile-card-link {
+  display: flex;
+  min-width: 0;
+  border-radius: 28px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.trainers-page .trainer-profile-card-link .trainer-profile-card {
+  width: 100%;
+}
+
+.trainers-page .trainer-profile-card-link:focus-visible {
+  outline: 4px solid rgba(8, 233, 90, 0.56);
+  outline-offset: 4px;
+}
+
+.trainers-page .trainer-profile-contact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.trainer-profile-page {
+  background:
+    radial-gradient(circle at 2% 2%, rgba(8, 233, 90, 0.18), transparent 24%),
+    radial-gradient(circle at 96% 14%, rgba(121, 184, 232, 0.13), transparent 21%),
+    linear-gradient(180deg, #eff6eb 0%, #f8f4ec 32%, #fbf8f1 100%);
+}
+
+.trainer-detail-main {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.trainer-detail-back {
+  padding: 3px 8px;
+}
+
+.trainer-detail-back .text-link {
+  color: var(--forest);
+  font-weight: 800;
+}
+
+.trainer-detail-status {
+  padding: 14px 18px;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(18, 18, 18, 0.66);
+}
+
+.trainer-detail-status[hidden] {
+  display: none;
+}
+
+.trainer-detail-status.is-error {
+  border-color: rgba(157, 44, 28, 0.18);
+  background: #fff3ef;
+  color: #8a2b1c;
+}
+
+.trainer-detail-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.trainer-detail-loading,
+.trainer-detail-error {
+  overflow: hidden;
+  min-height: 560px;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 36px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 24px 60px rgba(3, 26, 14, 0.09);
+}
+
+.trainer-detail-loading {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+}
+
+.trainer-detail-loading-image {
+  background:
+    linear-gradient(100deg, transparent 28%, rgba(255, 255, 255, 0.2) 42%, transparent 56%)
+      0 0 / 220% 100%,
+    linear-gradient(145deg, #0a4426, #75d99a);
+  animation: trainer-detail-shimmer 1.4s linear infinite;
+}
+
+.trainer-detail-loading > div {
+  display: flex;
+  padding: 48px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.trainer-detail-loading h1,
+.trainer-detail-error h1 {
+  margin: 14px 0 0;
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: clamp(3.4rem, 6vw, 6.2rem);
+  line-height: 0.88;
+  text-transform: uppercase;
+}
+
+.trainer-detail-loading p:last-child,
+.trainer-detail-error > p:not(.eyebrow) {
+  max-width: 34rem;
+  margin: 20px 0 0;
+  color: rgba(18, 18, 18, 0.65);
+  line-height: 1.65;
+}
+
+.trainer-detail-error {
+  display: flex;
+  padding: clamp(32px, 6vw, 72px);
+  align-items: flex-start;
+  justify-content: center;
+  flex-direction: column;
+}
+
+.trainer-detail-error .button {
+  margin-top: 26px;
+}
+
+.trainer-detail-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(380px, 0.82fr);
+  overflow: hidden;
+  min-height: 620px;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 38px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 28px 68px rgba(3, 26, 14, 0.12);
+}
+
+.trainer-detail-media {
+  position: relative;
+  display: grid;
+  min-height: 620px;
+  overflow: hidden;
+  place-items: center;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 78% 14%, rgba(8, 233, 90, 0.48), transparent 28%),
+    linear-gradient(145deg, #073b21, #61ce89);
+}
+
+.trainer-detail-media > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 32%;
+}
+
+.trainer-detail-photo-fallback {
+  color: #fff;
+  font-family: var(--display);
+  font-size: clamp(6rem, 14vw, 11rem);
+  line-height: 1;
+}
+
+.trainer-detail-photo-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(3, 25, 13, 0.08) 40%, rgba(3, 25, 13, 0.72) 100%);
+  pointer-events: none;
+}
+
+.trainer-detail-photo-badges {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  left: 24px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trainer-detail-photo-badges span,
+.trainer-detail-photo-badges strong {
+  display: inline-flex;
+  min-height: 42px;
+  padding: 0 15px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.trainer-detail-photo-badges span {
+  background: rgba(8, 233, 90, 0.9);
+  color: var(--forest);
+}
+
+.trainer-detail-photo-badges strong {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--forest);
+}
+
+.trainer-detail-summary {
+  display: flex;
+  padding: clamp(34px, 4.4vw, 58px);
+  flex-direction: column;
+  justify-content: center;
+}
+
+.trainer-detail-summary h1 {
+  max-width: 9ch;
+  margin: 16px 0 0;
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: clamp(4.2rem, 7vw, 7.1rem);
+  letter-spacing: -0.035em;
+  line-height: 0.84;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.trainer-detail-location {
+  margin: 18px 0 0;
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 1.06rem;
+  font-weight: 750;
+}
+
+.trainer-detail-rating {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 42px;
+  margin-top: 22px;
+  padding: 0 14px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 999px;
+  background: rgba(3, 45, 23, 0.045);
+  color: var(--forest);
+}
+
+.trainer-detail-rating > span {
+  color: #e8ad16;
+}
+
+.trainer-detail-rating small,
+.trainer-detail-rating-new span {
+  color: rgba(18, 18, 18, 0.58);
+  font-size: 0.78rem;
+}
+
+.trainer-detail-rating-new {
+  background: rgba(121, 184, 232, 0.13);
+}
+
+.trainer-detail-quick-facts {
+  display: grid;
+  gap: 0;
+  margin-top: 24px;
+  border-block: 1px solid rgba(3, 45, 23, 0.09);
+}
+
+.trainer-detail-quick-facts > div {
+  display: grid;
+  gap: 4px;
+  padding: 15px 0;
+}
+
+.trainer-detail-quick-facts > div + div {
+  border-top: 1px solid rgba(3, 45, 23, 0.08);
+}
+
+.trainer-detail-quick-facts span,
+.trainer-detail-experience span {
+  color: rgba(18, 18, 18, 0.5);
+  font-size: 0.69rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trainer-detail-quick-facts strong {
+  color: var(--forest);
+  font-size: 0.93rem;
+  line-height: 1.4;
+}
+
+.trainer-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.trainer-detail-actions .button {
+  min-height: 52px;
+  padding-inline: 21px;
+}
+
+.trainer-detail-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+  gap: 18px;
+}
+
+.trainer-detail-panel,
+.trainer-detail-reviews {
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 48px rgba(3, 26, 14, 0.07);
+}
+
+.trainer-detail-panel {
+  padding: clamp(26px, 4vw, 42px);
+}
+
+.trainer-detail-panel h2,
+.trainer-detail-reviews-head h2 {
+  margin: 12px 0 0;
+  color: var(--forest);
+  font-family: var(--display);
+  font-size: clamp(2.8rem, 4.6vw, 4.8rem);
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.trainer-detail-panel > p:not(.eyebrow) {
+  max-width: 52rem;
+  margin: 20px 0 0;
+  color: rgba(18, 18, 18, 0.67);
+  font-size: 1rem;
+  line-height: 1.72;
+}
+
+.trainer-detail-experience {
+  display: grid;
+  gap: 7px;
+  margin-top: 30px;
+  padding: 20px;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(8, 233, 90, 0.11), rgba(121, 184, 232, 0.09));
+}
+
+.trainer-detail-experience strong {
+  color: var(--forest);
+  line-height: 1.5;
+}
+
+.trainer-detail-side-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.trainer-detail-availability {
+  background:
+    radial-gradient(circle at 92% 8%, rgba(8, 233, 90, 0.16), transparent 28%),
+    rgba(255, 255, 255, 0.9);
+}
+
+.trainer-detail-availability .text-link {
+  display: inline-block;
+  margin-top: 20px;
+  color: var(--forest);
+  font-weight: 850;
+}
+
+.trainer-detail-certification {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(121, 184, 232, 0.18), transparent 30%),
+    #f5fbf2;
+}
+
+.trainer-detail-cert-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--acid);
+  color: var(--forest);
+  font-size: 1.2rem;
+  font-weight: 950;
+}
+
+.trainer-detail-certification h2 {
+  font-size: clamp(2rem, 3vw, 3rem);
+}
+
+.trainer-detail-certification .text-link {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--forest);
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
+.trainer-detail-reviews {
+  padding: clamp(26px, 4vw, 42px);
+}
+
+.trainer-detail-reviews-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.trainer-detail-reviews-head .button {
+  flex: 0 0 auto;
+}
+
+.trainer-detail-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.trainer-detail-review {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid rgba(3, 45, 23, 0.09);
+  border-radius: 22px;
+  background: rgba(247, 250, 247, 0.86);
+}
+
+.trainer-detail-review-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.trainer-detail-review-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.trainer-detail-review-head strong {
+  color: var(--forest);
+}
+
+.trainer-detail-review-head span {
+  color: rgba(18, 18, 18, 0.52);
+  font-size: 0.76rem;
+}
+
+.trainer-detail-review-stars > span {
+  color: #e8ad16;
+  letter-spacing: 0.05em;
+}
+
+.trainer-detail-review > p {
+  margin: 0;
+  color: rgba(18, 18, 18, 0.68);
+  line-height: 1.62;
+}
+
+.trainer-detail-empty-reviews {
+  grid-column: 1 / -1;
+  padding: 28px;
+  border: 1px dashed rgba(3, 45, 23, 0.18);
+  border-radius: 22px;
+  background: rgba(3, 45, 23, 0.035);
+}
+
+.trainer-detail-empty-reviews h3 {
+  margin: 9px 0 0;
+  color: var(--forest);
+  font-size: 1.15rem;
+}
+
+.trainer-detail-empty-reviews > p:last-child {
+  margin: 8px 0 0;
+  color: rgba(18, 18, 18, 0.62);
+}
+
+@keyframes trainer-detail-shimmer {
+  to {
+    background-position: -220% 0, 0 0;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .trainers-page .trainer-profile-card-link:hover .trainer-profile-card {
+    transform: translateY(-3px);
+    box-shadow: 0 22px 46px rgba(3, 26, 14, 0.12);
+  }
+
+  .trainers-page .trainer-profile-card-link:hover .trainer-profile-photo {
+    transform: scale(1.025);
+  }
+}
+
+@media (max-width: 980px) {
+  .trainer-detail-hero,
+  .trainer-detail-loading {
+    grid-template-columns: 1fr;
+  }
+
+  .trainer-detail-hero {
+    min-height: 0;
+  }
+
+  .trainer-detail-media {
+    min-height: 0;
+    aspect-ratio: 16 / 10;
+  }
+
+  .trainer-detail-summary h1 {
+    max-width: 11ch;
+  }
+
+  .trainer-detail-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .trainer-detail-main {
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .trainer-detail-hero,
+  .trainer-detail-loading,
+  .trainer-detail-error {
+    border-radius: 26px;
+  }
+
+  .trainer-detail-loading {
+    min-height: 520px;
+  }
+
+  .trainer-detail-loading-image {
+    min-height: 260px;
+  }
+
+  .trainer-detail-loading > div {
+    padding: 28px 22px;
+  }
+
+  .trainer-detail-summary {
+    padding: 28px 22px;
+  }
+
+  .trainer-detail-summary h1 {
+    font-size: clamp(3.6rem, 19vw, 5.5rem);
+  }
+
+  .trainer-detail-photo-badges {
+    right: 14px;
+    bottom: 14px;
+    left: 14px;
+  }
+
+  .trainer-detail-photo-badges span,
+  .trainer-detail-photo-badges strong {
+    min-height: 36px;
+    padding-inline: 11px;
+    font-size: 0.72rem;
+  }
+
+  .trainer-detail-actions,
+  .trainer-detail-actions .button {
+    width: 100%;
+  }
+
+  .trainer-detail-panel,
+  .trainer-detail-reviews {
+    padding: 24px 20px;
+    border-radius: 24px;
+  }
+
+  .trainer-detail-certification {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .trainer-detail-cert-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .trainer-detail-reviews-head {
+    display: grid;
+    align-items: start;
+  }
+
+  .trainer-detail-reviews-head .button {
+    width: 100%;
+  }
+
+  .trainer-detail-review-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trainer-detail-loading-image {
+    animation: none;
+  }
+}

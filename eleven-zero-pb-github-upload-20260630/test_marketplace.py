@@ -583,6 +583,146 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertNotIn("image_data", admin_item)
         self.assertNotIn("data:image", json.dumps(admin_item))
 
+    def test_public_trainer_detail_returns_profile_and_reviews_without_private_credential(self):
+        trainer_owner_id = self.create_user("trainer-detail-owner@example.com")
+        reviewer_id = self.create_user("trainer-detail-reviewer@example.com")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  verified, experience, bio, availability,
+                  certification_organization, certification_name,
+                  certification_credential_id, certification_verification_url,
+                  joined_at, rating, review_count, approval_status
+                ) VALUES (?, 'Andre Mercado', 'Arlington, VA', 'private',
+                  'advanced', '$90/hr', 'andre@example.com', 1,
+                  'Eight years coaching competitive players',
+                  'Private lessons, clinics, and tournament preparation.',
+                  'Weekday evenings and weekends',
+                  'Professional Pickleball Registry',
+                  'PPR Coach Certification', 'PPR-PRIVATE-009',
+                  'https://example.com/verify/public-profile',
+                  '2025-05-01', 5.0, 1, 'approved')
+                """,
+                (trainer_owner_id,),
+            ).lastrowid
+            connection.execute(
+                """
+                INSERT INTO trainer_reviews (
+                  trainer_id, user_id, reviewer_name, rating, comment, created_at
+                ) VALUES (?, ?, 'Verified Client', 5,
+                  'Clear instruction and a very useful practice plan.',
+                  '2026-07-28T12:00:00Z')
+                """,
+                (trainer_id, reviewer_id),
+            )
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            fetch_trainer_by_id = app.ElevenZeroHandler.fetch_trainer_by_id
+            fetch_reviews = app.ElevenZeroHandler.fetch_reviews
+
+            def current_user(self):
+                return None
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_api_get(
+            StubHandler(), app.urlparse(f"/api/trainers/{trainer_id}")
+        )
+
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["payload"]["item"]["id"], trainer_id)
+        self.assertEqual(captured["payload"]["item"]["name"], "Andre Mercado")
+        self.assertEqual(
+            captured["payload"]["item"]["certificationName"],
+            "PPR Coach Certification",
+        )
+        self.assertNotIn("certificationId", captured["payload"]["item"])
+        self.assertNotIn("PPR-PRIVATE-009", json.dumps(captured["payload"]))
+        self.assertEqual(len(captured["payload"]["reviews"]), 1)
+        self.assertEqual(
+            captured["payload"]["reviews"][0]["reviewer_name"],
+            "Verified Client",
+        )
+        self.assertEqual(captured["payload"]["reviews"][0]["rating"], 5)
+
+    def test_nonapproved_trainer_detail_is_private_to_owner_and_admin(self):
+        pending_owner_id = self.create_user("trainer-pending-owner@example.com")
+        other_user_id = self.create_user("trainer-detail-other@example.com")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_ids = {}
+            for approval_status in ("pending", "rejected"):
+                trainer_ids[approval_status] = connection.execute(
+                    """
+                    INSERT INTO trainers (
+                      user_id, name, location, format, level, rate, email,
+                      experience, bio, availability,
+                      certification_organization, certification_name,
+                      certification_credential_id, joined_at, approval_status
+                    ) VALUES (?, ?, 'Arlington, VA', 'private', 'beginner',
+                      '$75/hr', 'pending@example.com', 'Five years',
+                      'Trainer profile awaiting moderator review.', 'Evenings',
+                      'Professional Pickleball Registry',
+                      'PPR Coach Certification', 'PPR-PRIVATE-010',
+                      '2026-07-28', ?)
+                    """,
+                    (
+                        pending_owner_id,
+                        f"{approval_status.title()} Coach",
+                        approval_status,
+                    ),
+                ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            fetch_trainer_by_id = app.ElevenZeroHandler.fetch_trainer_by_id
+            fetch_reviews = app.ElevenZeroHandler.fetch_reviews
+
+            def current_user(self):
+                return None
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        for trainer_id in trainer_ids.values():
+            captured.clear()
+            app.ElevenZeroHandler.handle_api_get(
+                StubHandler(), app.urlparse(f"/api/trainers/{trainer_id}")
+            )
+            self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+            self.assertNotIn("PPR-PRIVATE-010", json.dumps(captured["payload"]))
+
+            self.assertIsNone(
+                app.ElevenZeroHandler.fetch_trainer_by_id(
+                    None,
+                    trainer_id,
+                    {"id": other_user_id, "isAdmin": False},
+                )
+            )
+            owner_item = app.ElevenZeroHandler.fetch_trainer_by_id(
+                None,
+                trainer_id,
+                {"id": pending_owner_id, "isAdmin": False},
+            )
+            admin_item = app.ElevenZeroHandler.fetch_trainer_by_id(
+                None,
+                trainer_id,
+                {"id": other_user_id, "isAdmin": True},
+            )
+            self.assertEqual(owner_item["id"], trainer_id)
+            self.assertEqual(admin_item["id"], trainer_id)
+            self.assertNotIn("certificationId", owner_item)
+            self.assertNotIn("certificationId", admin_item)
+
     def test_account_can_create_only_one_trainer_profile(self):
         user_id = self.create_user("trainer-single@example.com")
         captured = {}
