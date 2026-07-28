@@ -371,89 +371,87 @@ function renderTrainerCard(trainer) {
   const imageUrl = String(trainer.imageUrl || "").trim();
   const certificationOrg = String(trainer.certificationOrg || "").trim();
   const certificationName = String(trainer.certificationName || "").trim();
-  const certificationUrl = safeCredentialUrl(trainer.certificationUrl);
   const hasCertification = Boolean(certificationOrg || certificationName);
-  const contactHref = trainer.email
-    ? `mailto:${ElevenZeroApp.escapeHtml(trainer.email)}`
-    : "./auth.html?next=./trainers.html";
+  const profileHref = `./trainer-profile.html?id=${encodeURIComponent(trainer.id)}`;
 
   return `
-    <article class="trainer-profile-card reveal is-visible" data-trainer-card>
-      <div class="trainer-profile-media ${imageUrl ? "has-photo" : "is-fallback"}">
-        <span class="trainer-profile-photo-fallback" aria-hidden="true">${ElevenZeroApp.escapeHtml(
-          trainer.initials
-        )}</span>
-        ${
-          imageUrl
-            ? `<img
-                class="trainer-profile-photo"
-                src="${ElevenZeroApp.escapeHtml(imageUrl)}"
-                alt="${ElevenZeroApp.escapeHtml(
-                  `Photo of ${trainer.name}, pickleball trainer in ${trainer.location}`
-                )}"
-                loading="lazy"
-                decoding="async"
-              />`
-            : ""
-        }
-        <div class="trainer-profile-media-badges">
-          <span class="trainer-profile-rate">${ElevenZeroApp.escapeHtml(trainer.rate)}</span>
-          <span class="trainer-profile-verified">${trainer.verified ? "Verified" : "New"}</span>
-        </div>
-      </div>
-
-      <div class="trainer-profile-body">
-        <header class="trainer-profile-heading">
-          <div>
-            <h3>${ElevenZeroApp.escapeHtml(trainer.name)}</h3>
-            <p>${ElevenZeroApp.escapeHtml(trainer.location)}</p>
+    <a
+      class="trainer-profile-card-link reveal is-visible"
+      href="${profileHref}"
+      aria-label="${ElevenZeroApp.escapeHtml(`View ${trainer.name}'s full trainer profile`)}"
+    >
+      <article class="trainer-profile-card" data-trainer-card>
+        <div class="trainer-profile-media ${imageUrl ? "has-photo" : "is-fallback"}">
+          <span class="trainer-profile-photo-fallback" aria-hidden="true">${ElevenZeroApp.escapeHtml(
+            trainer.initials
+          )}</span>
+          ${
+            imageUrl
+              ? `<img
+                  class="trainer-profile-photo"
+                  src="${ElevenZeroApp.escapeHtml(imageUrl)}"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />`
+              : ""
+          }
+          <div class="trainer-profile-media-badges">
+            <span class="trainer-profile-rate">${ElevenZeroApp.escapeHtml(trainer.rate)}</span>
+            <span class="trainer-profile-verified">${trainer.verified ? "Verified" : "New"}</span>
           </div>
-          ${renderTrainerRatingPill(trainer)}
-        </header>
-
-        <div class="trainer-profile-facts" aria-label="Trainer details">
-          <span>${ElevenZeroApp.escapeHtml(formatTenureLong(tenureMonths))}</span>
-          <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
-          <span>${ElevenZeroApp.escapeHtml(levelLabel)}</span>
         </div>
 
-        ${
-          hasCertification
-            ? `<section class="trainer-profile-certification" aria-label="Trainer certification">
-                <p>Certification</p>
-                <strong>${ElevenZeroApp.escapeHtml(
-                  certificationName || "Credential listed"
-                )}</strong>
-                ${certificationOrg ? `<span>${ElevenZeroApp.escapeHtml(certificationOrg)}</span>` : ""}
-                ${
-                  certificationUrl
-                    ? `<a href="${ElevenZeroApp.escapeHtml(
-                        certificationUrl
-                      )}" target="_blank" rel="noreferrer">View credential</a>`
-                    : ""
-                }
-              </section>`
-            : ""
-        }
+        <div class="trainer-profile-body">
+          <header class="trainer-profile-heading">
+            <div>
+              <h3>${ElevenZeroApp.escapeHtml(trainer.name)}</h3>
+              <p>${ElevenZeroApp.escapeHtml(trainer.location)}</p>
+            </div>
+            ${renderTrainerRatingPill(trainer)}
+          </header>
 
-        <p class="trainer-profile-bio">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
-
-        <dl class="trainer-profile-details">
-          <div>
-            <dt>Experience</dt>
-            <dd>${ElevenZeroApp.escapeHtml(trainer.experience)}</dd>
+          <div class="trainer-profile-facts" aria-label="Trainer details">
+            <span>${ElevenZeroApp.escapeHtml(formatTenureLong(tenureMonths))}</span>
+            <span>${ElevenZeroApp.escapeHtml(formatLabel)}</span>
+            <span>${ElevenZeroApp.escapeHtml(levelLabel)}</span>
           </div>
-          <div>
-            <dt>Availability</dt>
-            <dd>${ElevenZeroApp.escapeHtml(trainer.availability)}</dd>
-          </div>
-        </dl>
 
-        <a class="button button-dark trainer-profile-contact" href="${contactHref}">
-          Contact trainer
-        </a>
-      </div>
-    </article>
+          ${
+            hasCertification
+              ? `<section class="trainer-profile-certification" aria-label="Trainer certification">
+                  <p>Certification</p>
+                  <strong>${ElevenZeroApp.escapeHtml(
+                    certificationName || "Credential listed"
+                  )}</strong>
+                  ${
+                    certificationOrg
+                      ? `<span>${ElevenZeroApp.escapeHtml(certificationOrg)}</span>`
+                      : ""
+                  }
+                </section>`
+              : ""
+          }
+
+          <p class="trainer-profile-bio">${ElevenZeroApp.escapeHtml(trainer.bio)}</p>
+
+          <dl class="trainer-profile-details">
+            <div>
+              <dt>Experience</dt>
+              <dd>${ElevenZeroApp.escapeHtml(trainer.experience)}</dd>
+            </div>
+            <div>
+              <dt>Availability</dt>
+              <dd>${ElevenZeroApp.escapeHtml(trainer.availability)}</dd>
+            </div>
+          </dl>
+
+          <span class="button button-dark trainer-profile-contact">
+            View full profile <span aria-hidden="true">→</span>
+          </span>
+        </div>
+      </article>
+    </a>
   `;
 }
 
@@ -591,6 +589,7 @@ function populateTrainerSelect() {
   if (!trainerReviewSelect) return;
 
   const previousValue = trainerReviewSelect.value;
+  const requestedTrainer = new URLSearchParams(window.location.search).get("reviewTrainer");
   const options = trainerPageState.trainers
     .slice()
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -604,6 +603,11 @@ function populateTrainerSelect() {
 
   if (previousValue && trainerPageState.trainers.some((trainer) => String(trainer.id) === previousValue)) {
     trainerReviewSelect.value = previousValue;
+  } else if (
+    requestedTrainer &&
+    trainerPageState.trainers.some((trainer) => String(trainer.id) === requestedTrainer)
+  ) {
+    trainerReviewSelect.value = requestedTrainer;
   }
 }
 
