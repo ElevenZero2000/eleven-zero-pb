@@ -3,6 +3,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -720,8 +721,32 @@ class MarketplaceSafetyTests(unittest.TestCase):
             )
             self.assertEqual(owner_item["id"], trainer_id)
             self.assertEqual(admin_item["id"], trainer_id)
-            self.assertNotIn("certificationId", owner_item)
-            self.assertNotIn("certificationId", admin_item)
+            self.assertEqual(owner_item["certificationId"], "PPR-PRIVATE-010")
+            self.assertEqual(admin_item["certificationId"], "PPR-PRIVATE-010")
+
+    def test_anonymous_orphan_trainer_detail_is_never_public_or_owner_serialized(self):
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, approval_status
+                ) VALUES (NULL, 'Orphan Demo Coach', 'Virginia', 'private',
+                  'beginner', '$50/hr', 'private@example.com', 'Five years',
+                  'Private demo content', 'Weekends', '2026-01-01', 'approved')
+                """
+            ).lastrowid
+            connection.commit()
+
+        self.assertIsNone(
+            app.ElevenZeroHandler.fetch_trainer_by_id(None, trainer_id, None)
+        )
+        admin_item = app.ElevenZeroHandler.fetch_trainer_by_id(
+            None,
+            trainer_id,
+            {"id": 999, "isAdmin": True},
+        )
+        self.assertEqual(admin_item["email"], "private@example.com")
 
     def test_account_can_create_only_one_trainer_profile(self):
         user_id = self.create_user("trainer-single@example.com")
@@ -850,7 +875,7 @@ class MarketplaceSafetyTests(unittest.TestCase):
             "public, max-age=86400, immutable",
         )
 
-    def test_owner_image_replacement_returns_entire_profile_to_review(self):
+    def test_owner_image_replacement_keeps_approved_profile_live_during_media_review(self):
         owner_id = self.create_user("trainer-replace@example.com")
         original_image = app.normalize_trainer_landscape_image_data(
             self.trainer_image_data(width=1_000, height=700)
@@ -889,20 +914,123 @@ class MarketplaceSafetyTests(unittest.TestCase):
         )
 
         self.assertEqual(captured["status"], 200)
-        self.assertEqual(captured["payload"]["item"]["approval_status"], "pending")
+        self.assertEqual(captured["payload"]["item"]["approval_status"], "approved")
+        self.assertEqual(
+            captured["payload"]["item"]["mediaReviewStatus"], "pending"
+        )
         self.assertNotIn("data:image", json.dumps(captured["payload"]))
         with sqlite3.connect(app.DB_PATH) as connection:
             row = connection.execute(
                 """
-                SELECT approval_status, reviewed_at, image_data
+                SELECT
+                  approval_status,
+                  reviewed_at,
+                  image_data,
+                  pending_image_data,
+                  media_review_status
                 FROM trainers
                 WHERE id = ?
                 """,
                 (trainer_id,),
             ).fetchone()
-        self.assertEqual(row[0], "pending")
-        self.assertIsNone(row[1])
-        self.assertNotEqual(row[2], original_image)
+        self.assertEqual(row[0], "approved")
+        self.assertEqual(row[1], "2026-07-23T12:05:00Z")
+        self.assertEqual(row[2], original_image)
+        self.assertNotEqual(row[3], original_image)
+        self.assertEqual(row[4], "pending")
+
+    def test_trainer_gallery_is_moderated_without_raw_image_leaks_or_downtime(self):
+        owner_id = self.create_user("trainer-gallery@example.com")
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+            def send_bytes(self, payload, content_type, status=200, **kwargs):
+                captured["bytes"] = payload
+                captured["content_type"] = content_type
+                captured["status"] = status
+                captured["cache_control"] = kwargs.get("cache_control")
+
+        handler = StubHandler()
+        app.ElevenZeroHandler.handle_create_trainer(
+            handler,
+            {"id": owner_id, "email": "trainer-gallery@example.com"},
+            self.trainer_payload(
+                trainerGalleryImages=[
+                    self.trainer_image_data(width=1_300, height=800),
+                    self.trainer_image_data(width=1_100, height=700),
+                ]
+            ),
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        trainer_id = captured["payload"]["item"]["id"]
+        self.assertEqual(
+            len(captured["payload"]["item"]["galleryImageUrls"]), 2
+        )
+        self.assertNotIn("data:image", json.dumps(captured["payload"]))
+
+        app.ElevenZeroHandler.handle_admin_trainer_review(
+            handler, {"id": trainer_id, "status": "approved"}
+        )
+        self.assertEqual(captured["status"], 200)
+        public_item = app.ElevenZeroHandler.fetch_trainers(None)[0]
+        self.assertEqual(len(public_item["galleryImageUrls"]), 2)
+
+        app.ElevenZeroHandler.handle_replace_trainer_image(
+            handler,
+            {"id": owner_id},
+            {
+                "id": trainer_id,
+                "trainerImage": self.trainer_image_data(width=1_500, height=900),
+                "trainerGalleryImages": [
+                    self.trainer_image_data(width=1_250, height=780)
+                ],
+            },
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(
+            captured["payload"]["item"]["mediaReviewStatus"], "pending"
+        )
+        self.assertEqual(
+            len(app.ElevenZeroHandler.fetch_trainers(None)[0]["galleryImageUrls"]),
+            2,
+        )
+
+        app.ElevenZeroHandler.handle_trainer_gallery_image(
+            handler, trainer_id, 1, None, pending=True
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+        app.ElevenZeroHandler.handle_trainer_gallery_image(
+            handler,
+            trainer_id,
+            1,
+            {"id": owner_id, "isAdmin": False},
+            pending=True,
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["content_type"], "image/jpeg")
+        self.assertEqual(captured["cache_control"], "no-store")
+
+        admin_item = next(
+            item
+            for item in app.ElevenZeroHandler.build_admin_dashboard(object())[
+                "trainers"
+            ]
+            if item["id"] == trainer_id
+        )
+        self.assertEqual(len(admin_item["galleryImageUrls"]), 2)
+        self.assertEqual(len(admin_item["pendingGalleryImageUrls"]), 1)
+
+        app.ElevenZeroHandler.handle_admin_trainer_review(
+            handler, {"id": trainer_id, "status": "approved"}
+        )
+        self.assertEqual(captured["status"], 200)
+        promoted = app.ElevenZeroHandler.fetch_trainers(None)[0]
+        self.assertEqual(len(promoted["galleryImageUrls"]), 1)
 
     def test_admin_cannot_approve_pending_image_less_trainer_but_legacy_live_survives(self):
         owner_id = self.create_user("trainer-legacy@example.com")
@@ -1154,6 +1282,185 @@ class MarketplaceSafetyTests(unittest.TestCase):
         )
         self.assertNotIn("image_data", item)
         self.assertNotIn("data:image", json.dumps(item))
+
+    def test_trainer_client_flow_unlocks_private_messages_and_class_confirmation(self):
+        trainer_user_id = self.create_user("coach-flow@example.com")
+        client_user_id = self.create_user("client-flow@example.com")
+        stranger_user_id = self.create_user("stranger-flow@example.com")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE users SET name = 'Coach Taylor' WHERE id = ?",
+                (trainer_user_id,),
+            )
+            connection.execute(
+                "UPDATE users SET name = 'Player Jordan' WHERE id = ?",
+                (client_user_id,),
+            )
+            connection.execute(
+                "UPDATE users SET name = 'Other Member' WHERE id = ?",
+                (stranger_user_id,),
+            )
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, approval_status
+                ) VALUES (?, 'Coach Taylor', 'Arlington, VA', 'private',
+                  'intermediate', '$80/hr', 'coach-flow@example.com',
+                  'Six years', 'Private coaching profile', 'Weekends',
+                  '2026-07-20', 'approved')
+                """,
+                (trainer_user_id,),
+            ).lastrowid
+            connection.commit()
+
+        handler = object.__new__(app.ElevenZeroHandler)
+        captured = {}
+
+        def capture(payload, status=200, **_kwargs):
+            captured["payload"] = payload
+            captured["status"] = status
+
+        handler.send_json = capture
+        trainer_user = {
+            "id": trainer_user_id,
+            "email": "coach-flow@example.com",
+        }
+        client_user = {
+            "id": client_user_id,
+            "email": "client-flow@example.com",
+        }
+        stranger_user = {
+            "id": stranger_user_id,
+            "email": "stranger-flow@example.com",
+        }
+
+        handler.handle_create_trainer_client_request(
+            client_user,
+            {
+                "trainerId": trainer_id,
+                "introMessage": "I want to work on resets and transition play.",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        relationship_id = captured["payload"]["request"]["id"]
+
+        pending_state = handler.fetch_trainer_viewer_state(
+            trainer_id, client_user
+        )
+        self.assertEqual(pending_state["relationshipStatus"], "pending")
+        self.assertIsNone(pending_state["relationshipId"])
+        self.assertTrue(
+            handler.fetch_trainer_viewer_state(
+                trainer_id, trainer_user
+            )["isOwner"]
+        )
+        self.assertEqual(
+            handler.build_trainer_hub(trainer_user_id)["incomingRequests"][0][
+                "id"
+            ],
+            relationship_id,
+        )
+
+        handler.handle_trainer_client_request_action(
+            trainer_user,
+            {"requestId": relationship_id, "action": "accept"},
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["payload"]["status"], "active")
+        active_state = handler.fetch_trainer_viewer_state(
+            trainer_id, client_user
+        )
+        self.assertEqual(active_state["relationshipStatus"], "active")
+        self.assertEqual(active_state["relationshipId"], relationship_id)
+
+        handler.handle_create_trainer_message(
+            client_user,
+            {
+                "relationshipId": relationship_id,
+                "body": "Saturday morning works well for me.",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        self.assertEqual(
+            handler.build_trainer_hub(trainer_user_id)["unreadCount"], 1
+        )
+
+        handler.handle_create_trainer_message(
+            stranger_user,
+            {
+                "relationshipId": relationship_id,
+                "body": "I should not be able to join this conversation.",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+        self.assertNotIn("Coach Taylor", json.dumps(captured["payload"]))
+
+        handler.handle_create_trainer_message(
+            trainer_user,
+            {
+                "relationshipId": relationship_id,
+                "body": "Great. I can meet at Quincy Park.",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+
+        handler.handle_trainer_relationship_detail(
+            trainer_user, relationship_id
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(len(captured["payload"]["messages"]), 2)
+        self.assertEqual(
+            handler.build_trainer_hub(trainer_user_id)["unreadCount"], 0
+        )
+        self.assertEqual(
+            handler.build_trainer_hub(client_user_id)["unreadCount"], 1
+        )
+
+        handler.handle_create_trainer_lesson(
+            client_user,
+            {
+                "relationshipId": relationship_id,
+                "startsAt": datetime.now(timezone.utc).isoformat(),
+                "durationMinutes": 60,
+                "timezone": "America/New_York",
+                "location": "Quincy Park",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("future", captured["payload"]["error"])
+
+        starts_at = (
+            datetime.now(timezone.utc) + timedelta(days=2)
+        ).replace(microsecond=0)
+        handler.handle_create_trainer_lesson(
+            client_user,
+            {
+                "relationshipId": relationship_id,
+                "startsAt": starts_at.isoformat(),
+                "durationMinutes": 60,
+                "timezone": "America/New_York",
+                "location": "Quincy Park, Court 2",
+                "note": "Work on resets and transition play.",
+            },
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        lesson_id = captured["payload"]["lesson"]["id"]
+
+        handler.handle_trainer_lesson_action(
+            client_user, {"lessonId": lesson_id, "action": "confirm"}
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.FORBIDDEN)
+
+        handler.handle_trainer_lesson_action(
+            trainer_user, {"lessonId": lesson_id, "action": "confirm"}
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["payload"]["lesson"]["status"], "confirmed")
+        self.assertEqual(
+            handler.build_trainer_hub(client_user_id)["lessons"][0]["status"],
+            "confirmed",
+        )
 
     def test_production_startup_quarantines_anonymous_content(self):
         anonymous_listing_id = self.create_listing(None, "Anonymous")
