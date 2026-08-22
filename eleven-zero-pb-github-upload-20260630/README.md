@@ -14,6 +14,8 @@ What is already working:
 - branded buyer confirmation email
 - owner moderation, notifications, and sales reporting
 - moderated trainer profiles, tenure, ratings, and reviews
+- moderated trainer cover photos and five-photo profile galleries
+- trainer-client requests, participant-only messages, and lesson scheduling
 - a Google-powered courts finder with map pins and community reports
 - responsive desktop/mobile navigation and accessibility improvements
 
@@ -21,6 +23,8 @@ Production safeguards:
 
 - anonymous demo/test listings are excluded from the public catalog
 - new listings and trainer profiles stay pending until owner approval
+- trainer photo replacements stay pending while the last approved photos remain public
+- private trainer-client conversations are available only after a trainer accepts a request
 - photos are served through lightweight image endpoints instead of embedded in catalog JSON
 - HTTPS security headers, secure cookies, rate limits, and no-store API responses
 - Google Analytics and search metadata support
@@ -66,6 +70,9 @@ Live label purchasing still requires an active Shippo billing method. If Shippo 
 create a label or confirm delivery, the seller payout stays on hold for owner review.
 Legal pages are product-ready drafts and should be reviewed by qualified counsel before
 a large public launch.
+
+Trainer requests, private messages, and lesson scheduling do not process coaching payments
+in this release. Trainers and clients remain responsible for agreeing on lesson payment terms.
 
 Deployment note:
 

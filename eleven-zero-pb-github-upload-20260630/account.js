@@ -54,12 +54,47 @@ const profilePreviewFallback = document.querySelector("[data-profile-preview-fal
 const profileStatus = document.querySelector("[data-profile-status]");
 const profileSaveButton = document.querySelector("[data-profile-save]");
 const profileReviewBanner = document.querySelector("[data-profile-review-banner]");
+const trainingHub = document.querySelector("[data-training-hub]");
+const trainingHubStatus = document.querySelector("[data-training-hub-status]");
+const trainingHubUnread = document.querySelector("[data-training-hub-unread]");
+const trainingHubRequests = document.querySelector("[data-training-hub-requests]");
+const trainingIncoming = document.querySelector("[data-training-incoming]");
+const trainingOutgoing = document.querySelector("[data-training-outgoing]");
+const trainingIncomingCount = document.querySelector("[data-training-incoming-count]");
+const trainingOutgoingCount = document.querySelector("[data-training-outgoing-count]");
+const trainingHubWorkspace = document.querySelector("[data-training-hub-workspace]");
+const trainingConnections = document.querySelector("[data-training-connections]");
+const trainingConnectionCount = document.querySelector("[data-training-connection-count]");
+const trainingConversationEmpty = document.querySelector("[data-training-conversation-empty]");
+const trainingThread = document.querySelector("[data-training-thread]");
+const trainingThreadRole = document.querySelector("[data-training-thread-role]");
+const trainingThreadName = document.querySelector("[data-training-thread-name]");
+const trainingMessages = document.querySelector("[data-training-messages]");
+const trainingMessageForm = document.querySelector("[data-training-message-form]");
+const trainingMessageStatus = document.querySelector("[data-training-message-status]");
+const trainingScheduleForm = document.querySelector("[data-training-schedule-form]");
+const trainingScheduleStatus = document.querySelector("[data-training-schedule-status]");
+const trainingThreadLessons = document.querySelector("[data-training-thread-lessons]");
+const trainingTimezone = document.querySelector("[data-training-timezone]");
+const trainingUpcomingWrap = document.querySelector("[data-training-upcoming-wrap]");
+const trainingUpcoming = document.querySelector("[data-training-upcoming]");
+const trainingGalleryShell = document.querySelector("[data-training-gallery-shell]");
+const trainingGalleryProfiles = document.querySelector("[data-training-gallery-profiles]");
+const trainingGalleryStatus = document.querySelector("[data-training-gallery-status]");
 
 let latestSellerProfile = null;
 let latestSalesAnalytics = {};
 let activeSalesPeriod = "day";
 let latestAccountUser = null;
 let profileImageDraft;
+let latestTrainingHub = null;
+let activeTrainingRelationshipId = 0;
+let trainingThreadPollTimer = null;
+let trainingHubPollTimer = null;
+let trainingThreadLoading = false;
+let queuedTrainingRelationshipId = 0;
+let trainerGalleryDrafts = new Map();
+let latestOwnedTrainers = [];
 
 function profileInitials(name) {
   const words = String(name || "Eleven Zero")
@@ -355,12 +390,691 @@ function renderListingItem(item) {
 function renderTrainerItem(item) {
   return `
     <article class="list-item">
-      <strong>${ElevenZeroApp.escapeHtml(item.name)}</strong>
+      <strong><a class="list-item-link" href="./trainer-profile.html?id=${ElevenZeroApp.escapeHtml(
+        item.id
+      )}">${ElevenZeroApp.escapeHtml(item.name)}</a></strong>
       <span>${ElevenZeroApp.escapeHtml(item.level)} · ${ElevenZeroApp.escapeHtml(
         item.format
       )} · ${ElevenZeroApp.escapeHtml(item.rate)}</span>
     </article>
   `;
+}
+
+function trainingFormatDate(value, includeTime = true) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+    ...(includeTime ? { hour: "numeric", minute: "2-digit" } : {}),
+  }).format(date);
+}
+
+function trainingRequestStatusLabel(status) {
+  return {
+    pending: "Waiting for reply",
+    active: "Accepted",
+    declined: "Declined",
+  }[String(status || "").toLowerCase()] || "Updated";
+}
+
+function renderTrainingRequestEmpty(copy) {
+  return `<p class="training-hub-list-empty">${ElevenZeroApp.escapeHtml(copy)}</p>`;
+}
+
+function renderIncomingTrainingRequest(item) {
+  return `
+    <article class="training-request-card">
+      <div>
+        <strong>${ElevenZeroApp.escapeHtml(item.clientName || "Player")}</strong>
+        <span>Wants to train with ${ElevenZeroApp.escapeHtml(item.trainerName || "your profile")}</span>
+      </div>
+      ${
+        item.introMessage
+          ? `<p>${ElevenZeroApp.escapeHtml(item.introMessage)}</p>`
+          : '<p class="training-request-muted">No introduction was added.</p>'
+      }
+      <small>${ElevenZeroApp.escapeHtml(trainingFormatDate(item.createdAt))}</small>
+      <div class="training-request-actions">
+        <button class="button button-primary" type="button" data-training-request-action="accept" data-request-id="${ElevenZeroApp.escapeHtml(
+          item.id
+        )}">Accept</button>
+        <button class="button button-secondary" type="button" data-training-request-action="decline" data-request-id="${ElevenZeroApp.escapeHtml(
+          item.id
+        )}">Decline</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderOutgoingTrainingRequest(item) {
+  const isActive = item.status === "active";
+  return `
+    <article class="training-request-card">
+      <div>
+        <strong>${ElevenZeroApp.escapeHtml(item.trainerName || "Trainer")}</strong>
+        <span class="training-request-state training-request-state-${ElevenZeroApp.escapeHtml(
+          item.status || "pending"
+        )}">${ElevenZeroApp.escapeHtml(trainingRequestStatusLabel(item.status))}</span>
+      </div>
+      ${item.introMessage ? `<p>${ElevenZeroApp.escapeHtml(item.introMessage)}</p>` : ""}
+      <small>Sent ${ElevenZeroApp.escapeHtml(trainingFormatDate(item.createdAt))}</small>
+      ${
+        isActive
+          ? `<button class="training-request-open" type="button" data-training-open-for-trainer="${ElevenZeroApp.escapeHtml(
+              item.trainerId
+            )}">Open conversation</button>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function trainingPartnerName(relationship) {
+  return relationship.role === "trainer"
+    ? relationship.clientName || "Player"
+    : relationship.trainerName || "Trainer";
+}
+
+function renderTrainingConnection(item) {
+  const isActive = Number(item.id) === Number(activeTrainingRelationshipId);
+  return `
+    <button
+      class="training-connection ${isActive ? "is-active" : ""}"
+      type="button"
+      data-training-relationship-id="${ElevenZeroApp.escapeHtml(item.id)}"
+      aria-pressed="${isActive}"
+    >
+      <span class="training-connection-avatar" aria-hidden="true">${ElevenZeroApp.escapeHtml(
+        profileInitials(trainingPartnerName(item))
+      )}</span>
+      <span>
+        <strong>${ElevenZeroApp.escapeHtml(trainingPartnerName(item))}</strong>
+        <small>${item.role === "trainer" ? "Client" : "Trainer"}</small>
+      </span>
+      <span aria-hidden="true">›</span>
+    </button>
+  `;
+}
+
+function renderTrainingLesson(item, compact = false) {
+  const status = String(item.status || "proposed");
+  const className = status === "confirmed" ? "is-confirmed" : status === "cancelled" ? "is-cancelled" : "is-proposed";
+  const partner = item.trainerName && item.clientName
+    ? `${item.trainerName} + ${item.clientName}`
+    : "Training class";
+  const actions = [];
+  if (item.canConfirm) {
+    actions.push(
+      `<button class="button button-primary" type="button" data-training-lesson-action="confirm" data-lesson-id="${ElevenZeroApp.escapeHtml(
+        item.id
+      )}">Confirm</button>`
+    );
+  }
+  if (item.canCancel) {
+    actions.push(
+      `<button class="button button-secondary" type="button" data-training-lesson-action="cancel" data-lesson-id="${ElevenZeroApp.escapeHtml(
+        item.id
+      )}">Cancel</button>`
+    );
+  }
+  return `
+    <article class="training-lesson ${className} ${compact ? "is-compact" : ""}">
+      <div class="training-lesson-date">
+        <strong>${ElevenZeroApp.escapeHtml(trainingFormatDate(item.startsAt))}</strong>
+        <span>${ElevenZeroApp.escapeHtml(item.durationMinutes)} minutes</span>
+      </div>
+      <div class="training-lesson-detail">
+        ${compact ? `<strong>${ElevenZeroApp.escapeHtml(partner)}</strong>` : ""}
+        <span>${ElevenZeroApp.escapeHtml(item.location || "Location to be decided")}</span>
+        ${item.note ? `<p>${ElevenZeroApp.escapeHtml(item.note)}</p>` : ""}
+        <small>${status === "proposed" ? `Proposed by ${ElevenZeroApp.escapeHtml(item.proposedByName || "member")}` : ElevenZeroApp.escapeHtml(status === "confirmed" ? "Confirmed" : "Cancelled")}</small>
+      </div>
+      <span class="training-lesson-status">${ElevenZeroApp.escapeHtml(status)}</span>
+      ${actions.length ? `<div class="training-lesson-actions">${actions.join("")}</div>` : ""}
+    </article>
+  `;
+}
+
+function renderTrainingUpcoming(lessons) {
+  if (!trainingUpcoming || !trainingUpcomingWrap) return;
+  const visibleLessons = (lessons || [])
+    .filter((item) => item.status !== "cancelled" && new Date(item.startsAt).getTime() >= Date.now() - 3600000)
+    .slice(0, 6);
+  trainingUpcomingWrap.hidden = !visibleLessons.length;
+  trainingUpcoming.innerHTML = visibleLessons.map((item) => renderTrainingLesson(item, true)).join("");
+}
+
+function renderTrainingHub(data) {
+  latestTrainingHub = data || {};
+  const incoming = data.incomingRequests || [];
+  const outgoing = data.outgoingRequests || [];
+  const relationships = data.relationships || [];
+  const unreadCount = Number(data.unreadCount || 0);
+
+  if (trainingHubUnread) {
+    trainingHubUnread.hidden = unreadCount <= 0;
+    trainingHubUnread.textContent = `${unreadCount} unread`;
+  }
+  if (trainingIncomingCount) trainingIncomingCount.textContent = String(incoming.length);
+  if (trainingOutgoingCount) trainingOutgoingCount.textContent = String(outgoing.length);
+  if (trainingConnectionCount) trainingConnectionCount.textContent = String(relationships.length);
+
+  if (trainingHubRequests) trainingHubRequests.hidden = false;
+  if (trainingIncoming) {
+    trainingIncoming.innerHTML = incoming.length
+      ? incoming.map(renderIncomingTrainingRequest).join("")
+      : renderTrainingRequestEmpty("No new client requests.");
+  }
+  if (trainingOutgoing) {
+    trainingOutgoing.innerHTML = outgoing.length
+      ? outgoing.slice(0, 8).map(renderOutgoingTrainingRequest).join("")
+      : renderTrainingRequestEmpty("You have not requested a trainer yet.");
+  }
+
+  if (trainingHubWorkspace) trainingHubWorkspace.hidden = false;
+  if (trainingConnections) {
+    trainingConnections.innerHTML = relationships.length
+      ? relationships.map(renderTrainingConnection).join("")
+      : renderTrainingRequestEmpty("Accepted clients and trainers will appear here.");
+  }
+  renderTrainingUpcoming(data.lessons || []);
+
+  if (activeTrainingRelationshipId && !relationships.some((item) => Number(item.id) === Number(activeTrainingRelationshipId))) {
+    activeTrainingRelationshipId = 0;
+    closeTrainingThread();
+  } else if (activeTrainingRelationshipId) {
+    trainingConnections?.querySelectorAll("[data-training-relationship-id]").forEach((button) => {
+      const active = Number(button.dataset.trainingRelationshipId) === Number(activeTrainingRelationshipId);
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+  }
+}
+
+async function loadTrainingHub({ silent = false } = {}) {
+  if (!trainingHub || !ElevenZeroApp.session?.authenticated) return;
+  try {
+    if (!silent) ElevenZeroApp.setStatus(trainingHubStatus, "Loading your training activity…", "warning");
+    const response = await ElevenZeroApp.request("/api/account/trainer-hub");
+    renderTrainingHub(response);
+    ElevenZeroApp.setStatus(
+      trainingHubStatus,
+      response.relationships?.length || response.incomingRequests?.length || response.outgoingRequests?.length
+        ? "Your Training Hub is up to date."
+        : "Request a trainer from the Trainers page to get started.",
+      "success"
+    );
+  } catch (error) {
+    if (!silent) ElevenZeroApp.setStatus(trainingHubStatus, error.message, "error");
+  }
+}
+
+function closeTrainingThread() {
+  if (trainingConversationEmpty) trainingConversationEmpty.hidden = false;
+  if (trainingThread) trainingThread.hidden = true;
+  if (trainingMessages) trainingMessages.innerHTML = "";
+}
+
+function renderTrainingMessages(messages) {
+  if (!trainingMessages) return;
+  if (!messages.length) {
+    trainingMessages.innerHTML = `
+      <div class="training-thread-no-messages">
+        <strong>Start the conversation</strong>
+        <span>Messages are private between this trainer and client.</span>
+      </div>
+    `;
+    return;
+  }
+  trainingMessages.innerHTML = messages
+    .map(
+      (item) => `
+        <article class="training-message ${item.isMine ? "is-mine" : "is-theirs"}">
+          <strong>${ElevenZeroApp.escapeHtml(item.isMine ? "You" : item.senderName || "Member")}</strong>
+          <p>${ElevenZeroApp.escapeHtml(item.body)}</p>
+          <time datetime="${ElevenZeroApp.escapeHtml(item.createdAt || "")}">${ElevenZeroApp.escapeHtml(
+            trainingFormatDate(item.createdAt)
+          )}</time>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderTrainingThreadDetail(response, { preserveScroll = false } = {}) {
+  const relationship = response.relationship || {};
+  const oldScrollTop = trainingMessages?.scrollTop || 0;
+  const wasNearBottom = trainingMessages
+    ? trainingMessages.scrollHeight - trainingMessages.clientHeight - trainingMessages.scrollTop < 90
+    : true;
+  if (trainingConversationEmpty) trainingConversationEmpty.hidden = true;
+  if (trainingThread) trainingThread.hidden = false;
+  if (trainingThreadName) trainingThreadName.textContent = trainingPartnerName(relationship);
+  if (trainingThreadRole) {
+    trainingThreadRole.textContent = relationship.role === "trainer" ? "Your client" : "Your trainer";
+  }
+  renderTrainingMessages(response.messages || []);
+  if (trainingThreadLessons) {
+    trainingThreadLessons.innerHTML = response.lessons?.length
+      ? response.lessons.map((item) => renderTrainingLesson(item)).join("")
+      : renderTrainingRequestEmpty("No classes proposed yet.");
+  }
+  if (trainingMessages) {
+    if (!preserveScroll || wasNearBottom) trainingMessages.scrollTop = trainingMessages.scrollHeight;
+    else trainingMessages.scrollTop = oldScrollTop;
+  }
+}
+
+async function openTrainingThread(relationshipId, { silent = false } = {}) {
+  const parsedId = Number(relationshipId || 0);
+  if (!parsedId) return;
+  if (trainingThreadLoading) {
+    if (!silent) queuedTrainingRelationshipId = parsedId;
+    return;
+  }
+  activeTrainingRelationshipId = parsedId;
+  renderTrainingHub(latestTrainingHub || {});
+  trainingThreadLoading = true;
+  try {
+    if (!silent) ElevenZeroApp.setStatus(trainingMessageStatus, "Opening conversation…", "warning");
+    const response = await ElevenZeroApp.request(`/api/trainer-client/relationships/${parsedId}`);
+    if (activeTrainingRelationshipId !== parsedId) return;
+    renderTrainingThreadDetail(response, { preserveScroll: silent });
+    ElevenZeroApp.setStatus(trainingMessageStatus, "");
+    await loadTrainingHub({ silent: true });
+  } catch (error) {
+    if (!silent) ElevenZeroApp.setStatus(trainingMessageStatus, error.message, "error");
+  } finally {
+    trainingThreadLoading = false;
+    const queuedId = queuedTrainingRelationshipId;
+    queuedTrainingRelationshipId = 0;
+    if (queuedId && queuedId !== parsedId) {
+      window.setTimeout(() => openTrainingThread(queuedId), 0);
+    }
+  }
+}
+
+async function answerTrainingRequest(requestId, action, button) {
+  if (!requestId || !["accept", "decline"].includes(action) || button?.disabled) return;
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = action === "accept" ? "Accepting…" : "Declining…";
+  try {
+    const response = await ElevenZeroApp.request("/api/trainer-client/requests/action", {
+      method: "POST",
+      body: { requestId: Number(requestId), action },
+    });
+    ElevenZeroApp.setStatus(trainingHubStatus, response.message, "success");
+    await loadTrainingHub({ silent: true });
+    if (response.relationship?.id) await openTrainingThread(response.relationship.id);
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainingHubStatus, error.message, "error");
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+async function sendTrainingMessage(event) {
+  event.preventDefault();
+  if (!activeTrainingRelationshipId) return;
+  const textarea = trainingMessageForm?.elements.body;
+  const body = String(textarea?.value || "").trim();
+  if (!body) return;
+  const button = trainingMessageForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const response = await ElevenZeroApp.request("/api/trainer-client/messages", {
+      method: "POST",
+      body: { relationshipId: activeTrainingRelationshipId, body },
+    });
+    textarea.value = "";
+    ElevenZeroApp.setStatus(trainingMessageStatus, "Message sent.", "success");
+    await openTrainingThread(activeTrainingRelationshipId);
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainingMessageStatus, error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setTrainingScheduleDefaults() {
+  if (!trainingScheduleForm) return;
+  const input = trainingScheduleForm.elements.startsAt;
+  if (input && !input.value) {
+    const next = new Date(Date.now() + 60 * 60 * 1000);
+    next.setMinutes(Math.ceil(next.getMinutes() / 30) * 30, 0, 0);
+    const local = new Date(next.getTime() - next.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    input.value = local;
+    const min = new Date(Date.now() + 5 * 60 * 1000 - new Date().getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    input.min = min;
+  }
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
+  if (trainingTimezone) trainingTimezone.textContent = `Times shown in ${timezone}`;
+}
+
+async function proposeTrainingLesson(event) {
+  event.preventDefault();
+  if (!activeTrainingRelationshipId) return;
+  const formData = new FormData(trainingScheduleForm);
+  const rawStart = String(formData.get("startsAt") || "");
+  const startsAt = new Date(rawStart);
+  if (!rawStart || Number.isNaN(startsAt.getTime())) {
+    ElevenZeroApp.setStatus(trainingScheduleStatus, "Choose a valid class time.", "error");
+    return;
+  }
+  const button = trainingScheduleForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const response = await ElevenZeroApp.request("/api/trainer-client/lessons", {
+      method: "POST",
+      body: {
+        relationshipId: activeTrainingRelationshipId,
+        startsAt: startsAt.toISOString(),
+        durationMinutes: Number(formData.get("durationMinutes") || 60),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+        location: String(formData.get("location") || "").trim(),
+        note: String(formData.get("note") || "").trim(),
+      },
+    });
+    trainingScheduleForm.reset();
+    setTrainingScheduleDefaults();
+    ElevenZeroApp.setStatus(trainingScheduleStatus, response.message, "success");
+    await Promise.all([openTrainingThread(activeTrainingRelationshipId), loadTrainingHub({ silent: true })]);
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainingScheduleStatus, error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function updateTrainingLesson(lessonId, action, button) {
+  if (!lessonId || !["confirm", "cancel"].includes(action) || button?.disabled) return;
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = action === "confirm" ? "Confirming…" : "Cancelling…";
+  try {
+    const response = await ElevenZeroApp.request("/api/trainer-client/lessons/action", {
+      method: "POST",
+      body: { lessonId: Number(lessonId), action },
+    });
+    ElevenZeroApp.setStatus(trainingScheduleStatus, response.message, "success");
+    await Promise.all([
+      activeTrainingRelationshipId ? openTrainingThread(activeTrainingRelationshipId) : Promise.resolve(),
+      loadTrainingHub({ silent: true }),
+    ]);
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainingScheduleStatus, error.message, "error");
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+function openTrainingThreadForTrainer(trainerId) {
+  const relationship = latestTrainingHub?.relationships?.find(
+    (item) => Number(item.trainerId) === Number(trainerId)
+  );
+  if (relationship) openTrainingThread(relationship.id);
+}
+
+function bindTrainingHub() {
+  trainingHub?.addEventListener("click", async (event) => {
+    const requestButton = event.target.closest("[data-training-request-action]");
+    if (requestButton) {
+      await answerTrainingRequest(
+        requestButton.dataset.requestId,
+        requestButton.dataset.trainingRequestAction,
+        requestButton
+      );
+      return;
+    }
+    const connectionButton = event.target.closest("[data-training-relationship-id]");
+    if (connectionButton) {
+      await openTrainingThread(connectionButton.dataset.trainingRelationshipId);
+      return;
+    }
+    const trainerButton = event.target.closest("[data-training-open-for-trainer]");
+    if (trainerButton) {
+      openTrainingThreadForTrainer(trainerButton.dataset.trainingOpenForTrainer);
+      return;
+    }
+    const lessonButton = event.target.closest("[data-training-lesson-action]");
+    if (lessonButton) {
+      await updateTrainingLesson(
+        lessonButton.dataset.lessonId,
+        lessonButton.dataset.trainingLessonAction,
+        lessonButton
+      );
+      return;
+    }
+    if (event.target.closest("[data-training-thread-refresh]")) {
+      await openTrainingThread(activeTrainingRelationshipId);
+    }
+  });
+  trainingMessageForm?.addEventListener("submit", sendTrainingMessage);
+  trainingScheduleForm?.addEventListener("submit", proposeTrainingLesson);
+  setTrainingScheduleDefaults();
+}
+
+function trainingPhotoExtension(file) {
+  const name = String(file?.name || "");
+  return name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+}
+
+async function optimizeTrainingPhoto(file) {
+  const type = String(file?.type || "").toLowerCase();
+  if (!["image/jpeg", "image/png", "image/webp"].includes(type) && !["jpg", "jpeg", "png", "webp"].includes(trainingPhotoExtension(file))) {
+    throw new Error("Choose a JPG, PNG, or WebP photo.");
+  }
+  if (file.size > 10 * 1024 * 1024) throw new Error("Choose a photo smaller than 10 MB.");
+  const source = await readFileAsDataUrl(file);
+  const image = await loadImageElement(source);
+  const targetRatio = 8 / 5;
+  const sourceRatio = image.naturalWidth / image.naturalHeight;
+  let sourceWidth = image.naturalWidth;
+  let sourceHeight = image.naturalHeight;
+  let sourceX = 0;
+  let sourceY = 0;
+  if (sourceRatio > targetRatio) {
+    sourceWidth = image.naturalHeight * targetRatio;
+    sourceX = (image.naturalWidth - sourceWidth) / 2;
+  } else {
+    sourceHeight = image.naturalWidth / targetRatio;
+    sourceY = (image.naturalHeight - sourceHeight) / 2;
+  }
+  for (const [width, height, quality] of [[1600, 1000, 0.82], [1280, 800, 0.76], [960, 600, 0.7]]) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("That photo could not be prepared.");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+    const candidate = canvas.toDataURL("image/jpeg", quality);
+    if (candidate.length <= 1_500_000) return candidate;
+  }
+  throw new Error("That photo is still too large. Try a smaller image.");
+}
+
+async function trainingPhotoSourceToDataUrl(source) {
+  if (String(source || "").startsWith("data:image/")) return source;
+  const response = await fetch(source, { credentials: "same-origin" });
+  if (!response.ok) throw new Error("One saved trainer photo could not be loaded.");
+  const blob = await response.blob();
+  return readFileAsDataUrl(blob);
+}
+
+function trainerGalleryDraft(item) {
+  const existing = trainerGalleryDrafts.get(Number(item.id));
+  if (existing) return existing;
+  const pending = item.mediaReviewStatus === "pending" && item.pendingImageUrl;
+  const draft = {
+    id: Number(item.id),
+    name: item.name || "Trainer profile",
+    status: item.mediaReviewStatus || "approved",
+    cover: pending ? item.pendingImageUrl : item.imageUrl || "",
+    gallery: [...(pending ? item.pendingGalleryImageUrls || [] : item.galleryImageUrls || [])].slice(0, 5),
+  };
+  trainerGalleryDrafts.set(draft.id, draft);
+  return draft;
+}
+
+function renderTrainerGalleryProfiles(items, { replace = true } = {}) {
+  if (!trainingGalleryShell || !trainingGalleryProfiles) return;
+  if (replace) latestOwnedTrainers = [...items];
+  trainingGalleryShell.hidden = !items.length;
+  if (!items.length) {
+    trainingGalleryProfiles.innerHTML = "";
+    return;
+  }
+  trainingGalleryProfiles.innerHTML = items
+    .map((item) => {
+      const draft = trainerGalleryDraft(item);
+      return `
+        <article class="training-gallery-profile" data-training-gallery-profile="${ElevenZeroApp.escapeHtml(draft.id)}">
+          <div class="training-gallery-profile-head">
+            <div>
+              <h3>${ElevenZeroApp.escapeHtml(draft.name)}</h3>
+              <span>${draft.status === "pending" ? "Photo update awaiting review" : "Live photo set"}</span>
+            </div>
+            <a href="./trainer-profile.html?id=${ElevenZeroApp.escapeHtml(draft.id)}">View profile</a>
+          </div>
+          <div class="training-gallery-editor">
+            <div class="training-gallery-cover">
+              <span>Cover photo</span>
+              ${
+                draft.cover
+                  ? `<img src="${ElevenZeroApp.escapeHtml(draft.cover)}" alt="Current cover for ${ElevenZeroApp.escapeHtml(draft.name)}" />`
+                  : '<div class="training-gallery-placeholder">Cover required</div>'
+              }
+              <label class="button button-secondary">
+                ${draft.cover ? "Replace cover" : "Choose cover"}
+                <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" data-training-cover-input="${ElevenZeroApp.escapeHtml(draft.id)}" />
+              </label>
+            </div>
+            <div class="training-gallery-extras">
+              <div>
+                <span>Gallery photos</span>
+                <small>${draft.gallery.length}/5</small>
+              </div>
+              <div class="training-gallery-grid">
+                ${draft.gallery
+                  .map(
+                    (source, index) => `
+                      <figure>
+                        <img src="${ElevenZeroApp.escapeHtml(source)}" alt="Gallery photo ${index + 1}" />
+                        <button type="button" data-training-gallery-remove="${index}" data-trainer-id="${ElevenZeroApp.escapeHtml(draft.id)}" aria-label="Remove gallery photo ${index + 1}">×</button>
+                      </figure>
+                    `
+                  )
+                  .join("")}
+                ${
+                  draft.gallery.length < 5
+                    ? `<label class="training-gallery-add">
+                        <span aria-hidden="true">+</span>
+                        <strong>Add photos</strong>
+                        <input type="file" multiple accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" data-training-gallery-input="${ElevenZeroApp.escapeHtml(draft.id)}" />
+                      </label>`
+                    : ""
+                }
+              </div>
+            </div>
+          </div>
+          <div class="training-gallery-save-row">
+            <span>All changes go to Eleven Zero PB for review.</span>
+            <button class="button button-dark" type="button" data-training-gallery-save="${ElevenZeroApp.escapeHtml(draft.id)}">Submit photo update</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function handleTrainingGalleryFiles(input, isCover) {
+  const trainerId = Number(isCover ? input.dataset.trainingCoverInput : input.dataset.trainingGalleryInput);
+  const draft = trainerGalleryDrafts.get(trainerId);
+  const files = Array.from(input.files || []);
+  if (!draft || !files.length) return;
+  input.disabled = true;
+  try {
+    ElevenZeroApp.setStatus(trainingGalleryStatus, "Preparing trainer photos…", "warning");
+    if (isCover) {
+      draft.cover = await optimizeTrainingPhoto(files[0]);
+    } else {
+      const available = Math.max(0, 5 - draft.gallery.length);
+      const additions = [];
+      for (const file of files.slice(0, available)) additions.push(await optimizeTrainingPhoto(file));
+      draft.gallery.push(...additions);
+    }
+    renderTrainerGalleryProfiles(latestOwnedTrainers, { replace: false });
+    ElevenZeroApp.setStatus(trainingGalleryStatus, "Photos ready. Submit when the set looks right.", "success");
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainingGalleryStatus, error.message, "error");
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function submitTrainerGallery(trainerId, button) {
+  const draft = trainerGalleryDrafts.get(Number(trainerId));
+  if (!draft || button?.disabled) return;
+  if (!draft.cover) {
+    ElevenZeroApp.setStatus(trainingGalleryStatus, "Choose a cover photo first.", "error");
+    return;
+  }
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "Preparing…";
+  try {
+    ElevenZeroApp.setStatus(trainingGalleryStatus, "Preparing and submitting your complete photo set…", "warning");
+    const cover = await trainingPhotoSourceToDataUrl(draft.cover);
+    const gallery = [];
+    for (const source of draft.gallery) gallery.push(await trainingPhotoSourceToDataUrl(source));
+    const response = await ElevenZeroApp.request("/api/account/trainers/images", {
+      method: "POST",
+      body: { id: draft.id, trainerImage: cover, trainerGalleryImages: gallery },
+    });
+    trainerGalleryDrafts.delete(draft.id);
+    latestOwnedTrainers = latestOwnedTrainers.map((item) =>
+      Number(item.id) === Number(response.item.id) ? response.item : item
+    );
+    renderTrainerGalleryProfiles(latestOwnedTrainers, { replace: false });
+    ElevenZeroApp.setStatus(trainingGalleryStatus, response.message, "success");
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainingGalleryStatus, error.message, "error");
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+function bindTrainerGalleryManager() {
+  trainingGalleryProfiles?.addEventListener("change", async (event) => {
+    const coverInput = event.target.closest("[data-training-cover-input]");
+    const galleryInput = event.target.closest("[data-training-gallery-input]");
+    if (coverInput) await handleTrainingGalleryFiles(coverInput, true);
+    else if (galleryInput) await handleTrainingGalleryFiles(galleryInput, false);
+  });
+  trainingGalleryProfiles?.addEventListener("click", async (event) => {
+    const removeButton = event.target.closest("[data-training-gallery-remove]");
+    if (removeButton) {
+      const draft = trainerGalleryDrafts.get(Number(removeButton.dataset.trainerId));
+      if (draft) {
+        draft.gallery.splice(Number(removeButton.dataset.trainingGalleryRemove), 1);
+        renderTrainerGalleryProfiles(latestOwnedTrainers, { replace: false });
+        ElevenZeroApp.setStatus(trainingGalleryStatus, "Photo removed from this draft.", "warning");
+      }
+      return;
+    }
+    const saveButton = event.target.closest("[data-training-gallery-save]");
+    if (saveButton) await submitTrainerGallery(saveButton.dataset.trainingGallerySave, saveButton);
+  });
 }
 
 function formatCents(value) {
@@ -1067,6 +1781,33 @@ function renderAdminTrainers(items) {
     .map((item) => {
       const statusTone = getListingStatusTone(item.approval_status);
       const statusLabel = getListingStatusLabel(item);
+      const mediaReviewPending = item.mediaReviewStatus === "pending";
+      const photoSetMarkup = (title, cover, gallery = [], pending = false) => {
+        const sources = [cover, ...gallery].filter(Boolean);
+        if (!sources.length) return "";
+        return `
+          <section class="training-admin-photo-set ${pending ? "is-pending" : ""}">
+            <div>
+              <strong>${ElevenZeroApp.escapeHtml(title)}</strong>
+              <span>${sources.length} photo${sources.length === 1 ? "" : "s"}</span>
+            </div>
+            <div class="training-admin-photo-grid">
+              ${sources
+                .map(
+                  (source, index) => `
+                    <img
+                      src="${escapeAttr(source)}"
+                      alt="${escapeAttr(`${title} ${index + 1} for ${item.name}`)}"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+        `;
+      };
       return `
         <details class="admin-record">
           <summary>
@@ -1079,19 +1820,20 @@ function renderAdminTrainers(items) {
           </summary>
 
           <form class="admin-editor-form" data-admin-form="trainer" data-record-id="${escapeAttr(item.id)}">
-            ${
-              item.imageUrl
-                ? `<div class="admin-trainer-photo-preview">
-                    <img
-                      src="${escapeAttr(item.imageUrl)}"
-                      alt="Submitted trainer photo for ${escapeAttr(item.name)}"
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <span>Trainer photo submitted with this profile</span>
-                  </div>`
-                : ""
-            }
+            <div class="training-admin-photo-review">
+              ${photoSetMarkup("Current public photos", item.imageUrl, item.galleryImageUrls || [])}
+              ${photoSetMarkup(
+                "Complete proposed replacement",
+                item.pendingImageUrl,
+                item.pendingGalleryImageUrls || [],
+                true
+              )}
+              ${
+                mediaReviewPending
+                  ? '<p>Review the complete proposed set. Approving replaces all current public photos together; rejecting keeps the current set live.</p>'
+                  : ""
+              }
+            </div>
             <fieldset class="admin-certification-editor">
               <legend>Certification details</legend>
               <div class="admin-field-grid">
@@ -1152,7 +1894,11 @@ function renderAdminTrainers(items) {
 
             <div class="admin-review-actions">
               <button class="button button-dark" type="button" data-admin-review="approved" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Approve + publish</button>
-              <button class="button button-secondary" type="button" data-admin-review="pending" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Move back to review</button>
+              ${
+                mediaReviewPending
+                  ? ""
+                  : `<button class="button button-secondary" type="button" data-admin-review="pending" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Move back to review</button>`
+              }
               <button class="button button-secondary" type="button" data-admin-review="rejected" data-admin-review-type="trainer" data-record-id="${escapeAttr(item.id)}">Mark needs changes</button>
             </div>
 
@@ -1931,6 +2677,7 @@ async function loadDashboard() {
       "No trainer profiles yet",
       "Publish your first trainer profile from the trainers page."
     );
+    renderTrainerGalleryProfiles(response.recentTrainers || []);
     renderDashboardList(
       accountPurchases,
       response.recentPurchases || [],
@@ -2016,6 +2763,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   bindAdminPanel();
+  bindTrainingHub();
+  bindTrainerGalleryManager();
   accountPurchases?.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-order-issue-form]");
     if (!form) return;
@@ -2033,7 +2782,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     await retryShippingLabel(retryButton.dataset.retryShipping, retryButton);
   });
   await loadDashboard();
+  await loadTrainingHub();
+  if (latestTrainingHub?.relationships?.length === 1 && !activeTrainingRelationshipId) {
+    await openTrainingThread(latestTrainingHub.relationships[0].id, { silent: true });
+  }
   await loadAdminDashboard();
   sellerConnectButton?.addEventListener("click", handleSellerOnboarding);
   sellerRefreshButton?.addEventListener("click", refreshSellerProfile);
+
+  trainingHubPollTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") loadTrainingHub({ silent: true });
+  }, 25000);
+  trainingThreadPollTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible" && activeTrainingRelationshipId) {
+      openTrainingThread(activeTrainingRelationshipId, { silent: true });
+    }
+  }, 18000);
+  window.addEventListener("pagehide", () => {
+    window.clearInterval(trainingHubPollTimer);
+    window.clearInterval(trainingThreadPollTimer);
+  }, { once: true });
 });

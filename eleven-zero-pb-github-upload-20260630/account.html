@@ -8,7 +8,7 @@
       name="description"
       content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260723trainercert1" />
+    <link rel="stylesheet" href="./styles.css?v=20260820traininghub1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -80,6 +80,7 @@
 
             <div class="hero-actions" data-account-actions>
               <a class="button button-primary" href="./sell.html">Create Listing</a>
+              <a class="button button-secondary" href="#training-hub">Training Hub</a>
               <a class="button button-secondary" href="./trainers.html#join">Join as Trainer</a>
               <a class="button button-secondary" href="#seller-payouts">Set Up Payouts</a>
               <a class="button button-secondary is-hidden" href="#owner-tools" data-owner-anchor>
@@ -126,6 +127,196 @@
                 <div class="list-stack" data-account-trainers></div>
               </article>
             </div>
+
+            <section
+              class="dashboard-card dashboard-card-wide training-hub-shell"
+              id="training-hub"
+              data-training-hub
+              data-customer-account-section
+            >
+              <div class="training-hub-heading">
+                <div>
+                  <p class="eyebrow">Lessons &amp; coaching</p>
+                  <h2>Training Hub</h2>
+                  <p class="dashboard-copy">
+                    Manage client requests, private messages, and class times in one place.
+                  </p>
+                </div>
+                <span class="training-hub-unread" data-training-hub-unread hidden>
+                  0 unread
+                </span>
+              </div>
+
+              <div class="training-hub-status" aria-live="polite" data-training-hub-status>
+                Loading your training activity…
+              </div>
+
+              <div class="training-hub-requests" data-training-hub-requests hidden>
+                <article class="training-hub-request-panel">
+                  <div class="training-hub-section-head">
+                    <div>
+                      <span>For trainers</span>
+                      <h3>Client requests</h3>
+                    </div>
+                    <span class="training-hub-count" data-training-incoming-count>0</span>
+                  </div>
+                  <div class="training-hub-request-list" data-training-incoming></div>
+                </article>
+
+                <article class="training-hub-request-panel">
+                  <div class="training-hub-section-head">
+                    <div>
+                      <span>For players</span>
+                      <h3>Your requests</h3>
+                    </div>
+                    <span class="training-hub-count" data-training-outgoing-count>0</span>
+                  </div>
+                  <div class="training-hub-request-list" data-training-outgoing></div>
+                </article>
+              </div>
+
+              <div class="training-hub-workspace" data-training-hub-workspace hidden>
+                <aside class="training-hub-sidebar" aria-label="Trainer conversations">
+                  <div class="training-hub-section-head">
+                    <div>
+                      <span>Private</span>
+                      <h3>Connections</h3>
+                    </div>
+                    <span class="training-hub-count" data-training-connection-count>0</span>
+                  </div>
+                  <div class="training-hub-connections" data-training-connections></div>
+                </aside>
+
+                <div class="training-hub-conversation" data-training-conversation>
+                  <div class="training-hub-empty" data-training-conversation-empty>
+                    <span aria-hidden="true">↗</span>
+                    <h3>Choose a connection</h3>
+                    <p>Open a private conversation to message and schedule a class.</p>
+                  </div>
+
+                  <div data-training-thread hidden>
+                    <div class="training-thread-head">
+                      <div>
+                        <span data-training-thread-role>Your connection</span>
+                        <h3 data-training-thread-name>Trainer conversation</h3>
+                      </div>
+                      <button class="training-thread-refresh" type="button" data-training-thread-refresh>
+                        Refresh
+                      </button>
+                    </div>
+
+                    <div
+                      class="training-thread-messages"
+                      role="log"
+                      aria-live="polite"
+                      aria-label="Private messages"
+                      data-training-messages
+                    ></div>
+
+                    <form class="training-message-form" data-training-message-form>
+                      <label>
+                        <span class="sr-only">Write a private message</span>
+                        <textarea
+                          name="body"
+                          rows="2"
+                          maxlength="2000"
+                          placeholder="Write a message…"
+                          required
+                        ></textarea>
+                      </label>
+                      <button class="button button-dark" type="submit">Send</button>
+                    </form>
+                    <p class="training-inline-status" aria-live="polite" data-training-message-status></p>
+
+                    <div class="training-lessons-block">
+                      <div class="training-hub-section-head">
+                        <div>
+                          <span>Schedule</span>
+                          <h3>Classes</h3>
+                        </div>
+                      </div>
+                      <div class="training-lesson-list" data-training-thread-lessons></div>
+
+                      <details class="training-schedule-disclosure">
+                        <summary>Propose a class time</summary>
+                        <form class="training-schedule-form" data-training-schedule-form>
+                          <div class="training-schedule-grid">
+                            <label>
+                              Date &amp; time
+                              <input type="datetime-local" name="startsAt" required />
+                            </label>
+                            <label>
+                              Duration
+                              <select name="durationMinutes" required>
+                                <option value="30">30 minutes</option>
+                                <option value="45">45 minutes</option>
+                                <option value="60" selected>1 hour</option>
+                                <option value="90">1 hour 30 minutes</option>
+                                <option value="120">2 hours</option>
+                              </select>
+                            </label>
+                          </div>
+                          <label>
+                            Location
+                            <input
+                              type="text"
+                              name="location"
+                              maxlength="200"
+                              placeholder="Court name, address, or video call"
+                              required
+                            />
+                          </label>
+                          <label>
+                            Note <span>(optional)</span>
+                            <textarea
+                              name="note"
+                              rows="2"
+                              maxlength="1000"
+                              placeholder="What would you like to work on?"
+                            ></textarea>
+                          </label>
+                          <div class="training-schedule-submit">
+                            <span data-training-timezone></span>
+                            <button class="button button-primary" type="submit">Send proposal</button>
+                          </div>
+                        </form>
+                      </details>
+                      <p class="training-inline-status" aria-live="polite" data-training-schedule-status></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="training-upcoming" data-training-upcoming-wrap hidden>
+                <div class="training-hub-section-head">
+                  <div>
+                    <span>At a glance</span>
+                    <h3>Your class schedule</h3>
+                  </div>
+                </div>
+                <div class="training-upcoming-list" data-training-upcoming></div>
+              </div>
+            </section>
+
+            <section
+              class="dashboard-card dashboard-card-wide training-gallery-shell"
+              data-training-gallery-shell
+              data-customer-account-section
+              hidden
+            >
+              <div class="training-hub-heading">
+                <div>
+                  <p class="eyebrow">Trainer profile</p>
+                  <h2>Manage your photos</h2>
+                  <p class="dashboard-copy">
+                    Keep one cover photo and add up to five gallery photos. New photos are reviewed before they replace your live set.
+                  </p>
+                </div>
+                <span class="dashboard-pill">Photo review</span>
+              </div>
+              <div class="training-gallery-profiles" data-training-gallery-profiles></div>
+              <p class="training-inline-status" aria-live="polite" data-training-gallery-status></p>
+            </section>
 
             <details class="dashboard-card dashboard-card-wide account-sales-details account-purchases-details" open data-customer-account-section>
               <summary>
@@ -426,7 +617,7 @@
     </dialog>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./account.js?v=20260723trainercert1"></script>
+    <script src="./account.js?v=20260820traininghub1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>
