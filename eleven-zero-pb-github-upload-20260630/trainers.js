@@ -36,6 +36,10 @@ const trainerPhotoPreviewImage = document.querySelector("[data-trainer-photo-pre
 const trainerPhotoReplaceButton = document.querySelector("[data-trainer-photo-replace]");
 const trainerPhotoRemoveButton = document.querySelector("[data-trainer-photo-remove]");
 const trainerPhotoStatus = document.querySelector("[data-trainer-photo-status]");
+const trainerGalleryInput = document.querySelector("[data-trainer-gallery-input]");
+const trainerGalleryDropzone = document.querySelector("[data-trainer-gallery-dropzone]");
+const trainerGalleryPreview = document.querySelector("[data-trainer-gallery-preview]");
+const trainerGalleryStatus = document.querySelector("[data-trainer-gallery-status]");
 const trainerJoinSubmitButton = trainerJoinForm?.querySelector('button[type="submit"]');
 const certificationOrgSelect = trainerJoinForm?.querySelector("[data-certification-org]");
 const certificationOrgOtherField = trainerJoinForm?.querySelector(
@@ -47,10 +51,13 @@ const certificationOrgOtherInput = trainerJoinForm?.querySelector(
 
 const TRAINER_PHOTO_MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 const TRAINER_PHOTO_MAX_DATA_URL_LENGTH = 1_500_000;
-const TRAINER_PHOTO_DEFAULT_STATUS = "JPG, PNG or WebP · 10 MB max";
+const TRAINER_PHOTO_DEFAULT_STATUS = "JPG, PNG or WebP · landscape works best";
+const TRAINER_GALLERY_DEFAULT_STATUS = "Add up to five JPG, PNG, or WebP photos.";
+const TRAINER_GALLERY_MAX_PHOTOS = 5;
 const TRAINER_PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
 
 let trainerImageDraft = "";
+let trainerGalleryDrafts = [];
 let trainerImageProcessing = false;
 
 const formatLabels = {
@@ -176,9 +183,42 @@ async function prepareTrainerPhoto(file) {
 function setTrainerPhotoProcessing(isProcessing) {
   trainerImageProcessing = isProcessing;
   trainerPhotoDropzone?.setAttribute("aria-busy", String(isProcessing));
+  trainerGalleryDropzone?.setAttribute("aria-busy", String(isProcessing));
   if (trainerJoinSubmitButton) {
     trainerJoinSubmitButton.disabled = isProcessing;
   }
+}
+
+function renderTrainerGalleryDrafts() {
+  if (!trainerGalleryPreview) return;
+
+  trainerGalleryPreview.innerHTML = trainerGalleryDrafts
+    .map(
+      (image, index) => `
+        <figure class="trainer-gallery-preview-item">
+          <img src="${image}" alt="Additional trainer photo ${index + 1}" />
+          <button
+            type="button"
+            data-remove-trainer-gallery-image="${index}"
+            aria-label="Remove additional trainer photo ${index + 1}"
+          >
+            Remove
+          </button>
+        </figure>
+      `
+    )
+    .join("");
+
+  if (trainerGalleryDropzone) {
+    trainerGalleryDropzone.hidden = trainerGalleryDrafts.length >= TRAINER_GALLERY_MAX_PHOTOS;
+  }
+}
+
+function clearTrainerGallery() {
+  trainerGalleryDrafts = [];
+  if (trainerGalleryInput) trainerGalleryInput.value = "";
+  renderTrainerGalleryDrafts();
+  ElevenZeroApp.setStatus(trainerGalleryStatus, TRAINER_GALLERY_DEFAULT_STATUS);
 }
 
 function renderTrainerPhotoDraft() {
@@ -239,6 +279,71 @@ async function handleTrainerPhotoSelection(file) {
     ElevenZeroApp.setStatus(trainerPhotoStatus, error.message, "error");
   } finally {
     if (trainerPhotoInput) trainerPhotoInput.value = "";
+    setTrainerPhotoProcessing(false);
+  }
+}
+
+async function handleTrainerGallerySelection(fileList) {
+  if (trainerImageProcessing) return;
+
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+
+  const remaining = TRAINER_GALLERY_MAX_PHOTOS - trainerGalleryDrafts.length;
+  if (remaining <= 0) {
+    ElevenZeroApp.setStatus(
+      trainerGalleryStatus,
+      "You already added the maximum of five photos.",
+      "warning"
+    );
+    return;
+  }
+
+  const selected = files.slice(0, remaining);
+  setTrainerPhotoProcessing(true);
+  ElevenZeroApp.setStatus(
+    trainerGalleryStatus,
+    `Preparing ${selected.length} photo${selected.length === 1 ? "" : "s"}…`,
+    "warning"
+  );
+
+  const errors = [];
+  try {
+    for (const file of selected) {
+      try {
+        const prepared = await prepareTrainerPhoto(file);
+        if (!trainerGalleryDrafts.includes(prepared)) {
+          trainerGalleryDrafts.push(prepared);
+        }
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
+    renderTrainerGalleryDrafts();
+
+    if (errors.length) {
+      ElevenZeroApp.setStatus(
+        trainerGalleryStatus,
+        `${trainerGalleryDrafts.length} photo${
+          trainerGalleryDrafts.length === 1 ? "" : "s"
+        } ready. ${errors[0]}`,
+        "warning"
+      );
+    } else if (files.length > selected.length) {
+      ElevenZeroApp.setStatus(
+        trainerGalleryStatus,
+        "Five photos ready. Extra selections were not added.",
+        "warning"
+      );
+    } else {
+      ElevenZeroApp.setStatus(
+        trainerGalleryStatus,
+        `${trainerGalleryDrafts.length} of ${TRAINER_GALLERY_MAX_PHOTOS} gallery photos ready.`,
+        "success"
+      );
+    }
+  } finally {
+    if (trainerGalleryInput) trainerGalleryInput.value = "";
     setTrainerPhotoProcessing(false);
   }
 }
@@ -684,6 +789,7 @@ async function handleTrainerJoin(event) {
   }
 
   payload.trainerImage = trainerImageDraft;
+  payload.trainerGalleryImages = [...trainerGalleryDrafts];
 
   try {
     if (trainerJoinSubmitButton) {
@@ -696,6 +802,7 @@ async function handleTrainerJoin(event) {
     });
     trainerJoinForm.reset();
     clearTrainerPhoto();
+    clearTrainerGallery();
     syncOtherCertificationOrganization();
     ElevenZeroApp.setStatus(
       trainerJoinStatus,
@@ -791,6 +898,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   trainerPhotoReplaceButton?.addEventListener("click", () => trainerPhotoInput?.click());
   trainerPhotoRemoveButton?.addEventListener("click", clearTrainerPhoto);
+  trainerGalleryDropzone?.addEventListener("click", () => trainerGalleryInput?.click());
+  trainerGalleryInput?.addEventListener("change", (event) => {
+    handleTrainerGallerySelection(event.target.files);
+  });
+  trainerGalleryPreview?.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-trainer-gallery-image]");
+    if (!removeButton) return;
+    const index = Number(removeButton.dataset.removeTrainerGalleryImage);
+    if (!Number.isInteger(index) || index < 0 || index >= trainerGalleryDrafts.length) return;
+    trainerGalleryDrafts.splice(index, 1);
+    renderTrainerGalleryDrafts();
+    ElevenZeroApp.setStatus(
+      trainerGalleryStatus,
+      trainerGalleryDrafts.length
+        ? `${trainerGalleryDrafts.length} of ${TRAINER_GALLERY_MAX_PHOTOS} gallery photos ready.`
+        : TRAINER_GALLERY_DEFAULT_STATUS,
+      trainerGalleryDrafts.length ? "success" : "neutral"
+    );
+  });
   certificationOrgSelect?.addEventListener("change", syncOtherCertificationOrganization);
   trainerPhotoDropzone?.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -804,6 +930,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.preventDefault();
     trainerPhotoDropzone.classList.remove("is-dragging");
     handleTrainerPhotoSelection(event.dataTransfer?.files?.[0]);
+  });
+  trainerGalleryDropzone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    trainerGalleryDropzone.classList.add("is-dragging");
+  });
+  trainerGalleryDropzone?.addEventListener("dragleave", () => {
+    trainerGalleryDropzone.classList.remove("is-dragging");
+  });
+  trainerGalleryDropzone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    trainerGalleryDropzone.classList.remove("is-dragging");
+    handleTrainerGallerySelection(event.dataTransfer?.files);
   });
   trainerReviewForm?.addEventListener("submit", handleTrainerReview);
   trainerLoadMore?.addEventListener("click", () => {

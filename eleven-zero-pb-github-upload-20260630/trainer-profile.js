@@ -1,5 +1,22 @@
 const trainerDetailShell = document.querySelector("[data-trainer-detail-shell]");
 const trainerDetailStatus = document.querySelector("[data-trainer-detail-status]");
+const trainerRequestDialog = document.querySelector("[data-trainer-request-dialog]");
+const trainerRequestForm = document.querySelector("[data-trainer-request-form]");
+const trainerRequestMessage = document.querySelector("[data-trainer-request-message]");
+const trainerRequestCount = document.querySelector("[data-trainer-request-count]");
+const trainerRequestStatus = document.querySelector("[data-trainer-request-status]");
+const trainerRequestCopy = document.querySelector("[data-trainer-request-copy]");
+const trainerRequestSubmit = document.querySelector("[data-trainer-request-submit]");
+
+const trainerDetailState = {
+  trainer: null,
+  reviews: [],
+  viewerState: {
+    isOwner: false,
+    relationshipStatus: null,
+    relationshipId: null,
+  },
+};
 
 const trainerDetailFormatLabels = {
   private: "Private lessons",
@@ -169,7 +186,89 @@ function updateTrainerDetailMetadata(trainer) {
   });
 }
 
-function renderTrainerDetail(trainer, reviews) {
+function trainerDetailPhotoUrls(trainer) {
+  return [trainer.imageUrl, ...(Array.isArray(trainer.galleryImageUrls) ? trainer.galleryImageUrls : [])]
+    .map((value) => String(value || "").trim())
+    .filter((value, index, list) => value && list.indexOf(value) === index);
+}
+
+function trainerDetailGalleryMarkup(trainer) {
+  const photos = trainerDetailPhotoUrls(trainer);
+  if (photos.length < 2) return "";
+
+  return `
+    <section class="trainer-detail-gallery" aria-labelledby="trainer-gallery-title">
+      <div class="trainer-detail-gallery-head">
+        <div>
+          <p class="eyebrow">Photo gallery</p>
+          <h2 id="trainer-gallery-title">Coaching in action</h2>
+        </div>
+        <span>${photos.length} photos</span>
+      </div>
+      <div class="trainer-detail-gallery-grid">
+        ${photos
+          .map(
+            (photo, index) => `
+              <button
+                class="trainer-detail-gallery-thumb${index === 0 ? " is-active" : ""}"
+                type="button"
+                data-trainer-gallery-photo="${ElevenZeroApp.escapeHtml(photo)}"
+                data-trainer-gallery-index="${index}"
+                aria-label="Show ${index === 0 ? "cover photo" : `trainer photo ${index + 1}`}"
+                aria-pressed="${index === 0 ? "true" : "false"}"
+              >
+                <img
+                  src="${ElevenZeroApp.escapeHtml(photo)}"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />
+                <span>${index === 0 ? "Cover" : String(index + 1).padStart(2, "0")}</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function trainerDetailPrimaryAction(trainer, viewerState) {
+  if (viewerState.isOwner) {
+    return '<a class="button button-primary" href="./account.html#training-hub">Manage profile</a>';
+  }
+
+  if (viewerState.relationshipStatus === "active") {
+    return '<a class="button button-primary" href="./account.html#training-hub">Open conversation</a>';
+  }
+
+  if (viewerState.relationshipStatus === "pending") {
+    return '<button class="button button-primary" type="button" disabled>Request sent</button>';
+  }
+
+  if (!ElevenZeroApp.session?.authenticated) {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    return `<a class="button button-primary" href="./auth.html?next=${next}">Sign in to request</a>`;
+  }
+
+  return `<button class="button button-primary" type="button" data-trainer-request-open>Request a lesson</button>`;
+}
+
+function trainerDetailLessonLink(viewerState) {
+  if (viewerState.isOwner || viewerState.relationshipStatus === "active") {
+    return '<a class="text-link" href="./account.html#training-hub">Open Training Hub →</a>';
+  }
+  if (viewerState.relationshipStatus === "pending") {
+    return '<span class="trainer-detail-request-note">Your request is waiting for the trainer.</span>';
+  }
+  if (!ElevenZeroApp.session?.authenticated) {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    return `<a class="text-link" href="./auth.html?next=${next}">Sign in to request a lesson →</a>`;
+  }
+  return '<button class="trainer-detail-text-button" type="button" data-trainer-request-open>Request a lesson →</button>';
+}
+
+function renderTrainerDetail(trainer, reviews, viewerState) {
   const formatLabel = trainerDetailFormatLabels[trainer.format] || "Pickleball coaching";
   const levelLabel = trainerDetailLevelLabels[trainer.level] || "Players of all levels";
   const imageUrl = String(trainer.imageUrl || "").trim();
@@ -177,15 +276,6 @@ function renderTrainerDetail(trainer, reviews) {
   const certificationName = String(trainer.certificationName || "").trim();
   const certificationUrl = trainerDetailSafeUrl(trainer.certificationUrl);
   const hasCertification = Boolean(certificationOrg || certificationName);
-  const contactHref = trainer.email
-    ? `mailto:${encodeURIComponent(
-        String(trainer.email).trim()
-      )}?subject=${encodeURIComponent(
-        `Pickleball lesson inquiry for ${trainer.name} through Eleven Zero PB`
-      )}`
-    : `./auth.html?next=${encodeURIComponent(
-        `${window.location.pathname}${window.location.search}`
-      )}`;
   const reviewHref = `./trainers.html?reviewTrainer=${encodeURIComponent(
     trainer.id
   )}#reviews`;
@@ -236,11 +326,13 @@ function renderTrainerDetail(trainer, reviews) {
         </div>
 
         <div class="trainer-detail-actions">
-          <a class="button button-primary" href="${contactHref}">Contact trainer</a>
+          ${trainerDetailPrimaryAction(trainer, viewerState)}
           <a class="button button-secondary" href="${reviewHref}">Leave a review</a>
         </div>
       </div>
     </section>
+
+    ${trainerDetailGalleryMarkup(trainer)}
 
     <section class="trainer-detail-content-grid">
       <article class="trainer-detail-panel trainer-detail-about">
@@ -263,7 +355,7 @@ function renderTrainerDetail(trainer, reviews) {
           <p>${ElevenZeroApp.escapeHtml(
             trainer.availability || "Contact this trainer for current availability."
           )}</p>
-          <a class="text-link" href="${contactHref}">Ask about a lesson →</a>
+          ${trainerDetailLessonLink(viewerState)}
         </section>
 
         ${
@@ -320,6 +412,16 @@ function renderTrainerDetail(trainer, reviews) {
     },
     { once: true }
   );
+  trainerDetailShell.querySelectorAll(".trainer-detail-gallery-thumb img").forEach((image) => {
+    image.addEventListener(
+      "error",
+      () => image.closest(".trainer-detail-gallery-thumb")?.remove(),
+      { once: true }
+    );
+  });
+  if (trainerRequestCopy) {
+    trainerRequestCopy.textContent = `Introduce yourself to ${trainer.name} and share what you would like to work on.`;
+  }
   updateTrainerDetailMetadata(trainer);
 }
 
@@ -349,7 +451,18 @@ async function loadTrainerDetail() {
     if (!response.item) {
       throw new Error("That trainer profile is not available.");
     }
-    renderTrainerDetail(response.item, Array.isArray(response.reviews) ? response.reviews : []);
+    trainerDetailState.trainer = response.item;
+    trainerDetailState.reviews = Array.isArray(response.reviews) ? response.reviews : [];
+    trainerDetailState.viewerState = {
+      isOwner: Boolean(response.viewerState?.isOwner),
+      relationshipStatus: response.viewerState?.relationshipStatus || null,
+      relationshipId: response.viewerState?.relationshipId || null,
+    };
+    renderTrainerDetail(
+      trainerDetailState.trainer,
+      trainerDetailState.reviews,
+      trainerDetailState.viewerState
+    );
     trainerDetailStatus.hidden = true;
   } catch (error) {
     const message =
@@ -361,7 +474,132 @@ async function loadTrainerDetail() {
   }
 }
 
+function updateTrainerRequestCount() {
+  if (!trainerRequestCount || !trainerRequestMessage) return;
+  trainerRequestCount.textContent = `${trainerRequestMessage.value.length} / 500`;
+}
+
+function openTrainerRequestDialog() {
+  if (!ElevenZeroApp.session?.authenticated) {
+    ElevenZeroApp.redirectToAuth();
+    return;
+  }
+  if (!trainerRequestDialog || !trainerDetailState.trainer) return;
+
+  trainerRequestForm?.reset();
+  updateTrainerRequestCount();
+  ElevenZeroApp.setStatus(trainerRequestStatus, "");
+  if (trainerRequestSubmit) {
+    trainerRequestSubmit.disabled = false;
+    trainerRequestSubmit.textContent = "Send request";
+  }
+  if (typeof trainerRequestDialog.showModal === "function") {
+    trainerRequestDialog.showModal();
+  } else {
+    trainerRequestDialog.setAttribute("open", "");
+  }
+  window.setTimeout(() => trainerRequestMessage?.focus(), 0);
+}
+
+function closeTrainerRequestDialog() {
+  if (!trainerRequestDialog?.open) return;
+  if (typeof trainerRequestDialog.close === "function") {
+    trainerRequestDialog.close();
+  } else {
+    trainerRequestDialog.removeAttribute("open");
+  }
+}
+
+async function submitTrainerRequest(event) {
+  event.preventDefault();
+  if (!trainerDetailState.trainer) return;
+  if (!ElevenZeroApp.requireAuth(trainerRequestStatus, "Sign in to request a lesson.")) return;
+
+  const introMessage = String(trainerRequestMessage?.value || "").trim();
+  if (introMessage.length > 500) {
+    ElevenZeroApp.setStatus(
+      trainerRequestStatus,
+      "Keep your introduction under 500 characters.",
+      "error"
+    );
+    return;
+  }
+
+  try {
+    if (trainerRequestSubmit) {
+      trainerRequestSubmit.disabled = true;
+      trainerRequestSubmit.textContent = "Sending…";
+    }
+    const response = await ElevenZeroApp.request("/api/trainer-client/requests", {
+      method: "POST",
+      body: {
+        trainerId: trainerDetailState.trainer.id,
+        introMessage,
+      },
+    });
+    trainerDetailState.viewerState.relationshipStatus = "pending";
+    trainerDetailState.viewerState.relationshipId = null;
+    renderTrainerDetail(
+      trainerDetailState.trainer,
+      trainerDetailState.reviews,
+      trainerDetailState.viewerState
+    );
+    ElevenZeroApp.setStatus(
+      trainerRequestStatus,
+      response.message || "Your request was sent to the trainer.",
+      "success"
+    );
+    if (trainerRequestSubmit) trainerRequestSubmit.textContent = "Request sent";
+    window.setTimeout(closeTrainerRequestDialog, 900);
+  } catch (error) {
+    ElevenZeroApp.setStatus(trainerRequestStatus, error.message, "error");
+    if (trainerRequestSubmit) {
+      trainerRequestSubmit.disabled = false;
+      trainerRequestSubmit.textContent = "Send request";
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
   await loadTrainerDetail();
+
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    if (target.closest("[data-trainer-request-open]")) {
+      openTrainerRequestDialog();
+      return;
+    }
+
+    const galleryButton = target.closest("[data-trainer-gallery-photo]");
+    if (galleryButton) {
+      const mainImage = trainerDetailShell.querySelector("[data-trainer-detail-image]");
+      const photoUrl = galleryButton.dataset.trainerGalleryPhoto || "";
+      if (mainImage && photoUrl) {
+        mainImage.src = photoUrl;
+        mainImage.alt = `${trainerDetailState.trainer?.name || "Trainer"} coaching photo`;
+      }
+      trainerDetailShell.querySelectorAll("[data-trainer-gallery-photo]").forEach((button) => {
+        const isActive = button === galleryButton;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+    }
+  });
+
+  trainerRequestMessage?.addEventListener("input", updateTrainerRequestCount);
+  trainerRequestForm?.addEventListener("submit", submitTrainerRequest);
+  document.querySelector("[data-trainer-request-close]")?.addEventListener(
+    "click",
+    closeTrainerRequestDialog
+  );
+  document.querySelector("[data-trainer-request-cancel]")?.addEventListener(
+    "click",
+    closeTrainerRequestDialog
+  );
+  trainerRequestDialog?.addEventListener("click", (event) => {
+    if (event.target === trainerRequestDialog) closeTrainerRequestDialog();
+  });
 });

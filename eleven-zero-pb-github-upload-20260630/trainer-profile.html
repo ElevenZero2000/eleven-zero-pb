@@ -8,7 +8,7 @@
       name="description"
       content="View trainer experience, lesson details, certification, availability, and player reviews on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260728trainerprofile1" />
+    <link rel="stylesheet" href="./styles.css?v=20260820trainerclient1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="trainer-profile-page" data-nav="trainers">
@@ -64,6 +64,60 @@
         </section>
       </main>
 
+      <dialog
+        class="trainer-request-dialog"
+        data-trainer-request-dialog
+        aria-labelledby="trainer-request-title"
+      >
+        <form class="trainer-request-form" data-trainer-request-form>
+          <div class="trainer-request-dialog-head">
+            <div>
+              <p class="eyebrow">Client request</p>
+              <h2 id="trainer-request-title">Request a lesson</h2>
+            </div>
+            <button
+              class="trainer-request-close"
+              type="button"
+              data-trainer-request-close
+              aria-label="Close lesson request"
+            >
+              ×
+            </button>
+          </div>
+          <p class="trainer-request-dialog-copy" data-trainer-request-copy>
+            Introduce yourself and share what you would like to work on.
+          </p>
+          <label>
+            Message to trainer
+            <textarea
+              name="introMessage"
+              rows="6"
+              maxlength="500"
+              placeholder="Tell the trainer your level, goals, and general availability."
+              data-trainer-request-message
+            ></textarea>
+          </label>
+          <div class="trainer-request-message-meta">
+            <span>Scheduling opens after the trainer accepts.</span>
+            <span data-trainer-request-count>0 / 500</span>
+          </div>
+          <div
+            class="trainer-request-status"
+            data-trainer-request-status
+            role="status"
+            aria-live="polite"
+          ></div>
+          <div class="trainer-request-actions">
+            <button class="button button-secondary" type="button" data-trainer-request-cancel>
+              Cancel
+            </button>
+            <button class="button button-primary" type="submit" data-trainer-request-submit>
+              Send request
+            </button>
+          </div>
+        </form>
+      </dialog>
+
       <footer class="site-footer">
         <div class="footer-brand-block">
           <img
@@ -90,7 +144,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./trainer-profile.js?v=20260728trainerprofile1"></script>
+    <script src="./trainer-profile.js?v=20260820trainerclient1"></script>
     <script
       src="./header-tweaks.js?v=20260722audit1"
       data-eleven-zero-header-tweaks

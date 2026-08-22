@@ -1102,6 +1102,13 @@ COURT_APPROVAL_LABELS = {
 TRAINER_CERTIFICATION_TEXT_MAX_LENGTH = 120
 TRAINER_CERTIFICATION_CREDENTIAL_MAX_LENGTH = 120
 TRAINER_CERTIFICATION_URL_MAX_LENGTH = 500
+TRAINER_NAME_MAX_LENGTH = 100
+TRAINER_LOCATION_MAX_LENGTH = 160
+TRAINER_RATE_MAX_LENGTH = 80
+TRAINER_EXPERIENCE_MAX_LENGTH = 240
+TRAINER_AVAILABILITY_MAX_LENGTH = 500
+TRAINER_BIO_MAX_LENGTH = 2_000
+TRAINER_REVIEW_COMMENT_MAX_LENGTH = 2_000
 TRAINER_CERTIFICATION_PLACEHOLDERS = {
     "n a",
     "na",
@@ -1184,6 +1191,33 @@ def normalize_trainer_certification_fields(
             )
 
     return organization, certification_name, credential_id, verification_url
+
+
+def validate_trainer_profile_text_fields(
+    *,
+    name: str,
+    location: str,
+    rate: str,
+    experience: str,
+    availability: str,
+    bio: str,
+) -> None:
+    limits = (
+        ("Trainer name", name, TRAINER_NAME_MAX_LENGTH),
+        ("Home city", location, TRAINER_LOCATION_MAX_LENGTH),
+        ("Starting rate", rate, TRAINER_RATE_MAX_LENGTH),
+        ("Experience", experience, TRAINER_EXPERIENCE_MAX_LENGTH),
+        ("Availability", availability, TRAINER_AVAILABILITY_MAX_LENGTH),
+        ("Trainer bio", bio, TRAINER_BIO_MAX_LENGTH),
+    )
+    for label, value, maximum in limits:
+        if len(value) > maximum:
+            raise ValueError(f"{label} must be under {maximum:,} characters.")
+        if any(
+            ord(character) < 32 and character not in "\n\r\t"
+            for character in value
+        ):
+            raise ValueError(f"{label} contains unsupported characters.")
 
 
 def normalize_listing_approval_status(value: str, default: str = "pending") -> str:
@@ -4332,6 +4366,56 @@ def init_database() -> None:
         )
       # fmt: on
 
+        # Older databases did not enforce the one-review-per-client rule at the
+        # database layer. Keep the newest duplicate, repair only the affected
+        # trainer aggregates, then add the constraint without risking startup.
+        duplicate_review_trainer_ids = [
+            int(row[0])
+            for row in connection.execute(
+                """
+                SELECT trainer_id
+                FROM trainer_reviews
+                WHERE user_id IS NOT NULL
+                GROUP BY trainer_id, user_id
+                HAVING COUNT(*) > 1
+                """
+            ).fetchall()
+        ]
+        if duplicate_review_trainer_ids:
+            connection.execute(
+                """
+                DELETE FROM trainer_reviews
+                WHERE user_id IS NOT NULL
+                  AND id NOT IN (
+                    SELECT MAX(id)
+                    FROM trainer_reviews
+                    WHERE user_id IS NOT NULL
+                    GROUP BY trainer_id, user_id
+                  )
+                """
+            )
+            for trainer_id in set(duplicate_review_trainer_ids):
+                aggregate = connection.execute(
+                    """
+                    SELECT COUNT(*) AS review_count, COALESCE(AVG(rating), 0) AS rating
+                    FROM trainer_reviews
+                    WHERE trainer_id = ?
+                    """,
+                    (trainer_id,),
+                ).fetchone()
+                connection.execute(
+                    "UPDATE trainers SET review_count = ?, rating = ? WHERE id = ?",
+                    (
+                        int(aggregate["review_count"] or 0),
+                        round(float(aggregate["rating"] or 0), 2),
+                        trainer_id,
+                    ),
+                )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_trainer_reviews_user_trainer "
+            "ON trainer_reviews(trainer_id, user_id) WHERE user_id IS NOT NULL"
+        )
+
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_court_reports_court_id ON court_reports(court_id)"
         )
@@ -5237,12 +5321,24 @@ def trainer_gallery_image_urls(
     trainer_id = int(row_value(row, "id", 0) or 0)
     if trainer_id <= 0:
         return []
-    field = (
-        "pending_gallery_image_data_json"
-        if pending
-        else "gallery_image_data_json"
+    count_field = (
+        "pending_gallery_image_count" if pending else "gallery_image_count"
     )
-    images = trainer_gallery_image_data(row_value(row, field, "[]"))
+    count_value = row_value(row, count_field)
+    if count_value is None:
+        data_field = (
+            "pending_gallery_image_data_json"
+            if pending
+            else "gallery_image_data_json"
+        )
+        image_count = len(
+            trainer_gallery_image_data(row_value(row, data_field, "[]"))
+        )
+    else:
+        try:
+            image_count = min(max(int(count_value), 0), 5)
+        except (TypeError, ValueError):
+            image_count = 0
     version = str(
         row_value(row, "media_submitted_at" if pending else "image_updated_at", "")
         or row_value(row, "joined_at", "")
@@ -5251,16 +5347,18 @@ def trainer_gallery_image_urls(
     prefix = "pending-images" if pending else "images"
     return [
         f"/api/trainers/{trainer_id}/{prefix}/{index}?v={quote(version, safe='')}"
-        for index in range(1, len(images) + 1)
+        for index in range(1, image_count + 1)
     ]
 
 
 def trainer_pending_cover_url(row: sqlite3.Row | dict | None) -> str:
     trainer_id = int(row_value(row, "id", 0) or 0)
-    if (
-        trainer_id <= 0
-        or not str(row_value(row, "pending_image_data", "") or "").strip()
-    ):
+    pending_present = row_value(row, "pending_image_present")
+    if pending_present is None:
+        pending_present = bool(
+            str(row_value(row, "pending_image_data", "") or "").strip()
+        )
+    if trainer_id <= 0 or not bool(pending_present):
         return ""
     version = str(row_value(row, "media_submitted_at", "") or "pending")
     return (
@@ -6994,7 +7092,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   image_data,
                   gallery_image_data_json,
                   pending_image_data,
-                  pending_gallery_image_data_json
+                  pending_gallery_image_data_json,
+                  COALESCE(
+                    (SELECT account_status FROM users WHERE users.id = trainers.user_id),
+                    'missing'
+                  ) AS owner_account_status
                 FROM trainers
                 WHERE id = ?
                 """,
@@ -7011,13 +7113,20 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_id = int(viewer.get("id") or 0) if viewer else 0
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         owner_id = int(row["user_id"] or 0)
-        is_public = row["approval_status"] == "approved" and owner_id > 0
+        viewer_is_owner = (
+            viewer_id > 0 and owner_id > 0 and viewer_id == owner_id
+        )
+        is_public = (
+            row["approval_status"] == "approved"
+            and owner_id > 0
+            and row["owner_account_status"] == "active"
+        )
         if pending:
             is_public = False
         if (
             (pending or not is_public)
             and not viewer_is_admin
-            and viewer_id != owner_id
+            and not viewer_is_owner
         ):
             self.send_json(
                 {"error": "That trainer photo could not be found."},
@@ -7191,18 +7300,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   joined_at,
                   rating,
                   review_count,
-                  gallery_image_data_json,
+                  CASE
+                    WHEN json_valid(gallery_image_data_json)
+                      THEN MIN(json_array_length(gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS gallery_image_count,
                   image_updated_at,
-                  pending_image_data,
-                  pending_gallery_image_data_json,
+                  CASE WHEN length(trim(pending_image_data)) > 0 THEN 1 ELSE 0 END AS pending_image_present,
+                  CASE
+                    WHEN json_valid(pending_gallery_image_data_json)
+                      THEN MIN(json_array_length(pending_gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS pending_gallery_image_count,
                   media_review_status,
                   media_submitted_at,
                   CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
                   approval_status,
                   reviewed_at
                 FROM trainers
-                WHERE approval_status = 'approved'
-                  AND user_id IS NOT NULL
+                WHERE trainers.approval_status = 'approved'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM users AS trainer_owners
+                    WHERE trainer_owners.id = trainers.user_id
+                      AND trainer_owners.account_status = 'active'
+                  )
                 ORDER BY verified DESC, joined_at DESC, id DESC
                 """
             ).fetchall()
@@ -7235,14 +7357,26 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   joined_at,
                   rating,
                   review_count,
-                  gallery_image_data_json,
+                  CASE
+                    WHEN json_valid(gallery_image_data_json)
+                      THEN MIN(json_array_length(gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS gallery_image_count,
                   image_updated_at,
-                  pending_image_data,
-                  pending_gallery_image_data_json,
+                  CASE WHEN length(trim(pending_image_data)) > 0 THEN 1 ELSE 0 END AS pending_image_present,
+                  CASE
+                    WHEN json_valid(pending_gallery_image_data_json)
+                      THEN MIN(json_array_length(pending_gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS pending_gallery_image_count,
                   media_review_status,
                   media_submitted_at,
                   CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
-                  approval_status
+                  approval_status,
+                  COALESCE(
+                    (SELECT account_status FROM users WHERE users.id = trainers.user_id),
+                    'missing'
+                  ) AS owner_account_status
                 FROM trainers
                 WHERE id = ?
                 """,
@@ -7258,7 +7392,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_id = int(viewer.get("id") or 0) if viewer else 0
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         trainer_owner_id = int(row["user_id"] or 0)
-        is_public = approval_status == "approved" and trainer_owner_id > 0
+        is_public = (
+            approval_status == "approved"
+            and trainer_owner_id > 0
+            and row_value(row, "owner_account_status", "missing") == "active"
+        )
         viewer_is_owner = (
             viewer_id > 0
             and trainer_owner_id > 0
@@ -7365,8 +7503,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
               trainer_reviews.created_at
             FROM trainer_reviews
             JOIN trainers ON trainers.id = trainer_reviews.trainer_id
+            JOIN users AS trainer_owners ON trainer_owners.id = trainers.user_id
             WHERE trainers.approval_status = 'approved'
-              AND trainers.user_id IS NOT NULL
+              AND trainer_owners.account_status = 'active'
         """
         params: tuple = ()
 
@@ -8849,23 +8988,45 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 )
                 return
 
-            messages = connection.execute(
-                """
-                SELECT
-                  messages.id,
-                  messages.sender_user_id,
-                  senders.name AS sender_name,
-                  messages.body,
-                  messages.created_at
-                FROM trainer_messages AS messages
-                JOIN users AS senders ON senders.id = messages.sender_user_id
-                WHERE messages.relationship_id = ?
-                  AND messages.id > ?
-                ORDER BY messages.id ASC
-                LIMIT 200
-                """,
-                (relationship_id, max(after_id, 0)),
-            ).fetchall()
+            if after_id > 0:
+                messages = connection.execute(
+                    """
+                    SELECT
+                      messages.id,
+                      messages.sender_user_id,
+                      senders.name AS sender_name,
+                      messages.body,
+                      messages.created_at
+                    FROM trainer_messages AS messages
+                    JOIN users AS senders ON senders.id = messages.sender_user_id
+                    WHERE messages.relationship_id = ?
+                      AND messages.id > ?
+                    ORDER BY messages.id ASC
+                    LIMIT 200
+                    """,
+                    (relationship_id, after_id),
+                ).fetchall()
+            else:
+                messages = connection.execute(
+                    """
+                    SELECT *
+                    FROM (
+                      SELECT
+                        messages.id,
+                        messages.sender_user_id,
+                        senders.name AS sender_name,
+                        messages.body,
+                        messages.created_at
+                      FROM trainer_messages AS messages
+                      JOIN users AS senders ON senders.id = messages.sender_user_id
+                      WHERE messages.relationship_id = ?
+                      ORDER BY messages.id DESC
+                      LIMIT 200
+                    ) AS recent_messages
+                    ORDER BY id ASC
+                    """,
+                    (relationship_id,),
+                ).fetchall()
             lessons = connection.execute(
                 """
                 SELECT
@@ -8885,16 +9046,29 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 """,
                 (relationship_id,),
             ).fetchall()
-            connection.execute(
-                """
-                UPDATE trainer_messages
-                SET read_at = COALESCE(read_at, ?)
-                WHERE relationship_id = ?
-                  AND sender_user_id != ?
-                  AND read_at IS NULL
-                """,
-                (utc_now(), relationship_id, user_id),
-            )
+            returned_incoming_ids = [
+                int(row["id"])
+                for row in messages
+                if int(row["sender_user_id"]) != user_id
+            ]
+            if returned_incoming_ids:
+                placeholders = ",".join("?" for _ in returned_incoming_ids)
+                connection.execute(
+                    f"""
+                    UPDATE trainer_messages
+                    SET read_at = COALESCE(read_at, ?)
+                    WHERE relationship_id = ?
+                      AND sender_user_id != ?
+                      AND read_at IS NULL
+                      AND id IN ({placeholders})
+                    """,
+                    (
+                        utc_now(),
+                        relationship_id,
+                        user_id,
+                        *returned_incoming_ids,
+                    ),
+                )
             connection.commit()
 
         self.send_json(
@@ -8957,6 +9131,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 WHERE id = ?
                   AND approval_status = 'approved'
                   AND user_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM users AS trainer_owners
+                    WHERE trainer_owners.id = trainers.user_id
+                      AND trainer_owners.account_status = 'active'
+                  )
                 """,
                 (trainer_id,),
             ).fetchone()
@@ -9574,10 +9754,18 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   joined_at,
                   rating,
                   review_count,
-                  gallery_image_data_json,
+                  CASE
+                    WHEN json_valid(gallery_image_data_json)
+                      THEN MIN(json_array_length(gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS gallery_image_count,
                   image_updated_at,
-                  pending_image_data,
-                  pending_gallery_image_data_json,
+                  CASE WHEN length(trim(pending_image_data)) > 0 THEN 1 ELSE 0 END AS pending_image_present,
+                  CASE
+                    WHEN json_valid(pending_gallery_image_data_json)
+                      THEN MIN(json_array_length(pending_gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS pending_gallery_image_count,
                   media_review_status,
                   media_submitted_at,
                   CASE WHEN length(trim(image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
@@ -10050,10 +10238,18 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   trainers.joined_at,
                   trainers.rating,
                   trainers.review_count,
-                  trainers.gallery_image_data_json,
+                  CASE
+                    WHEN json_valid(trainers.gallery_image_data_json)
+                      THEN MIN(json_array_length(trainers.gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS gallery_image_count,
                   trainers.image_updated_at,
-                  trainers.pending_image_data,
-                  trainers.pending_gallery_image_data_json,
+                  CASE WHEN length(trim(trainers.pending_image_data)) > 0 THEN 1 ELSE 0 END AS pending_image_present,
+                  CASE
+                    WHEN json_valid(trainers.pending_gallery_image_data_json)
+                      THEN MIN(json_array_length(trainers.pending_gallery_image_data_json), 5)
+                    ELSE 0
+                  END AS pending_gallery_image_count,
                   trainers.media_review_status,
                   trainers.media_submitted_at,
                   CASE WHEN length(trim(trainers.image_data)) > 0 THEN 1 ELSE 0 END AS image_present,
@@ -10750,6 +10946,19 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if not all([name, location, format_value, level, rate, email, experience, availability, bio]):
             self.send_json({"error": "Please complete every trainer field before saving."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            validate_trainer_profile_text_fields(
+                name=name,
+                location=location,
+                rate=rate,
+                experience=experience,
+                availability=availability,
+                bio=bio,
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
             return
 
         if format_value not in {"private", "group", "clinic", "virtual"}:
@@ -11730,6 +11939,19 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 f"{level} players and start receiving direct intro requests."
             )
 
+        try:
+            validate_trainer_profile_text_fields(
+                name=name,
+                location=location,
+                rate=rate,
+                experience=experience,
+                availability=availability,
+                bio=bio,
+            )
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         with closing(connect_db()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -11785,15 +12007,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 ),
             )
             connection.commit()
-            row = connection.execute(
-                "SELECT * FROM trainers WHERE id = ?",
-                (cursor.lastrowid,),
-            ).fetchone()
+            trainer_id = int(cursor.lastrowid)
 
         self.send_json(
             {
                 "ok": True,
-                "item": serialize_owner_trainer_row(row),
+                "item": ElevenZeroHandler.fetch_trainer_by_id(
+                    self, trainer_id, user
+                ),
                 "message": "Trainer profile submitted for Eleven Zero PB review.",
             },
             status=HTTPStatus.CREATED,
@@ -11878,15 +12099,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     ),
                 )
             connection.commit()
-            updated = connection.execute(
-                "SELECT * FROM trainers WHERE id = ?",
-                (trainer_id,),
-            ).fetchone()
 
         self.send_json(
             {
                 "ok": True,
-                "item": serialize_owner_trainer_row(updated),
+                "item": ElevenZeroHandler.fetch_trainer_by_id(
+                    self, trainer_id, user
+                ),
                 "message": (
                     "Trainer photos submitted for review. Approved photos stay "
                     "live until the new set is approved."
@@ -12036,31 +12255,108 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         )
 
     def handle_create_review(self, user: dict, body: dict):
-        trainer_id = int(body.get("trainerId") or 0)
-        rating = int(body.get("rating") or 0)
+        try:
+            trainer_id = int(body.get("trainerId") or 0)
+            rating = int(body.get("rating") or 0)
+        except (TypeError, ValueError):
+            trainer_id = 0
+            rating = 0
         comment = str(body.get("comment", "")).strip()
 
-        if trainer_id <= 0 or rating not in {1, 2, 3, 4, 5} or len(comment) < 12:
+        if (
+            trainer_id <= 0
+            or rating not in {1, 2, 3, 4, 5}
+            or len(comment) < 12
+        ):
             self.send_json(
                 {"error": "Please choose a trainer, set a rating, and write a short review."},
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
+        if len(comment) > TRAINER_REVIEW_COMMENT_MAX_LENGTH or any(
+            ord(character) < 32 and character not in "\n\r\t"
+            for character in comment
+        ):
+            self.send_json(
+                {
+                    "error": (
+                        "Trainer review must be under "
+                        f"{TRAINER_REVIEW_COMMENT_MAX_LENGTH:,} characters."
+                    )
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
 
         with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             trainer = connection.execute(
-                "SELECT id, name, rating, review_count, approval_status FROM trainers WHERE id = ?",
+                """
+                SELECT
+                  trainers.id,
+                  trainers.user_id,
+                  trainers.name,
+                  trainers.approval_status,
+                  owners.account_status AS owner_account_status
+                FROM trainers
+                LEFT JOIN users AS owners ON owners.id = trainers.user_id
+                WHERE trainers.id = ?
+                """,
                 (trainer_id,),
             ).fetchone()
 
             if not trainer:
+                connection.rollback()
                 self.send_json({"error": "Trainer not found."}, status=HTTPStatus.NOT_FOUND)
                 return
 
-            if trainer["approval_status"] != "approved":
+            if (
+                trainer["approval_status"] != "approved"
+                or trainer["owner_account_status"] != "active"
+            ):
+                connection.rollback()
                 self.send_json(
                     {"error": "That trainer profile is still under review."},
                     status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            if int(trainer["user_id"] or 0) == int(user["id"]):
+                connection.rollback()
+                self.send_json(
+                    {"error": "You cannot review your own trainer profile."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            eligible_relationship = connection.execute(
+                """
+                SELECT relationships.id
+                FROM trainer_client_relationships AS relationships
+                WHERE relationships.trainer_id = ?
+                  AND relationships.client_user_id = ?
+                  AND relationships.status = 'active'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM trainer_lessons AS lessons
+                    WHERE lessons.relationship_id = relationships.id
+                      AND lessons.status = 'confirmed'
+                      AND lessons.ends_at <= ?
+                  )
+                LIMIT 1
+                """,
+                (trainer_id, int(user["id"]), utc_now()),
+            ).fetchone()
+            if not eligible_relationship:
+                connection.rollback()
+                self.send_json(
+                    {
+                        "error": (
+                            "You can review this trainer after an accepted client "
+                            "request and a completed confirmed class."
+                        )
+                    },
+                    status=HTTPStatus.FORBIDDEN,
                 )
                 return
 
@@ -12069,35 +12365,51 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 (trainer_id, user["id"]),
             ).fetchone()
             if existing_review:
+                connection.rollback()
                 self.send_json(
                     {"error": "You already reviewed this trainer."},
                     status=HTTPStatus.CONFLICT,
                 )
                 return
 
-            new_review_count = trainer["review_count"] + 1
-            new_rating = round(
-                ((trainer["rating"] * trainer["review_count"]) + rating) / new_review_count, 1
-            )
-
-            connection.execute(
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO trainer_reviews (
+                      trainer_id, user_id, reviewer_name, rating, comment, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        trainer_id,
+                        user["id"],
+                        user["name"],
+                        rating,
+                        comment,
+                        utc_now(),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                connection.rollback()
+                self.send_json(
+                    {"error": "You already reviewed this trainer."},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            aggregate = connection.execute(
                 """
-                INSERT INTO trainer_reviews (
-                  trainer_id, user_id, reviewer_name, rating, comment, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                SELECT COUNT(*) AS review_count, COALESCE(AVG(rating), 0) AS rating
+                FROM trainer_reviews
+                WHERE trainer_id = ?
                 """,
-                (
-                    trainer_id,
-                    user["id"],
-                    user["name"],
-                    rating,
-                    comment,
-                    utc_now(),
-                ),
-            )
+                (trainer_id,),
+            ).fetchone()
             connection.execute(
                 "UPDATE trainers SET rating = ?, review_count = ? WHERE id = ?",
-                (new_rating, new_review_count, trainer_id),
+                (
+                    round(float(aggregate["rating"] or 0), 2),
+                    int(aggregate["review_count"] or 0),
+                    trainer_id,
+                ),
             )
             connection.commit()
 

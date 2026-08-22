@@ -101,6 +101,63 @@ class MarketplaceSafetyTests(unittest.TestCase):
         payload.update(overrides)
         return payload
 
+    def create_trainer_profile(
+        self,
+        owner_id,
+        *,
+        name="Coach Taylor",
+        approval="approved",
+        image_data="",
+        gallery_images=None,
+    ):
+        with sqlite3.connect(app.DB_PATH) as connection:
+            trainer_id = connection.execute(
+                """
+                INSERT INTO trainers (
+                  user_id, name, location, format, level, rate, email,
+                  experience, bio, availability, joined_at, image_data,
+                  gallery_image_data_json, image_updated_at, approval_status
+                ) VALUES (?, ?, 'Arlington, VA', 'private', 'intermediate',
+                  '$80/hr', 'coach@example.com', 'Six years',
+                  'Private coaching profile', 'Weekends', '2026-07-20',
+                  ?, ?, '2026-07-20T12:00:00Z', ?)
+                """,
+                (
+                    owner_id,
+                    name,
+                    image_data,
+                    json.dumps(gallery_images or []),
+                    approval,
+                ),
+            ).lastrowid
+            connection.commit()
+        return trainer_id
+
+    def create_trainer_relationship(
+        self, trainer_id, client_user_id, *, status="active"
+    ):
+        now = "2026-07-20T12:00:00Z"
+        with sqlite3.connect(app.DB_PATH) as connection:
+            relationship_id = connection.execute(
+                """
+                INSERT INTO trainer_client_relationships (
+                  trainer_id, client_user_id, status, requested_at,
+                  responded_at, started_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trainer_id,
+                    client_user_id,
+                    status,
+                    now,
+                    now if status != "pending" else None,
+                    now if status == "active" else None,
+                    now,
+                ),
+            ).lastrowid
+            connection.commit()
+        return relationship_id
+
     def test_public_catalog_only_returns_approved_real_seller_listings(self):
         seller_id = self.create_user()
         visible_id = self.create_listing(seller_id, "Visible")
@@ -1461,6 +1518,349 @@ class MarketplaceSafetyTests(unittest.TestCase):
             handler.build_trainer_hub(client_user_id)["lessons"][0]["status"],
             "confirmed",
         )
+
+    def test_initial_conversation_returns_newest_200_and_marks_only_them_read(self):
+        trainer_user_id = self.create_user("coach-messages@example.com")
+        client_user_id = self.create_user("client-messages@example.com")
+        trainer_id = self.create_trainer_profile(trainer_user_id)
+        relationship_id = self.create_trainer_relationship(
+            trainer_id, client_user_id
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            for index in range(1, 206):
+                connection.execute(
+                    """
+                    INSERT INTO trainer_messages (
+                      relationship_id, sender_user_id, body, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        relationship_id,
+                        client_user_id,
+                        f"Message {index:03d}",
+                        f"2026-07-20T12:{index % 60:02d}:00Z",
+                    ),
+                )
+            connection.commit()
+
+        handler = object.__new__(app.ElevenZeroHandler)
+        captured = {}
+        handler.send_json = lambda payload, status=200, **_kwargs: captured.update(
+            payload=payload, status=status
+        )
+        handler.handle_trainer_relationship_detail(
+            {"id": trainer_user_id}, relationship_id
+        )
+
+        messages = captured["payload"]["messages"]
+        self.assertEqual(len(messages), 200)
+        self.assertEqual(messages[0]["body"], "Message 006")
+        self.assertEqual(messages[-1]["body"], "Message 205")
+        self.assertEqual(
+            [item["id"] for item in messages],
+            sorted(item["id"] for item in messages),
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            unread_ids = [
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT id FROM trainer_messages
+                    WHERE relationship_id = ? AND read_at IS NULL
+                    ORDER BY id
+                    """,
+                    (relationship_id,),
+                ).fetchall()
+            ]
+            last_seen_id = connection.execute(
+                "SELECT MAX(id) FROM trainer_messages WHERE relationship_id = ?",
+                (relationship_id,),
+            ).fetchone()[0]
+            for index in range(206, 209):
+                connection.execute(
+                    """
+                    INSERT INTO trainer_messages (
+                      relationship_id, sender_user_id, body, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        relationship_id,
+                        client_user_id,
+                        f"Message {index:03d}",
+                        "2026-07-20T13:00:00Z",
+                    ),
+                )
+            connection.commit()
+
+        self.assertEqual(len(unread_ids), 5)
+        handler.handle_trainer_relationship_detail(
+            {"id": trainer_user_id}, relationship_id, after_id=last_seen_id
+        )
+        self.assertEqual(
+            [item["body"] for item in captured["payload"]["messages"]],
+            ["Message 206", "Message 207", "Message 208"],
+        )
+        self.assertEqual(
+            handler.build_trainer_hub(trainer_user_id)["unreadCount"], 5
+        )
+
+    def test_suspended_trainer_owner_is_hidden_but_owner_and_admin_keep_access(self):
+        owner_id = self.create_user("suspended-coach@example.com")
+        client_id = self.create_user("suspended-client@example.com")
+        image_data = self.trainer_image_data()
+        trainer_id = self.create_trainer_profile(
+            owner_id,
+            image_data=image_data,
+            gallery_images=[image_data],
+        )
+        handler = object.__new__(app.ElevenZeroHandler)
+        self.assertEqual(len(handler.fetch_trainers()), 1)
+        self.assertIsNotNone(handler.fetch_trainer_by_id(trainer_id))
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE users SET account_status = 'suspended' WHERE id = ?",
+                (owner_id,),
+            )
+            connection.commit()
+
+        self.assertEqual(handler.fetch_trainers(), [])
+        self.assertIsNone(handler.fetch_trainer_by_id(trainer_id))
+        self.assertIsNotNone(
+            handler.fetch_trainer_by_id(
+                trainer_id, {"id": owner_id, "isAdmin": False}
+            )
+        )
+        self.assertIsNotNone(
+            handler.fetch_trainer_by_id(
+                trainer_id, {"id": 999, "isAdmin": True}
+            )
+        )
+
+        captured = {}
+        handler.send_json = lambda payload, status=200, **_kwargs: captured.update(
+            payload=payload, status=status
+        )
+        handler.send_bytes = lambda payload, mime_type, **kwargs: captured.update(
+            payload=payload, mime_type=mime_type, status=200, kwargs=kwargs
+        )
+        handler.handle_trainer_image(trainer_id, None)
+        self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+        handler.handle_trainer_image(
+            trainer_id, {"id": owner_id, "isAdmin": False}
+        )
+        self.assertEqual(captured["status"], 200)
+        self.assertEqual(captured["mime_type"], "image/png")
+
+        handler.handle_create_trainer_client_request(
+            {"id": client_id, "name": "Client", "email": "client@example.com"},
+            {"trainerId": trainer_id, "introMessage": "I would like a lesson."},
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+
+    def test_trainer_reviews_require_completed_client_lesson_and_block_self_review(self):
+        owner_id = self.create_user("review-coach@example.com")
+        client_id = self.create_user("review-client@example.com")
+        stranger_id = self.create_user("review-stranger@example.com")
+        trainer_id = self.create_trainer_profile(owner_id)
+        handler = object.__new__(app.ElevenZeroHandler)
+        captured = {}
+        handler.send_json = lambda payload, status=200, **_kwargs: captured.update(
+            payload=payload, status=status
+        )
+        review_body = {
+            "trainerId": trainer_id,
+            "rating": 5,
+            "comment": "Clear instruction and a very helpful lesson.",
+        }
+
+        handler.handle_create_review(
+            {"id": owner_id, "name": "Coach Taylor"}, review_body
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("own", captured["payload"]["error"])
+
+        handler.handle_create_review(
+            {"id": stranger_id, "name": "Stranger"}, review_body
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.FORBIDDEN)
+
+        relationship_id = self.create_trainer_relationship(trainer_id, client_id)
+        handler.handle_create_review(
+            {"id": client_id, "name": "Player Jordan"}, review_body
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.FORBIDDEN)
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            lesson_id = connection.execute(
+                """
+                INSERT INTO trainer_lessons (
+                  relationship_id, proposed_by_user_id, starts_at, ends_at,
+                  duration_minutes, timezone, location, status,
+                  confirmed_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 60, 'America/New_York', 'Quincy Park',
+                  'confirmed', ?, ?, ?)
+                """,
+                (
+                    relationship_id,
+                    client_id,
+                    (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    (now + timedelta(days=1, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    app.utc_now(),
+                    app.utc_now(),
+                    app.utc_now(),
+                ),
+            ).lastrowid
+            connection.commit()
+
+        handler.handle_create_review(
+            {"id": client_id, "name": "Player Jordan"}, review_body
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.FORBIDDEN)
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE trainer_lessons
+                SET starts_at = ?, ends_at = ?
+                WHERE id = ?
+                """,
+                (
+                    (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    lesson_id,
+                ),
+            )
+            connection.commit()
+
+        handler.handle_create_review(
+            {"id": client_id, "name": "Player Jordan"}, review_body
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            rating, review_count = connection.execute(
+                "SELECT rating, review_count FROM trainers WHERE id = ?",
+                (trainer_id,),
+            ).fetchone()
+        self.assertEqual(review_count, 1)
+        self.assertEqual(rating, 5)
+
+        handler.handle_create_review(
+            {"id": client_id, "name": "Player Jordan"}, review_body
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        handler.handle_create_review(
+            {"id": client_id, "name": "Player Jordan"},
+            {**review_body, "comment": "x" * (app.TRAINER_REVIEW_COMMENT_MAX_LENGTH + 1)},
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+
+    def test_trainer_review_migration_deduplicates_and_enforces_uniqueness(self):
+        owner_id = self.create_user("migration-coach@example.com")
+        reviewer_id = self.create_user("migration-client@example.com")
+        trainer_id = self.create_trainer_profile(owner_id)
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute("DROP INDEX idx_trainer_reviews_user_trainer")
+            connection.execute(
+                """
+                INSERT INTO trainer_reviews (
+                  trainer_id, user_id, reviewer_name, rating, comment, created_at
+                ) VALUES (?, ?, 'Player', 1, 'Old duplicate review.', '2026-07-01T00:00:00Z')
+                """,
+                (trainer_id, reviewer_id),
+            )
+            newest_id = connection.execute(
+                """
+                INSERT INTO trainer_reviews (
+                  trainer_id, user_id, reviewer_name, rating, comment, created_at
+                ) VALUES (?, ?, 'Player', 5, 'Newest review should remain.', '2026-07-02T00:00:00Z')
+                """,
+                (trainer_id, reviewer_id),
+            ).lastrowid
+            connection.execute(
+                "UPDATE trainers SET rating = 3, review_count = 2 WHERE id = ?",
+                (trainer_id,),
+            )
+            connection.commit()
+
+        app.init_database()
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            reviews = connection.execute(
+                "SELECT id, rating FROM trainer_reviews WHERE trainer_id = ?",
+                (trainer_id,),
+            ).fetchall()
+            aggregate = connection.execute(
+                "SELECT rating, review_count FROM trainers WHERE id = ?",
+                (trainer_id,),
+            ).fetchone()
+            self.assertEqual(reviews, [(newest_id, 5)])
+            self.assertEqual(aggregate, (5.0, 1))
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO trainer_reviews (
+                      trainer_id, user_id, reviewer_name, rating, comment, created_at
+                    ) VALUES (?, ?, 'Player', 4, 'Another review.', '2026-07-03T00:00:00Z')
+                    """,
+                    (trainer_id, reviewer_id),
+                )
+
+    def test_trainer_profile_text_caps_and_summary_queries_do_not_load_gallery_blobs(self):
+        owner_id = self.create_user("trainer-caps@example.com")
+        handler = object.__new__(app.ElevenZeroHandler)
+        captured = {}
+        handler.send_json = lambda payload, status=200, **_kwargs: captured.update(
+            payload=payload, status=status
+        )
+        handler.handle_create_trainer(
+            {"id": owner_id, "email": "trainer-caps@example.com"},
+            self.trainer_payload(
+                name="x" * (app.TRAINER_NAME_MAX_LENGTH + 1)
+            ),
+        )
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("Trainer name", captured["payload"]["error"])
+
+        image_data = self.trainer_image_data()
+        trainer_id = self.create_trainer_profile(
+            owner_id,
+            image_data=image_data,
+            gallery_images=[image_data, image_data],
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE trainers
+                SET pending_image_data = ?,
+                    pending_gallery_image_data_json = ?,
+                    media_review_status = 'pending',
+                    media_submitted_at = '2026-07-21T00:00:00Z'
+                WHERE id = ?
+                """,
+                (image_data, json.dumps([image_data]), trainer_id),
+            )
+            connection.commit()
+
+        original_serializer = app.serialize_trainer_row
+        seen_row_keys = set()
+
+        def inspect_summary_row(row):
+            seen_row_keys.update(row.keys())
+            return original_serializer(row)
+
+        app.serialize_trainer_row = inspect_summary_row
+        try:
+            items = handler.fetch_trainers()
+        finally:
+            app.serialize_trainer_row = original_serializer
+
+        self.assertEqual(len(items[0]["galleryImageUrls"]), 2)
+        self.assertIn("gallery_image_count", seen_row_keys)
+        self.assertNotIn("gallery_image_data_json", seen_row_keys)
+        self.assertNotIn("pending_image_data", seen_row_keys)
+        self.assertNotIn("pending_gallery_image_data_json", seen_row_keys)
 
     def test_production_startup_quarantines_anonymous_content(self):
         anonymous_listing_id = self.create_listing(None, "Anonymous")

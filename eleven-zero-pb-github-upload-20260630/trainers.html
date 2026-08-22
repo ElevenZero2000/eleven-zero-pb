@@ -8,7 +8,7 @@
       name="description"
       content="Find pickleball trainers, leave reviews, and join the Eleven Zero PB coaching network."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260728trainerprofile1" />
+    <link rel="stylesheet" href="./styles.css?v=20260820trainerclient1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="trainers-page" data-nav="trainers">
@@ -166,7 +166,10 @@
                   <textarea
                     name="comment"
                     rows="4"
+                    minlength="12"
+                    maxlength="2000"
                     placeholder="What should other players know?"
+                    required
                   ></textarea>
                 </label>
                 <button class="button button-dark" type="submit">Publish review</button>
@@ -200,8 +203,8 @@
               <form class="seller-form" data-trainer-join-form>
                 <div class="trainer-photo-field">
                   <div class="trainer-photo-field-head">
-                    <strong>Trainer photo</strong>
-                    <span>Required · landscape</span>
+                    <strong>Cover photo</strong>
+                    <span>Required · shown first</span>
                   </div>
                   <button
                     class="trainer-photo-dropzone"
@@ -212,7 +215,7 @@
                   >
                     <span class="trainer-photo-add-icon" aria-hidden="true">+</span>
                     <span>
-                      <strong>Add photo</strong>
+                      <strong>Add cover photo</strong>
                       <small>Tap or drag here</small>
                     </span>
                   </button>
@@ -222,7 +225,7 @@
                     type="file"
                     accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                     data-trainer-photo-input
-                    aria-label="Choose one landscape trainer photo"
+                    aria-label="Choose one landscape trainer cover photo"
                   />
                   <div class="trainer-photo-preview" data-trainer-photo-preview hidden>
                     <img data-trainer-photo-preview-image alt="Trainer photo preview" />
@@ -237,16 +240,57 @@
                     data-trainer-photo-status
                     aria-live="polite"
                   >
-                    JPG, PNG or WebP · 10 MB max
+                    JPG, PNG or WebP · landscape works best
+                  </p>
+                </div>
+                <div class="trainer-gallery-field">
+                  <div class="trainer-photo-field-head">
+                    <strong>More photos</strong>
+                    <span>Optional · up to 5</span>
+                  </div>
+                  <button
+                    class="trainer-gallery-dropzone"
+                    type="button"
+                    data-trainer-gallery-dropzone
+                    aria-controls="trainer-gallery-input"
+                    aria-describedby="trainer-gallery-status"
+                  >
+                    <span class="trainer-photo-add-icon" aria-hidden="true">+</span>
+                    <span>
+                      <strong>Add gallery photos</strong>
+                      <small>Show lessons, courts, and your coaching style</small>
+                    </span>
+                  </button>
+                  <input
+                    class="trainer-photo-native-input"
+                    id="trainer-gallery-input"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    multiple
+                    data-trainer-gallery-input
+                    aria-label="Choose up to five additional trainer photos"
+                  />
+                  <div
+                    class="trainer-gallery-preview-grid"
+                    data-trainer-gallery-preview
+                    aria-label="Additional trainer photos"
+                  ></div>
+                  <p
+                    class="trainer-photo-status"
+                    id="trainer-gallery-status"
+                    data-trainer-gallery-status
+                    aria-live="polite"
+                  >
+                    Add up to five JPG, PNG, or WebP photos.
                   </p>
                 </div>
                 <label>
                   Trainer name
-                  <input type="text" name="name" placeholder="Ex: Maria Alvarez" />
+                  <input type="text" name="name" maxlength="100" placeholder="Ex: Maria Alvarez" required />
                 </label>
                 <label>
                   Home city
-                  <input type="text" name="location" placeholder="Ex: Miami, FL" />
+                  <input type="text" name="location" maxlength="160" placeholder="Ex: Miami, FL" required />
                 </label>
                 <label>
                   Main lesson type
@@ -267,11 +311,11 @@
                 </label>
                 <label>
                   Starting rate
-                  <input type="text" name="rate" placeholder="$85/hr" />
+                  <input type="text" name="rate" maxlength="80" placeholder="$85/hr" required />
                 </label>
                 <label>
                   Contact email
-                  <input type="email" name="email" placeholder="coach@example.com" />
+                  <input type="email" name="email" placeholder="coach@example.com" required />
                 </label>
                 <fieldset class="trainer-certification-fieldset">
                   <legend>
@@ -303,6 +347,7 @@
                         type="text"
                         name="certificationOrgOther"
                         data-certification-org-other
+                        maxlength="120"
                         placeholder="Enter the organization"
                         disabled
                       />
@@ -312,19 +357,21 @@
                       <input
                         type="text"
                         name="certificationName"
+                        maxlength="120"
                         placeholder="Ex: Level 1 Coach"
                         required
                       />
                     </label>
                     <label>
                       Credential ID <span class="trainer-field-optional">Optional</span>
-                      <input type="text" name="certificationId" autocomplete="off" />
+                      <input type="text" name="certificationId" maxlength="120" autocomplete="off" />
                     </label>
                     <label>
                       Public verification URL <span class="trainer-field-optional">Optional</span>
                       <input
                         type="url"
                         name="certificationUrl"
+                        maxlength="500"
                         placeholder="https://"
                         inputmode="url"
                         autocomplete="url"
@@ -372,7 +419,7 @@
     </div>
 
     <script src="./app.js?v=20260722audit1"></script>
-    <script src="./trainers.js?v=20260728trainerprofile1"></script>
+    <script src="./trainers.js?v=20260820trainerclient1"></script>
     <script src="./header-tweaks.js?v=20260722audit1"></script>
   </body>
 </html>
