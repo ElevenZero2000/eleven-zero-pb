@@ -8,7 +8,14 @@
       name="description"
       content="Search, compare, buy, and sell pickleball paddles with reviewed listings, real photos, and shipping shown at checkout on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722audit2" />
+    <link
+      rel="preload"
+      as="image"
+      href="./assets/home-marketplace-hero.jpg"
+      imagesrcset="./assets/home-marketplace-hero-800.jpg 800w, ./assets/home-marketplace-hero.jpg 1600w"
+      imagesizes="(max-width: 760px) 100vw, 48vw"
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260916homephotos1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="home-simple-page" data-nav="home">
@@ -57,9 +64,14 @@
 
           <figure class="home-simple-photo reveal">
             <img
-              src="https://images.pexels.com/photos/30864598/pexels-photo-30864598.jpeg?auto=compress&amp;cs=tinysrgb&amp;w=1800"
-              alt="Pickleball player holding a paddle on an outdoor court"
+              src="./assets/home-marketplace-hero.jpg"
+              srcset="./assets/home-marketplace-hero-800.jpg 800w, ./assets/home-marketplace-hero.jpg 1600w"
+              sizes="(max-width: 760px) 100vw, 48vw"
+              width="1600"
+              height="900"
+              alt="Two pickleball players comparing paddles beside an outdoor court"
               fetchpriority="high"
+              decoding="async"
             />
             <figcaption>
               <span>Made for players</span>
@@ -114,11 +126,31 @@
 
           <div class="home-simple-more-links reveal">
             <a href="./shop.html">
+              <img
+                src="./assets/home-paddle-inspection.jpg"
+                srcset="./assets/home-paddle-inspection-700.jpg 700w, ./assets/home-paddle-inspection.jpg 1400w"
+                sizes="(max-width: 760px) 100vw, 45vw"
+                width="1400"
+                height="933"
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
               <span>Search and compare</span>
               <strong>Filter the shop and open every listing</strong>
               <b aria-hidden="true">→</b>
             </a>
             <a href="./sell.html">
+              <img
+                src="./assets/home-seller-listing.jpg"
+                srcset="./assets/home-seller-listing-700.jpg 700w, ./assets/home-seller-listing.jpg 1400w"
+                sizes="(max-width: 760px) 100vw, 45vw"
+                width="1400"
+                height="933"
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
               <span>Sell with confidence</span>
               <strong>Create a detailed listing for review</strong>
               <b aria-hidden="true">→</b>

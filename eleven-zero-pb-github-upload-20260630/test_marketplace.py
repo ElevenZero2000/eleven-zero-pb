@@ -61,7 +61,10 @@ class MarketplaceSafetyTests(unittest.TestCase):
                 (
                     user_id,
                     model,
-                    json.dumps(["data:image/png;base64,aGVsbG8="]),
+                    json.dumps([
+                        "data:image/png;base64,"
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z4X0AAAAASUVORK5CYII="
+                    ]),
                     approval,
                     sale_status,
                 ),
@@ -171,6 +174,48 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(items[0]["seller_name"], "Real Seller")
         self.assertEqual(items[0]["images"], [f"/api/listings/{visible_id}/images/0"])
 
+    def test_suspended_seller_listing_is_not_public_or_purchasable(self):
+        seller_id = self.create_user("suspended-seller@example.com")
+        listing_id = self.create_listing(seller_id, "Paused Seller Paddle")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                "UPDATE users SET account_status = 'suspended' WHERE id = ?",
+                (seller_id,),
+            )
+            connection.commit()
+
+        self.assertEqual(app.ElevenZeroHandler.fetch_listings(None), [])
+        self.assertIsNone(
+            app.ElevenZeroHandler.fetch_listing_by_id(None, listing_id, None)
+        )
+
+        owner_item = app.ElevenZeroHandler.fetch_listing_by_id(
+            None,
+            listing_id,
+            {"id": seller_id, "isAdmin": False},
+        )
+        self.assertIsNotNone(owner_item)
+        self.assertFalse(owner_item["checkout_available"])
+
+    def test_listing_photo_upload_rejects_svg_and_fake_jpeg(self):
+        svg = base64.b64encode(b"<svg xmlns='http://www.w3.org/2000/svg'></svg>").decode("ascii")
+        fake_jpeg = base64.b64encode(b"\xff\xd8\xffnot-a-real-photo").decode("ascii")
+
+        self.assertEqual(
+            app.normalize_listing_image_payload(
+                [f"data:image/svg+xml;base64,{svg}"],
+                process_uploads=True,
+            ),
+            [],
+        )
+        self.assertEqual(
+            app.normalize_listing_image_payload(
+                [f"data:image/jpeg;base64,{fake_jpeg}"],
+                process_uploads=True,
+            ),
+            [],
+        )
+
     def test_admin_live_paddle_count_excludes_sold_listings(self):
         seller_id = self.create_user()
         self.create_listing(seller_id, "Available")
@@ -182,6 +227,99 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(dashboard["stats"]["listingApproved"], 1)
         self.assertEqual(dashboard["stats"]["listingPending"], 1)
         self.assertEqual(len(dashboard["listings"]), 3)
+
+    def test_admin_cannot_make_paid_listing_available_again(self):
+        seller_id = self.create_user("admin-sale-guard-seller@example.com")
+        buyer_id = self.create_user("admin-sale-guard-buyer@example.com")
+        listing_id = self.create_listing(
+            seller_id,
+            "Paid Listing",
+            sale_status="pending",
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                INSERT INTO orders (
+                  listing_id, buyer_user_id, seller_user_id,
+                  stripe_checkout_session_id, amount_total_cents,
+                  shipping_amount_cents, platform_fee_cents,
+                  stripe_payment_status, stripe_session_status, status, created_at
+                ) VALUES (?, ?, ?, 'cs_test_admin_sale_guard', 16000, 1000, 1275,
+                  'paid', 'complete', 'paid', '2026-07-22T00:00:00Z')
+                """,
+                (listing_id, buyer_id, seller_id),
+            )
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_admin_listing_sale_status(
+            StubHandler(),
+            {"id": listing_id, "status": "available"},
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertIn("paid or processing order", captured["payload"]["error"])
+        with sqlite3.connect(app.DB_PATH) as connection:
+            sale_status = connection.execute(
+                "SELECT sale_status FROM listings WHERE id = ?",
+                (listing_id,),
+            ).fetchone()[0]
+        self.assertEqual(sale_status, "pending")
+
+    def test_admin_cannot_delete_listing_with_paid_order(self):
+        seller_id = self.create_user("admin-delete-guard-seller@example.com")
+        buyer_id = self.create_user("admin-delete-guard-buyer@example.com")
+        listing_id = self.create_listing(
+            seller_id,
+            "Fulfillment Listing",
+            sale_status="pending",
+        )
+        with sqlite3.connect(app.DB_PATH) as connection:
+            order_id = connection.execute(
+                """
+                INSERT INTO orders (
+                  listing_id, buyer_user_id, seller_user_id,
+                  stripe_checkout_session_id, amount_total_cents,
+                  shipping_amount_cents, platform_fee_cents,
+                  stripe_payment_status, stripe_session_status, status, created_at
+                ) VALUES (?, ?, ?, 'cs_test_admin_delete_guard', 16000, 1000, 1275,
+                  'paid', 'complete', 'paid', '2026-07-22T00:00:00Z')
+                """,
+                (listing_id, buyer_id, seller_id),
+            ).lastrowid
+            connection.commit()
+
+        captured = {}
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_admin_listing_delete(
+            StubHandler(),
+            {"id": listing_id},
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.CONFLICT)
+        self.assertIn("shipping and fulfillment", captured["payload"]["error"])
+        with sqlite3.connect(app.DB_PATH) as connection:
+            listing_exists = connection.execute(
+                "SELECT 1 FROM listings WHERE id = ?",
+                (listing_id,),
+            ).fetchone()
+            order_listing_id = connection.execute(
+                "SELECT listing_id FROM orders WHERE id = ?",
+                (order_id,),
+            ).fetchone()[0]
+        self.assertIsNotNone(listing_exists)
+        self.assertEqual(order_listing_id, listing_id)
 
     def test_seller_can_mark_only_own_paid_pending_listing_sold(self):
         seller_id = self.create_user("paid-seller@example.com")
@@ -1936,6 +2074,129 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual(app.resolve_paddle_color("black"), "Black")
         self.assertEqual(app.resolve_paddle_thickness("16.0"), "16")
 
+    def test_whole_dollar_parser_accepts_explicit_whole_dollar_values(self):
+        valid_values = (
+            (140, 140),
+            ("140", 140),
+            ("$140", 140),
+            ("1,000", 1_000),
+            ("$1,000", 1_000),
+        )
+
+        for raw_value, expected in valid_values:
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(
+                    app.parse_whole_dollar_amount(
+                        raw_value,
+                        maximum=app.MAX_MARKETPLACE_PRICE_USD,
+                    ),
+                    expected,
+                )
+
+    def test_whole_dollar_parser_rejects_ambiguous_or_excessive_values(self):
+        invalid_values = (
+            "140.50",
+            "$140.50",
+            "USD 140",
+            "140 dollars",
+            "1,00",
+            "-140",
+            140.5,
+            True,
+            "1,001",
+            "$1,001",
+        )
+
+        for raw_value in invalid_values:
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(
+                    app.parse_whole_dollar_amount(
+                        raw_value,
+                        maximum=app.MAX_MARKETPLACE_PRICE_USD,
+                    ),
+                    0,
+                )
+
+    def test_listing_submission_rejects_decimal_price_without_creating_listing(self):
+        captured = {}
+        seller_id = self.create_user()
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": seller_id},
+            {
+                "photoAttestation": "1",
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Black",
+                "thickness": "",
+                "category": "control",
+                "condition": "Excellent",
+                "price": "140.50",
+                "location": "Arlington, VA",
+                "shippingOriginZip": "22201",
+                "shippingOriginStreet1": "123 Test Street",
+                "images": [self.trainer_image_data(width=20, height=20)],
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "invalid_listing_price")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            listing_count = connection.execute(
+                "SELECT COUNT(*) FROM listings WHERE user_id = ?",
+                (seller_id,),
+            ).fetchone()[0]
+        self.assertEqual(listing_count, 0)
+
+    def test_admin_listing_update_rejects_decimal_price_without_mutating_listing(self):
+        captured = {}
+        seller_id = self.create_user()
+        listing_id = self.create_listing(seller_id, "Pro V Perseus")
+
+        class StubHandler:
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_admin_listing_update(
+            StubHandler(),
+            {
+                "id": listing_id,
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Black",
+                "thickness": "16",
+                "category": "control",
+                "condition": "Excellent",
+                "price": "140.50",
+                "location": "Arlington, VA",
+                "notes": "Clean paddle",
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "invalid_listing_price")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            stored_price = connection.execute(
+                "SELECT price_usd FROM listings WHERE id = ?",
+                (listing_id,),
+            ).fetchone()[0]
+        self.assertEqual(stored_price, 150)
+
     def test_listing_submission_rejects_invented_brand_and_model(self):
         captured = {}
 
@@ -2059,10 +2320,7 @@ class MarketplaceSafetyTests(unittest.TestCase):
                 "location": "Arlington, VA",
                 "shippingOriginZip": "22201",
                 "shippingOriginStreet1": "123 Test Street",
-                "images": [
-                    "data:image/png;base64,"
-                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z4X0AAAAASUVORK5CYII="
-                ],
+                "images": [self.trainer_image_data(width=20, height=20)],
             },
         )
 

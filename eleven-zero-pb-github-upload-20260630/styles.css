@@ -10731,12 +10731,33 @@ body.has-modal-open {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  min-height: 220px;
+  min-height: 300px;
   padding: 24px;
+  overflow: hidden;
+  isolation: isolate;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.08);
   transition: transform 180ms ease, background 180ms ease;
+}
+
+.home-simple-page .home-simple-more-links a::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(2, 24, 12, 0.03) 18%, rgba(2, 24, 12, 0.88) 100%);
+  pointer-events: none;
+}
+
+.home-simple-page .home-simple-more-links img {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .home-simple-page .home-simple-more-links a:hover {
@@ -10744,7 +10765,13 @@ body.has-modal-open {
   background: rgba(255, 255, 255, 0.13);
 }
 
+.home-simple-page .home-simple-more-links a:hover img {
+  transform: scale(1.035);
+}
+
 .home-simple-page .home-simple-more-links span {
+  position: relative;
+  z-index: 1;
   color: var(--acid);
   font-size: 0.73rem;
   font-weight: 900;
@@ -10753,6 +10780,8 @@ body.has-modal-open {
 }
 
 .home-simple-page .home-simple-more-links strong {
+  position: relative;
+  z-index: 1;
   max-width: 13ch;
   margin-top: 10px;
   font-size: 1.12rem;
@@ -10761,6 +10790,7 @@ body.has-modal-open {
 
 .home-simple-page .home-simple-more-links b {
   position: absolute;
+  z-index: 1;
   top: 20px;
   right: 20px;
   font-size: 1.45rem;
@@ -10925,7 +10955,7 @@ body.has-modal-open {
   }
 
   .home-simple-page .home-simple-more-links a {
-    min-height: 150px;
+    min-height: 230px;
   }
 
   .home-simple-page .home-simple-cta {

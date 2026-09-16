@@ -378,6 +378,112 @@ class ManagedShippingTests(unittest.TestCase):
         self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
         self.assertNotEqual(captured["payload"].get("code"), "seller_payouts_required")
 
+    def test_real_seller_profile_reads_ready_stripe_account(self):
+        with sqlite3.connect(app.DB_PATH) as connection:
+            seller_id = connection.execute(
+                """
+                INSERT INTO users (
+                  name, email, password_salt, password_hash, email_verified,
+                  created_at, stripe_account_id, stripe_details_submitted,
+                  stripe_charges_enabled, stripe_payouts_enabled,
+                  stripe_onboarding_complete, stripe_requirements_due_count
+                ) VALUES (
+                  'Ready Seller', 'ready-seller@example.com', 'salt', 'hash', 1,
+                  '2026-09-16T00:00:00Z', 'acct_ready', 1, 1, 1, 1, 0
+                )
+                """
+            ).lastrowid
+            connection.commit()
+
+        handler = object.__new__(app.ElevenZeroHandler)
+        seller_profile = handler.fetch_seller_profile(seller_id)["sellerProfile"]
+
+        self.assertEqual(seller_profile["connectedAccountId"], "acct_ready")
+        self.assertTrue(seller_profile["readyForPayouts"])
+
+    def test_shipping_quote_only_uses_public_available_active_listing(self):
+        base_listing = {
+            "id": 42,
+            "user_id": 7,
+            "approval_status": "approved",
+            "sale_status": "available",
+            "seller_account_status": "active",
+            "price_usd": 150,
+            "shipping_mode": "calculated",
+        }
+        shipping_address = {
+            "line1": "500 Market Street",
+            "city": "Philadelphia",
+            "state": "PA",
+            "postalCode": "19106",
+            "country": "US",
+        }
+        original_builder = app.build_shipping_quote_for_listing
+
+        try:
+            for field, value in (
+                ("approval_status", "pending"),
+                ("sale_status", "sold"),
+                ("seller_account_status", "suspended"),
+                ("user_id", None),
+            ):
+                captured = {}
+                listing = dict(base_listing)
+                listing[field] = value
+
+                class HiddenListingHandler:
+                    def fetch_listing_checkout_row(self, listing_id):
+                        self.requested_listing_id = listing_id
+                        return listing
+
+                    def send_json(self, payload, status=200, **_kwargs):
+                        captured["payload"] = payload
+                        captured["status"] = status
+
+                app.build_shipping_quote_for_listing = lambda *_args, **_kwargs: self.fail(
+                    "A hidden or unavailable listing must not request a carrier rate."
+                )
+                app.ElevenZeroHandler.handle_shipping_quote(
+                    HiddenListingHandler(),
+                    {"listingId": "42", "shippingAddress": shipping_address},
+                )
+                self.assertEqual(captured["status"], app.HTTPStatus.NOT_FOUND)
+                self.assertIn("not available", captured["payload"]["error"])
+
+            captured = {}
+
+            class PublicListingHandler:
+                def fetch_listing_checkout_row(self, listing_id):
+                    self.requested_listing_id = listing_id
+                    return dict(base_listing)
+
+                def send_json(self, payload, status=200, **_kwargs):
+                    captured["payload"] = payload
+                    captured["status"] = status
+
+            app.build_shipping_quote_for_listing = lambda *_args, **_kwargs: {
+                "amount_cents": 975,
+                "amount_usd": 9.75,
+                "estimated_total_cents": 15975,
+                "estimated_total_usd": 159.75,
+                "label": "USPS Ground Advantage",
+                "summary": "USPS Ground Advantage · 4 days",
+                "destination_summary": "Philadelphia, PA 19106",
+                "service_level": "Ground Advantage",
+                "rate_kind": "live",
+                "is_estimate": False,
+                "provider_label": "USPS",
+                "policy_label": "Live carrier rate",
+            }
+            app.ElevenZeroHandler.handle_shipping_quote(
+                PublicListingHandler(),
+                {"listingId": "42", "shippingAddress": shipping_address},
+            )
+            self.assertEqual(captured["status"], 200)
+            self.assertEqual(captured["payload"]["quote"]["amountCents"], 975)
+        finally:
+            app.build_shipping_quote_for_listing = original_builder
+
     def test_paid_order_immediately_marks_listing_sale_pending(self):
         listing_id = self.create_paid_order("cs_test_sale_pending")
 
@@ -399,6 +505,60 @@ class ManagedShippingTests(unittest.TestCase):
                 "SELECT sale_status FROM listings WHERE id = ?", (listing_id,)
             ).fetchone()[0]
         self.assertEqual(sale_status, "pending")
+
+    def test_database_startup_reopens_interrupted_email_claims(self):
+        self.create_paid_order("cs_test_email_claim_recovery")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET buyer_confirmation_status = 'sending',
+                    seller_sale_email_status = 'sending',
+                    seller_label_email_status = 'sending'
+                WHERE stripe_checkout_session_id = 'cs_test_email_claim_recovery'
+                """
+            )
+            connection.commit()
+
+        app.init_database()
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            statuses = connection.execute(
+                """
+                SELECT buyer_confirmation_status, seller_sale_email_status,
+                  seller_label_email_status
+                FROM orders
+                WHERE stripe_checkout_session_id = 'cs_test_email_claim_recovery'
+                """
+            ).fetchone()
+        self.assertEqual(statuses, ("error", "error", "error"))
+
+    def test_database_startup_flags_interrupted_label_purchase_for_manual_review(self):
+        self.create_paid_order("cs_test_label_claim_recovery")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE orders
+                SET shipping_status = 'purchasing',
+                    shipping_error = ''
+                WHERE stripe_checkout_session_id = 'cs_test_label_claim_recovery'
+                """
+            )
+            connection.commit()
+
+        app.init_database()
+
+        with sqlite3.connect(app.DB_PATH) as connection:
+            shipping_status, shipping_error = connection.execute(
+                """
+                SELECT shipping_status, shipping_error
+                FROM orders
+                WHERE stripe_checkout_session_id = 'cs_test_label_claim_recovery'
+                """
+            ).fetchone()
+        self.assertEqual(shipping_status, "attention_needed")
+        self.assertIn("Check Shippo", shipping_error)
+        self.assertIn("duplicate label", shipping_error)
 
     def test_failed_label_can_refresh_rate_and_retry_safely(self):
         self.create_paid_order("cs_test_shipping_retry")
@@ -780,6 +940,14 @@ class ManagedShippingTests(unittest.TestCase):
 
         def fake_stripe(method, path, data=None):
             captured.setdefault("stripeCalls", []).append((method, path, data or {}))
+            if method == "GET" and path == "/accounts/acct_ready":
+                return {
+                    "id": "acct_ready",
+                    "details_submitted": True,
+                    "charges_enabled": True,
+                    "payouts_enabled": True,
+                    "requirements": {"currently_due": []},
+                }
             return {
                 "id": "cs_test_address_reservation",
                 "url": "https://checkout.stripe.test/session",
@@ -790,6 +958,9 @@ class ManagedShippingTests(unittest.TestCase):
         class StubHandler:
             def fetch_listing_checkout_row(self, requested_id):
                 return app.ElevenZeroHandler.fetch_listing_checkout_row(self, requested_id)
+
+            def update_user_stripe_status(self, user_id, account):
+                return app.ElevenZeroHandler.update_user_stripe_status(self, user_id, account)
 
             def checkout_success_url(self):
                 return "https://11zeropb.com/success"
@@ -823,7 +994,11 @@ class ManagedShippingTests(unittest.TestCase):
             },
         )
 
-        stripe_payload = captured["stripeCalls"][0][2]
+        stripe_payload = next(
+            data
+            for method, path, data in captured["stripeCalls"]
+            if method == "POST" and path == "/checkout/sessions"
+        )
         self.assertEqual(captured["status"], app.HTTPStatus.CREATED)
         self.assertNotIn("shipping_address_collection[allowed_countries][0]", stripe_payload)
         self.assertEqual(

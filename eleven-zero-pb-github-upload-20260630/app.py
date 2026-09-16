@@ -203,6 +203,11 @@ DEFAULT_PADDLE_PACKAGE = {
     "height_in": 4.0,
 }
 
+# Paddle listings use whole-dollar prices. This ceiling is deliberately above
+# the shop's typical $250 filter suggestion so premium paddles remain valid,
+# while preventing accidental or unreasonable checkout amounts.
+MAX_MARKETPLACE_PRICE_USD = 1_000
+
 US_STATE_NAMES = {
     "AL": "Alabama",
     "AK": "Alaska",
@@ -317,6 +322,7 @@ US_STATE_REGION = {
 }
 ZIP_CODE_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
 MAX_API_JSON_BODY_BYTES = 26_000_000
+MAX_WEBHOOK_BODY_BYTES = 1_000_000
 
 
 def cache_control_for_path(path: str) -> str:
@@ -673,9 +679,20 @@ def parse_zip_code(value) -> str:
     return zip_code if ZIP_CODE_RE.fullmatch(zip_code) else ""
 
 
-def parse_whole_dollar_amount(raw_value) -> int:
-    digits = "".join(ch for ch in str(raw_value or "").strip() if ch.isdigit())
-    return int(digits) if digits else 0
+def parse_whole_dollar_amount(raw_value, *, maximum: int | None = None) -> int:
+    """Parse an explicitly formatted whole-dollar amount without guessing."""
+    if raw_value is None or isinstance(raw_value, bool):
+        return 0
+
+    raw = str(raw_value).strip()
+    if not re.fullmatch(r"\$?(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)", raw):
+        return 0
+
+    normalized = raw[1:] if raw.startswith("$") else raw
+    amount = int(normalized.replace(",", ""))
+    if maximum is not None and amount > maximum:
+        return 0
+    return amount
 
 
 def parse_shipping_weight_oz(raw_value) -> float | None:
@@ -3503,7 +3520,7 @@ def release_seller_transfer_for_order(
                     END,
                     payout_next_attempt_at = ?,
                     payout_error = ?
-                WHERE id = ?
+                WHERE orders.id = ?
                   AND payment_flow = 'separate_charge_transfer'
                   AND stripe_transfer_id = ''
                 """,
@@ -4653,6 +4670,52 @@ def init_database() -> None:
             """
         )
 
+        # A process can stop after claiming an email but before recording the
+        # send result. Re-open those claims on startup so the idempotent email
+        # functions can retry instead of leaving a paid order stuck forever.
+        connection.execute(
+            """
+            UPDATE orders
+            SET buyer_confirmation_status = 'error',
+                buyer_confirmation_error = 'Interrupted before delivery; ready to retry.'
+            WHERE buyer_confirmation_status = 'sending'
+              AND buyer_confirmation_sent_at IS NULL
+            """
+        )
+        connection.execute(
+            """
+            UPDATE orders
+            SET seller_sale_email_status = 'error',
+                seller_sale_email_error = 'Interrupted before delivery; ready to retry.'
+            WHERE seller_sale_email_status = 'sending'
+              AND seller_sale_email_sent_at IS NULL
+            """
+        )
+        connection.execute(
+            """
+            UPDATE orders
+            SET seller_label_email_status = 'error',
+                seller_label_email_error = 'Interrupted before delivery; ready to retry.'
+            WHERE seller_label_email_status = 'sending'
+              AND seller_label_email_sent_at IS NULL
+            """
+        )
+
+        # A process can also stop after claiming a Shippo label purchase but
+        # before recording the transaction. Do not automatically repurchase:
+        # Shippo may already have charged for a label that the app failed to
+        # persist. Flag the order for an owner to check Shippo before retrying.
+        connection.execute(
+            """
+            UPDATE orders
+            SET shipping_status = 'attention_needed',
+                shipping_error = 'Label purchase was interrupted. Check Shippo for an existing transaction before retrying to avoid purchasing a duplicate label.'
+            WHERE shipping_status = 'purchasing'
+              AND COALESCE(shippo_transaction_id, '') = ''
+              AND COALESCE(shippo_label_url, '') = ''
+            """
+        )
+
         # Production never publishes anonymous starter content or known checkout tests.
         # Preserve the rows for audit purposes while removing them from the public catalog.
         if APP_ENV == "production":
@@ -5099,6 +5162,11 @@ def row_to_dict(row: sqlite3.Row) -> dict:
 
 
 MAX_LISTING_IMAGE_DATA_URL_LENGTH = 2_000_000
+LISTING_IMAGE_MAX_INPUT_BYTES = 1_500_000
+LISTING_IMAGE_MAX_OUTPUT_BYTES = 1_500_000
+LISTING_IMAGE_MAX_PIXELS = 20_000_000
+LISTING_IMAGE_MAX_WIDTH = 1_600
+LISTING_IMAGE_MAX_HEIGHT = 1_600
 PROFILE_IMAGE_MAX_BYTES = 750_000
 PROFILE_IMAGE_MAX_DATA_URL_LENGTH = 1_100_000
 TRAINER_IMAGE_MAX_INPUT_BYTES = 3_000_000
@@ -5544,7 +5612,105 @@ def serialize_trainer_lesson(
     }
 
 
-def normalize_listing_image_payload(raw_images) -> list[str]:
+def decode_listing_image_data(value) -> tuple[str, bytes]:
+    if not isinstance(value, str):
+        raise ValueError("Choose a JPG, PNG, or WebP paddle photo.")
+
+    image = value.strip()
+    if not image or len(image) > MAX_LISTING_IMAGE_DATA_URL_LENGTH:
+        raise ValueError("Each paddle photo must be smaller than 1.5 MB.")
+
+    match = re.fullmatch(
+        r"data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)",
+        image,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Choose JPG, PNG, or WebP paddle photos.")
+
+    mime_type = match.group(1).lower()
+    try:
+        payload = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("That paddle photo could not be read.") from error
+
+    if not payload or len(payload) > LISTING_IMAGE_MAX_INPUT_BYTES:
+        raise ValueError("Each paddle photo must be smaller than 1.5 MB.")
+
+    has_valid_signature = (
+        (mime_type == "image/jpeg" and payload.startswith(b"\xff\xd8\xff"))
+        or (mime_type == "image/png" and payload.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (
+            mime_type == "image/webp"
+            and len(payload) >= 12
+            and payload[:4] == b"RIFF"
+            and payload[8:12] == b"WEBP"
+        )
+    )
+    if not has_valid_signature:
+        raise ValueError("That file is not a valid JPG, PNG, or WebP image.")
+
+    return mime_type, payload
+
+
+def normalize_listing_image_data(value) -> str:
+    """Validate, resize, and strip metadata from one seller paddle photo."""
+    mime_type, payload = decode_listing_image_data(value)
+    expected_format = {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/webp": "WEBP",
+    }[mime_type]
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(payload)) as uploaded:
+                if str(uploaded.format or "").upper() != expected_format:
+                    raise ValueError("The paddle photo type does not match the uploaded file.")
+
+                oriented = ImageOps.exif_transpose(uploaded)
+                oriented.load()
+                width, height = oriented.size
+                if width <= 0 or height <= 0 or width * height > LISTING_IMAGE_MAX_PIXELS:
+                    raise ValueError("Paddle photo dimensions are too large.")
+
+                if oriented.mode in {"RGBA", "LA"} or "transparency" in oriented.info:
+                    rgba = oriented.convert("RGBA")
+                    normalized = Image.new("RGB", rgba.size, "white")
+                    normalized.paste(rgba, mask=rgba.getchannel("A"))
+                else:
+                    normalized = oriented.convert("RGB")
+
+                normalized.thumbnail(
+                    (LISTING_IMAGE_MAX_WIDTH, LISTING_IMAGE_MAX_HEIGHT),
+                    Image.Resampling.LANCZOS,
+                )
+                output = BytesIO()
+                normalized.save(output, format="JPEG", quality=86, optimize=True)
+                normalized_payload = output.getvalue()
+                if len(normalized_payload) > LISTING_IMAGE_MAX_OUTPUT_BYTES:
+                    output = BytesIO()
+                    normalized.save(output, format="JPEG", quality=76, optimize=True)
+                    normalized_payload = output.getvalue()
+    except ValueError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+        OSError,
+    ) as error:
+        raise ValueError("That paddle photo could not be safely processed.") from error
+
+    if not normalized_payload or len(normalized_payload) > LISTING_IMAGE_MAX_OUTPUT_BYTES:
+        raise ValueError("That paddle photo is still too large after processing.")
+
+    encoded = base64.b64encode(normalized_payload).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def normalize_listing_image_payload(raw_images, *, process_uploads: bool = False) -> list[str]:
     if isinstance(raw_images, str):
         raw_images = raw_images.strip()
         if raw_images.startswith("data:image/"):
@@ -5566,11 +5732,15 @@ def normalize_listing_image_payload(raw_images) -> list[str]:
         if not isinstance(candidate, str):
             continue
 
-        image = candidate.strip()
-        if not image.startswith("data:image/"):
+        try:
+            if process_uploads:
+                image = normalize_listing_image_data(candidate)
+            else:
+                mime_type, payload = decode_listing_image_data(candidate)
+                image = f"data:{mime_type};base64,{base64.b64encode(payload).decode('ascii')}"
+        except ValueError:
             continue
-        if len(image) > MAX_LISTING_IMAGE_DATA_URL_LENGTH:
-            continue
+
         if image in images:
             continue
 
@@ -5661,6 +5831,9 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
     sale_status = normalize_listing_sale_status(
         row_value(row, "sale_status", "available"), default="available"
     )
+    seller_account_status = compact_whitespace(
+        row_value(row, "seller_account_status", "active")
+    ).lower() or "active"
 
     if sale_status == "reserved":
         reason = "Another buyer is checking out with this paddle. Please check back shortly."
@@ -5676,6 +5849,8 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
         reason = "Platform checkout will turn on after Stripe keys are connected."
     elif not seller_user_id:
         reason = "This sample listing is not attached to a live seller account yet."
+    elif seller_account_status != "active":
+        reason = "This seller account is paused, so the paddle is not available for checkout."
     elif not seller_profile["hasAccount"]:
         reason = "Seller still needs to connect payouts before checkout can turn on."
     elif not seller_profile["readyForPayouts"]:
@@ -5691,6 +5866,7 @@ def listing_checkout_state_from_row(row: sqlite3.Row | dict | None) -> dict:
             approval_status == "approved"
             and sale_status == "available"
             and seller_user_id
+            and seller_account_status == "active"
             and seller_profile["readyForPayouts"]
             and stripe_is_configured()
         ),
@@ -6610,7 +6786,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/checkout/create-session":
             user = self.require_user()
-            if not user:
+            if not self.require_verified_user(user):
                 return
             self.handle_create_checkout_session(user, body)
             return
@@ -6649,8 +6825,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        content_length = int(self.headers.get("Content-Length", "0") or 0)
-        if content_length <= 0 or content_length > 1_000_000:
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or 0)
+        except (TypeError, ValueError):
+            content_length = 0
+        if content_length <= 0 or content_length > MAX_WEBHOOK_BODY_BYTES:
             self.send_json(
                 {"error": "Invalid Shippo webhook body."},
                 status=HTTPStatus.BAD_REQUEST,
@@ -6709,8 +6888,17 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        content_length = int(self.headers.get("Content-Length", "0"))
-        raw_body = self.rfile.read(content_length) if content_length else b""
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or 0)
+        except (TypeError, ValueError):
+            content_length = 0
+        if content_length <= 0 or content_length > MAX_WEBHOOK_BODY_BYTES:
+            self.send_json(
+                {"error": "Invalid Stripe webhook body."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        raw_body = self.rfile.read(content_length)
         signature_header = self.headers.get("Stripe-Signature", "")
         signature_parts: dict[str, list[str]] = {}
         for part in signature_header.split(","):
@@ -7007,11 +7195,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.stripe_payouts_enabled,
                   users.stripe_onboarding_complete,
                   users.stripe_requirements_due_count,
-                  users.stripe_account_status_updated_at
+                  users.stripe_account_status_updated_at,
+                  users.account_status AS seller_account_status
                 FROM listings
                 LEFT JOIN users ON users.id = listings.user_id
                 WHERE listings.approval_status = 'approved'
                   AND listings.user_id IS NOT NULL
+                  AND users.account_status = 'active'
                 ORDER BY
                   CASE listings.sale_status WHEN 'available' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
                   listings.created_at DESC
@@ -7031,9 +7221,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         with closing(connect_db()) as connection:
             row = connection.execute(
                 """
-                SELECT id, user_id, approval_status, image_data_json
+                SELECT
+                  listings.id,
+                  listings.user_id,
+                  listings.approval_status,
+                  listings.image_data_json,
+                  COALESCE(users.account_status, 'missing') AS seller_account_status
                 FROM listings
-                WHERE id = ?
+                LEFT JOIN users ON users.id = listings.user_id
+                WHERE listings.id = ?
                 """,
                 (listing_id,),
             ).fetchone()
@@ -7045,7 +7241,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_id = int(viewer.get("id") or 0) if viewer else 0
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         owner_id = int(row["user_id"] or 0)
-        is_public = row["approval_status"] == "approved" and owner_id > 0
+        is_public = (
+            row["approval_status"] == "approved"
+            and owner_id > 0
+            and row["seller_account_status"] == "active"
+        )
         if not is_public and not viewer_is_admin and viewer_id != owner_id:
             self.send_json({"error": "That image could not be found."}, status=HTTPStatus.NOT_FOUND)
             return
@@ -7248,7 +7448,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.stripe_payouts_enabled,
                   users.stripe_onboarding_complete,
                   users.stripe_requirements_due_count,
-                  users.stripe_account_status_updated_at
+                  users.stripe_account_status_updated_at,
+                  COALESCE(users.account_status, 'missing') AS seller_account_status
                 FROM listings
                 LEFT JOIN users ON users.id = listings.user_id
                 WHERE listings.id = ?
@@ -7268,11 +7469,17 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         viewer_id = int(viewer.get("id") or 0) if viewer else 0
         viewer_is_admin = bool(viewer.get("isAdmin")) if viewer else False
         listing_owner_id = int(row["user_id"] or 0)
+        seller_account_status = compact_whitespace(
+            row_value(row, "seller_account_status", "missing")
+        ).lower() or "missing"
 
         if not listing_owner_id and not viewer_is_admin:
             return None
 
         if approval_status != "approved" and not viewer_is_admin and viewer_id != listing_owner_id:
+            return None
+
+        if seller_account_status != "active" and not viewer_is_admin and viewer_id != listing_owner_id:
             return None
 
         return serialize_listing_row(row)
@@ -7596,9 +7803,11 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 (user_id,),
             ).fetchone()
 
+        return row
+
     def fetch_listing_checkout_row(self, listing_id: int) -> sqlite3.Row | None:
         with closing(connect_db()) as connection:
-            return connection.execute(
+            row = connection.execute(
                 """
                 SELECT
                   listings.id,
@@ -7635,7 +7844,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   users.stripe_payouts_enabled,
                   users.stripe_onboarding_complete,
                   users.stripe_requirements_due_count,
-                  users.stripe_account_status_updated_at
+                  users.stripe_account_status_updated_at,
+                  COALESCE(users.account_status, 'missing') AS seller_account_status
                 FROM listings
                 LEFT JOIN users ON users.id = listings.user_id
                 WHERE listings.id = ?
@@ -7889,6 +8099,45 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
+
+        seller_account_status = compact_whitespace(
+            row_value(listing_row, "seller_account_status", "missing")
+        ).lower() or "missing"
+        if seller_account_status != "active":
+            self.send_json(
+                {"error": "This seller account is paused, so this paddle cannot be purchased."},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
+        connected_account_id = seller_profile["connectedAccountId"]
+        if connected_account_id:
+            try:
+                account = stripe_request("GET", f"/accounts/{connected_account_id}")
+                self.update_user_stripe_status(seller_user_id, account)
+            except (RuntimeError, ValueError) as error:
+                self.send_json(
+                    {
+                        "error": (
+                            "We could not confirm the seller’s payout account with Stripe. "
+                            "Please try checkout again shortly."
+                        )
+                    },
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+
+            listing_row = self.fetch_listing_checkout_row(int(listing_id_raw))
+            if not listing_row:
+                self.send_json(
+                    {"error": "That listing could not be found."},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            listing = serialize_listing_row(listing_row)
+            checkout_state = listing_checkout_state_from_row(listing_row)
+            seller_profile = checkout_state["sellerProfile"]
+            total_cents = checkout_state["priceCents"]
 
         if not seller_profile["readyForPayouts"] or not seller_profile["connectedAccountId"]:
             self.send_json(
@@ -8159,6 +8408,31 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         listing_row = self.fetch_listing_checkout_row(int(listing_id_raw))
         if not listing_row:
             self.send_json({"error": "That listing could not be found."}, status=HTTPStatus.NOT_FOUND)
+            return
+
+        approval_status = normalize_listing_approval_status(
+            row_value(listing_row, "approval_status", ""), default=""
+        )
+        sale_status = normalize_listing_sale_status(
+            row_value(listing_row, "sale_status", ""), default=""
+        )
+        seller_user_id = int(row_value(listing_row, "user_id", 0) or 0)
+        seller_account_status = compact_whitespace(
+            row_value(listing_row, "seller_account_status", "missing")
+        ).lower() or "missing"
+        if (
+            approval_status != "approved"
+            or sale_status != "available"
+            or seller_user_id <= 0
+            or seller_account_status != "active"
+        ):
+            # Use the same generic response for hidden, sold, or paused inventory
+            # so this public endpoint does not disclose private listing state or
+            # spend live carrier-rate requests for unavailable paddles.
+            self.send_json(
+                {"error": "That listing is not available for a shipping estimate."},
+                status=HTTPStatus.NOT_FOUND,
+            )
             return
 
         try:
@@ -10519,15 +10793,26 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
-        price_raw = str(body.get("price", "")).strip()
-        digits = "".join(ch for ch in price_raw if ch.isdigit())
-        price_usd = int(digits) if digits else 0
+        price_usd = parse_whole_dollar_amount(
+            body.get("price"),
+            maximum=MAX_MARKETPLACE_PRICE_USD,
+        )
 
         if listing_id <= 0:
             self.send_json({"error": "Choose a valid listing to update."}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        if not all([brand, model, category, condition, location, notes]) or price_usd <= 0:
+        if price_usd <= 0:
+            self.send_json(
+                {
+                    "error": "Enter a whole-dollar paddle price between $1 and $1,000.",
+                    "code": "invalid_listing_price",
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if not all([brand, model, category, condition, location, notes]):
             self.send_json({"error": "Please complete every listing field before saving."}, status=HTTPStatus.BAD_REQUEST)
             return
 
@@ -10626,12 +10911,42 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             listing_row = connection.execute(
                 "SELECT brand, model FROM listings WHERE id = ?", (listing_id,)
             ).fetchone()
             if not listing_row:
+                connection.rollback()
                 self.send_json({"error": "Listing not found."}, status=HTTPStatus.NOT_FOUND)
                 return
+
+            if requested_status == "available":
+                protected_order = connection.execute(
+                    """
+                    SELECT 1
+                    FROM orders
+                    WHERE listing_id = ?
+                      AND (
+                        status IN ('paid', 'processing')
+                        OR stripe_payment_status = 'paid'
+                      )
+                    LIMIT 1
+                    """,
+                    (listing_id,),
+                ).fetchone()
+                if protected_order:
+                    connection.rollback()
+                    self.send_json(
+                        {
+                            "error": (
+                                "This listing has a paid or processing order and cannot "
+                                "be made available again. Resolve the order first."
+                            )
+                        },
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+
             connection.execute(
                 "UPDATE listings SET sale_status = ? WHERE id = ?",
                 (requested_status, listing_id),
@@ -10774,6 +11089,33 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return
 
         with closing(connect_db()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            protected_order = connection.execute(
+                """
+                SELECT 1
+                FROM orders
+                WHERE listing_id = ?
+                  AND (
+                    status IN ('paid', 'processing')
+                    OR stripe_payment_status = 'paid'
+                  )
+                LIMIT 1
+                """,
+                (listing_id,),
+            ).fetchone()
+            if protected_order:
+                connection.rollback()
+                self.send_json(
+                    {
+                        "error": (
+                            "This listing has a paid or processing order and cannot be removed. "
+                            "Keep it attached so shipping and fulfillment records stay complete."
+                        )
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
             cursor = connection.execute("DELETE FROM listings WHERE id = ?", (listing_id,))
             connection.commit()
 
@@ -11615,8 +11957,14 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
-        images = normalize_listing_image_payload(body.get("images", []))
-        price_usd = parse_whole_dollar_amount(body.get("price"))
+        images = normalize_listing_image_payload(
+            body.get("images", []),
+            process_uploads=True,
+        )
+        price_usd = parse_whole_dollar_amount(
+            body.get("price"),
+            maximum=MAX_MARKETPLACE_PRICE_USD,
+        )
         shipping_mode = "calculated"
         shipping_flat_usd = parse_whole_dollar_amount(body.get("shippingFlat"))
         shipping_origin_zip_raw = str(body.get("shippingOriginZip", "")).strip()
@@ -11687,12 +12035,38 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         thickness_raw = canonical_thickness or ""
         thickness_mm = float(thickness_raw) if thickness_raw else None
 
-        if not all([brand, model, color, category, condition, location]) or price_usd <= 0:
+        if price_usd <= 0:
+            self.send_json(
+                {
+                    "error": "Enter a whole-dollar paddle price between $1 and $1,000.",
+                    "code": "invalid_listing_price",
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if not all([brand, model, color, category, condition, location]):
             self.send_json(
                 {
                     "error": (
                         "Add the brand, model, color, condition, price, and "
                         "ships-from city before submitting it for review."
+                    )
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if (
+            "," not in location
+            or not extract_city_from_location(location)
+            or not extract_state_from_location(location)
+        ):
+            self.send_json(
+                {
+                    "error": (
+                        "Enter the ship-from location as City, ST (for example, Miami, FL) "
+                        "so the prepaid shipping rate and label are accurate."
                     )
                 },
                 status=HTTPStatus.BAD_REQUEST,
