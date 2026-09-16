@@ -207,6 +207,7 @@ DEFAULT_PADDLE_PACKAGE = {
 # the shop's typical $250 filter suggestion so premium paddles remain valid,
 # while preventing accidental or unreasonable checkout amounts.
 MAX_MARKETPLACE_PRICE_USD = 1_000
+LISTING_CONDITIONS = {"Excellent", "Very Good", "Good"}
 
 US_STATE_NAMES = {
     "AL": "Alabama",
@@ -5883,6 +5884,13 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
     thickness_mm = row_value(row, "thickness_mm")
     images = public_listing_images(row)
     shipping_policy = shipping_policy_from_row(row)
+    # Origin ZIP is fulfillment data, not public listing data. Quote and label
+    # creation still read it directly from the database-backed policy above.
+    public_shipping_policy = {
+        key: value
+        for key, value in shipping_policy.items()
+        if key != "originZip"
+    }
     approval_status = normalize_listing_approval_status(
         row_value(row, "approval_status", "approved"), default="approved"
     )
@@ -5911,7 +5919,7 @@ def serialize_listing_row(row: sqlite3.Row | dict | None) -> dict | None:
         "reviewed_at": row_value(row, "reviewed_at"),
         "seller_name": row["seller_name"],
         "seller_joined_at": row_value(row, "seller_joined_at"),
-        "shipping": shipping_policy,
+        "shipping": public_shipping_policy,
         "shipping_policy_label": shipping_policy["label"],
         "seller_user_id": checkout_state["sellerUserId"],
         "seller_has_connected_account": checkout_state["sellerProfile"]["hasAccount"],
@@ -10789,7 +10797,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         color = str(body.get("color", "")).strip()
         thickness_raw = str(body.get("thickness", "")).strip()
         thickness_mm = parse_thickness_mm(thickness_raw) if thickness_raw else None
-        category = str(body.get("category", "")).strip().lower() or "control"
+        category = str(body.get("category", "")).strip().lower()
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
@@ -10818,6 +10826,13 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         if category not in {"control", "power", "hybrid"}:
             self.send_json({"error": "Listing category must be control, power, or hybrid."}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if condition not in LISTING_CONDITIONS:
+            self.send_json(
+                {"error": "Listing condition must be Excellent, Very Good, or Good."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
             return
 
         if thickness_raw and thickness_mm is None:
@@ -11953,7 +11968,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         color = str(body.get("color", "")).strip()
         thickness_raw = str(body.get("thickness", "")).strip()
         thickness_mm = parse_thickness_mm(thickness_raw) if thickness_raw else None
-        category = str(body.get("category", "")).strip().lower() or "control"
+        category = str(body.get("category", "")).strip().lower()
         condition = str(body.get("condition", "")).strip()
         location = str(body.get("location", "")).strip()
         notes = str(body.get("notes", "")).strip() or "No extra condition notes added yet."
@@ -12049,9 +12064,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.send_json(
                 {
                     "error": (
-                        "Add the brand, model, color, condition, price, and "
+                        "Add the brand, model, color, playing style, condition, price, and "
                         "ships-from city before submitting it for review."
-                    )
+                    ),
+                    "code": "incomplete_listing",
                 },
                 status=HTTPStatus.BAD_REQUEST,
             )
@@ -12076,6 +12092,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if category not in {"control", "power", "hybrid"}:
             self.send_json(
                 {"error": "Listing category must be control, power, or hybrid."},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if condition not in LISTING_CONDITIONS:
+            self.send_json(
+                {
+                    "error": "Listing condition must be Excellent, Very Good, or Good.",
+                    "code": "invalid_listing_condition",
+                },
                 status=HTTPStatus.BAD_REQUEST,
             )
             return
