@@ -1596,7 +1596,7 @@ function renderAdminListings(items) {
               <label>Condition
                 <select name="condition">${optionList(["Excellent", "Very Good", "Good"], item.condition)}</select>
               </label>
-              <label>Price <input name="price" value="${escapeAttr(item.price_usd)}" /></label>
+              <label>Price <input name="price" type="number" min="1" max="1000" step="1" inputmode="numeric" value="${escapeAttr(item.price_usd)}" /></label>
               <label>Location <input name="location" value="${escapeAttr(item.location)}" /></label>
             </div>
 
