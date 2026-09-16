@@ -6,7 +6,7 @@
     <title>Eleven Zero PB Dashboard</title>
     <meta
       name="description"
-      content="Your Eleven Zero PB dashboard for listings, trainer activity, and account stats."
+      content="Manage your Eleven Zero PB listings, purchases, sales, payouts, and account settings."
     />
     <link rel="stylesheet" href="./styles.css?v=20260820traininghub1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
@@ -26,8 +26,6 @@
         <nav class="site-nav" aria-label="Primary">
           <a href="./index.html">Home</a>
           <a href="./shop.html">Shop</a>
-          <a href="./courts.html">Courts</a>
-          <a href="./trainers.html">Trainers</a>
           <a href="./account.html">Account</a>
           <a href="./sell.html">Sell</a>
         </nav>
@@ -51,7 +49,7 @@
             <p class="eyebrow">Your account</p>
             <h1 data-account-name>Welcome to Eleven Zero PB.</h1>
             <p class="hero-text" data-account-copy>
-              Sign in to see your listings, trainer profiles, and activity stats.
+              Sign in to manage your listings, purchases, sales, and payouts.
             </p>
 
             <div class="account-profile-card" data-account-profile-card>
@@ -79,9 +77,10 @@
             </div>
 
             <div class="hero-actions" data-account-actions>
-              <a class="button button-primary" href="./sell.html">Create Listing</a>
-              <a class="button button-secondary" href="#training-hub">Training Hub</a>
-              <a class="button button-secondary" href="./trainers.html#join">Join as Trainer</a>
+              <a class="button button-primary" href="./shop.html">Browse paddles</a>
+              <a class="button button-secondary" href="./sell.html">Sell a paddle</a>
+              <a class="button button-secondary" href="#training-hub" data-paused-feature="trainers" hidden>Training Hub</a>
+              <a class="button button-secondary" href="./trainers.html#join" data-paused-feature="trainers" hidden>Join as Trainer</a>
               <a class="button button-secondary" href="#seller-payouts">Set Up Payouts</a>
               <a class="button button-secondary is-hidden" href="#owner-tools" data-owner-anchor>
                 Owner tools
@@ -100,12 +99,12 @@
                 <span>Listings created</span>
               </div>
               <div>
-                <strong data-account-stat-trainers>0</strong>
-                <span>Trainer profiles</span>
+                <strong data-account-stat-purchases>0</strong>
+                <span>Recent purchases</span>
               </div>
               <div>
-                <strong data-account-stat-reviews>0</strong>
-                <span>Reviews published</span>
+                <strong data-account-stat-sales>0</strong>
+                <span>Recent sales</span>
               </div>
             </div>
           </div>
@@ -115,13 +114,13 @@
         <section class="guide-section section-block">
           <div class="guide-panel account-dashboard-panel reveal">
             <div class="dashboard-grid" data-customer-account-section>
-              <article class="dashboard-card">
+              <article class="dashboard-card dashboard-card-wide">
                 <p class="eyebrow">Recent listings</p>
                 <h3>Your latest paddle submissions</h3>
                 <div class="list-stack" data-account-listings></div>
               </article>
 
-              <article class="dashboard-card">
+              <article class="dashboard-card" data-paused-feature="trainers" hidden>
                 <p class="eyebrow">Trainer profiles</p>
                 <h3>Your coaching presence</h3>
                 <div class="list-stack" data-account-trainers></div>
@@ -132,7 +131,9 @@
               class="dashboard-card dashboard-card-wide training-hub-shell"
               id="training-hub"
               data-training-hub
+              data-paused-feature="trainers"
               data-customer-account-section
+              hidden
             >
               <div class="training-hub-heading">
                 <div>
@@ -301,6 +302,7 @@
             <section
               class="dashboard-card dashboard-card-wide training-gallery-shell"
               data-training-gallery-shell
+              data-paused-feature="trainers"
               data-customer-account-section
               hidden
             >
@@ -387,7 +389,7 @@
               </div>
 
               <p class="dashboard-copy" data-owner-help-copy>
-                If you sign in with <strong data-support-email>11zeropb@gmail.com</strong>, this dashboard unlocks the live moderator panel for listings, courts, trainers, and reviews.
+                If you sign in with <strong data-support-email>11zeropb@gmail.com</strong>, this dashboard unlocks the live moderator panel for listings, orders, and customer accounts.
               </p>
             </article>
 
@@ -546,8 +548,8 @@
 
         <div class="footer-links">
           <a href="./index.html">Marketplace</a>
-          <a href="./trainers.html">Trainers</a>
-          <a href="./courts.html">Courts</a>
+          <a href="./shop.html">Shop</a>
+          <a href="./sell.html">Sell</a>
           <a href="./auth.html">Sign in</a>
           <a href="./privacy.html">Privacy</a>
           <a href="./terms.html">Terms</a>
@@ -616,8 +618,8 @@
       </form>
     </dialog>
 
-    <script src="./app.js?v=20260722audit1"></script>
-    <script src="./account.js?v=20260820traininghub1"></script>
-    <script src="./header-tweaks.js?v=20260722audit1"></script>
+    <script src="./app.js?v=20260916marketfocus1"></script>
+    <script src="./account.js?v=20260916marketfocus1"></script>
+    <script src="./header-tweaks.js?v=20260916marketfocus1"></script>
   </body>
 </html>

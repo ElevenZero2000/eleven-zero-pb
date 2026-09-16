@@ -246,7 +246,7 @@ const ElevenZeroApp = {
 
     const description =
       document.querySelector('meta[name="description"]')?.content ||
-      "Buy and sell pickleball paddles, find courts, and connect with trainers on Eleven Zero PB.";
+      "Buy and sell pickleball paddles through reviewed listings on Eleven Zero PB.";
     ensureMeta('meta[property="og:title"]', { property: "og:title", content: document.title });
     ensureMeta('meta[property="og:description"]', { property: "og:description", content: description });
     ensureMeta('meta[property="og:type"]', { property: "og:type", content: "website" });

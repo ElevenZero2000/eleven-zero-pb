@@ -38,7 +38,7 @@ document.addEventListener(
   if (document.querySelector('script[data-eleven-zero-header-tweaks]')) return;
 
   const headerTweaks = document.createElement("script");
-  headerTweaks.src = "./header-tweaks.js?v=20260703a";
+  headerTweaks.src = "./header-tweaks.js?v=20260916marketfocus1";
   headerTweaks.defer = true;
   headerTweaks.dataset.elevenZeroHeaderTweaks = "true";
   document.body.appendChild(headerTweaks);

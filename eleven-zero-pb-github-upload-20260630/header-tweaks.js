@@ -72,10 +72,8 @@
   const menuItems = [
     ["home", "Home", "./index.html"],
     ["shop", "Shop", "./shop.html"],
-    ["sell", "Sell", "./sell.html"],
-    ["courts", "Courts", "./courts.html"],
-    ["trainers", "Trainers", "./trainers.html"],
     ["account", "Account", "./account.html"],
+    ["sell", "Sell", "./sell.html"],
   ];
   mobileMenu.innerHTML = menuItems
     .map(
