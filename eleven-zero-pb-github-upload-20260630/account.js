@@ -1,10 +1,14 @@
+// Keep the paused community features intact so they can be restored later without
+// rebuilding them. Switching this flag off re-enables their account surfaces.
+const MARKETPLACE_FOCUS_MODE = true;
+
 const accountName = document.querySelector("[data-account-name]");
 const accountCopy = document.querySelector("[data-account-copy]");
 const accountEmail = document.querySelector("[data-account-email]");
 const accountStatus = document.querySelector("[data-account-status]");
 const statListings = document.querySelector("[data-account-stat-listings]");
-const statTrainers = document.querySelector("[data-account-stat-trainers]");
-const statReviews = document.querySelector("[data-account-stat-reviews]");
+const statPurchases = document.querySelector("[data-account-stat-purchases]");
+const statSales = document.querySelector("[data-account-stat-sales]");
 const accountListings = document.querySelector("[data-account-listings]");
 const accountTrainers = document.querySelector("[data-account-trainers]");
 const accountPurchases = document.querySelector("[data-account-purchases]");
@@ -95,6 +99,12 @@ let trainingThreadLoading = false;
 let queuedTrainingRelationshipId = 0;
 let trainerGalleryDrafts = new Map();
 let latestOwnedTrainers = [];
+
+function applyMarketplaceFocusMode() {
+  document.querySelectorAll("[data-paused-feature]").forEach((element) => {
+    element.hidden = MARKETPLACE_FOCUS_MODE;
+  });
+}
 
 function profileInitials(name) {
   const words = String(name || "Eleven Zero")
@@ -595,7 +605,7 @@ function renderTrainingHub(data) {
 }
 
 async function loadTrainingHub({ silent = false } = {}) {
-  if (!trainingHub || !ElevenZeroApp.session?.authenticated) return;
+  if (MARKETPLACE_FOCUS_MODE || !trainingHub || !ElevenZeroApp.session?.authenticated) return;
   try {
     if (!silent) ElevenZeroApp.setStatus(trainingHubStatus, "Loading your training activity…", "warning");
     const response = await ElevenZeroApp.request("/api/account/trainer-hub");
@@ -824,6 +834,7 @@ function openTrainingThreadForTrainer(trainerId) {
 }
 
 function bindTrainingHub() {
+  if (MARKETPLACE_FOCUS_MODE) return;
   trainingHub?.addEventListener("click", async (event) => {
     const requestButton = event.target.closest("[data-training-request-action]");
     if (requestButton) {
@@ -928,6 +939,10 @@ function trainerGalleryDraft(item) {
 
 function renderTrainerGalleryProfiles(items, { replace = true } = {}) {
   if (!trainingGalleryShell || !trainingGalleryProfiles) return;
+  if (MARKETPLACE_FOCUS_MODE) {
+    trainingGalleryShell.hidden = true;
+    return;
+  }
   if (replace) latestOwnedTrainers = [...items];
   trainingGalleryShell.hidden = !items.length;
   if (!items.length) {
@@ -1055,6 +1070,7 @@ async function submitTrainerGallery(trainerId, button) {
 }
 
 function bindTrainerGalleryManager() {
+  if (MARKETPLACE_FOCUS_MODE) return;
   trainingGalleryProfiles?.addEventListener("change", async (event) => {
     const coverInput = event.target.closest("[data-training-cover-input]");
     const galleryInput = event.target.closest("[data-training-gallery-input]");
@@ -2653,15 +2669,15 @@ async function loadDashboard() {
     }
     if (ownerHelpCopy) {
       ownerHelpCopy.innerHTML = user.isAdmin
-        ? "You’re already signed in with the owner account, so the moderator tools below are active for live listings, courts, trainers, and reviews."
+        ? "You’re already signed in with the owner account, so the moderator tools below are active for live listings, orders, and customer accounts."
         : `If you sign in with <strong>${ElevenZeroApp.escapeHtml(
             ElevenZeroApp.config.supportEmail || "11zeropb@gmail.com"
-          )}</strong>, this dashboard unlocks the live moderator panel for listings, courts, trainers, and reviews.`;
+          )}</strong>, this dashboard unlocks the live moderator panel for listings, orders, and customer accounts.`;
     }
     if (accountEmail) accountEmail.textContent = user.email;
     if (statListings) statListings.textContent = String(stats.listings);
-    if (statTrainers) statTrainers.textContent = String(stats.trainers);
-    if (statReviews) statReviews.textContent = String(stats.reviews);
+    if (statPurchases) statPurchases.textContent = String((response.recentPurchases || []).length);
+    if (statSales) statSales.textContent = String((response.recentSales || []).length);
 
     renderDashboardList(
       accountListings,
@@ -2670,14 +2686,16 @@ async function loadDashboard() {
       "No listings yet",
       "Submit your first paddle from the Sell page."
     );
-    renderDashboardList(
-      accountTrainers,
-      response.recentTrainers || [],
-      renderTrainerItem,
-      "No trainer profiles yet",
-      "Publish your first trainer profile from the trainers page."
-    );
-    renderTrainerGalleryProfiles(response.recentTrainers || []);
+    if (!MARKETPLACE_FOCUS_MODE) {
+      renderDashboardList(
+        accountTrainers,
+        response.recentTrainers || [],
+        renderTrainerItem,
+        "No trainer profiles yet",
+        "Publish your first trainer profile from the trainers page."
+      );
+      renderTrainerGalleryProfiles(response.recentTrainers || []);
+    }
     renderDashboardList(
       accountPurchases,
       response.recentPurchases || [],
@@ -2702,6 +2720,7 @@ async function loadDashboard() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
+  applyMarketplaceFocusMode();
 
   if (!ElevenZeroApp.session?.authenticated) {
     ElevenZeroApp.setStatus(
@@ -2763,8 +2782,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   bindAdminPanel();
-  bindTrainingHub();
-  bindTrainerGalleryManager();
+  if (!MARKETPLACE_FOCUS_MODE) {
+    bindTrainingHub();
+    bindTrainerGalleryManager();
+  }
   accountPurchases?.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-order-issue-form]");
     if (!form) return;
@@ -2782,22 +2803,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     await retryShippingLabel(retryButton.dataset.retryShipping, retryButton);
   });
   await loadDashboard();
-  await loadTrainingHub();
-  if (latestTrainingHub?.relationships?.length === 1 && !activeTrainingRelationshipId) {
-    await openTrainingThread(latestTrainingHub.relationships[0].id, { silent: true });
+  if (!MARKETPLACE_FOCUS_MODE) {
+    await loadTrainingHub();
+    if (latestTrainingHub?.relationships?.length === 1 && !activeTrainingRelationshipId) {
+      await openTrainingThread(latestTrainingHub.relationships[0].id, { silent: true });
+    }
   }
   await loadAdminDashboard();
   sellerConnectButton?.addEventListener("click", handleSellerOnboarding);
   sellerRefreshButton?.addEventListener("click", refreshSellerProfile);
 
-  trainingHubPollTimer = window.setInterval(() => {
-    if (document.visibilityState === "visible") loadTrainingHub({ silent: true });
-  }, 25000);
-  trainingThreadPollTimer = window.setInterval(() => {
-    if (document.visibilityState === "visible" && activeTrainingRelationshipId) {
-      openTrainingThread(activeTrainingRelationshipId, { silent: true });
-    }
-  }, 18000);
+  if (!MARKETPLACE_FOCUS_MODE) {
+    trainingHubPollTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") loadTrainingHub({ silent: true });
+    }, 25000);
+    trainingThreadPollTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && activeTrainingRelationshipId) {
+        openTrainingThread(activeTrainingRelationshipId, { silent: true });
+      }
+    }, 18000);
+  }
   window.addEventListener("pagehide", () => {
     window.clearInterval(trainingHubPollTimer);
     window.clearInterval(trainingThreadPollTimer);
