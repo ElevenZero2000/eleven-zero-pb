@@ -837,6 +837,28 @@ function renderGallery(item) {
   });
 }
 
+function formatPlayStyle(value) {
+  const styles = { control: "Control", power: "Power", hybrid: "Hybrid" };
+  return styles[String(value || "").toLowerCase()] || String(value || "Not specified");
+}
+
+function renderSellerNotes(value) {
+  const text = String(value || "").trim();
+  const paragraph = (copy) =>
+    `<p class="listing-detail-copy listing-seller-note">${ElevenZeroApp.escapeHtml(copy)}</p>`;
+  // Recognize common pasted spec labels without changing the seller's values.
+  // All text, including unknown labels and any HTML, remains escaped.
+  const labels = /(?:^|\s)(Surface|Core|UPA-A certified|USAP certified|Class|Paddle Length|Paddle Width|Grip Type|Grip Length|Grip Circumference\*?)\s*:/gi;
+  const matches = [...text.matchAll(labels)];
+  if (matches.length < 2) return paragraph(text);
+  const introduction = text.slice(0, matches[0].index).trim();
+  const rows = matches.map((match, index) => {
+    const value = text.slice(match.index + match[0].length, matches[index + 1]?.index ?? text.length).trim();
+    return `<div><dt>${ElevenZeroApp.escapeHtml(match[1])}</dt><dd>${ElevenZeroApp.escapeHtml(value)}</dd></div>`;
+  }).join("");
+  return (introduction ? paragraph(introduction) : "") + `<dl class="listing-note-specs">${rows}</dl>`;
+}
+
 function renderContent(item) {
   if (!contentNode) return;
 
@@ -849,7 +871,6 @@ function renderContent(item) {
 
   contentNode.innerHTML = `
     <div class="listing-product-heading">
-      <p class="eyebrow">Marketplace paddle</p>
       <p class="product-brand">${ElevenZeroApp.escapeHtml(item.brand)}</p>
       <h1>${ElevenZeroApp.escapeHtml(item.model)}</h1>
     </div>
@@ -887,7 +908,7 @@ function renderContent(item) {
       </article>
       <article>
         <span>Play style</span>
-        <strong>${ElevenZeroApp.escapeHtml(item.category || "Not listed")}</strong>
+        <strong>${ElevenZeroApp.escapeHtml(formatPlayStyle(item.category))}</strong>
       </article>
       <article>
         <span>Thickness</span>
@@ -898,8 +919,8 @@ function renderContent(item) {
       productNote
         ? `
           <section class="listing-product-about" aria-label="About this paddle">
-            <strong>About this paddle</strong>
-            <p class="listing-detail-copy">${ElevenZeroApp.escapeHtml(productNote)}</p>
+            <strong>Seller notes</strong>
+            ${renderSellerNotes(productNote)}
           </section>
         `
         : ""
@@ -968,47 +989,26 @@ function renderContent(item) {
 function renderStory(item) {
   if (!storyNode) return;
 
-  const thickness = formatThickness(item.thickness_mm);
-  const sellerName = item.seller_name || "Community seller";
-
   storyNode.innerHTML = `
     <article class="listing-detail-panel listing-detail-panel-soft listing-simple-details" id="details">
-      <p class="eyebrow">Paddle info</p>
-      <h2>Paddle details</h2>
+      <h2>Listing details</h2>
       <div class="listing-detail-bullets">
-        <div>
-          <strong>Seller</strong>
-          <span>${ElevenZeroApp.escapeHtml(sellerName)}</span>
-        </div>
-        <div>
-          <strong>Ships from</strong>
-          <span>${ElevenZeroApp.escapeHtml(item.location || "Not listed")}</span>
-        </div>
         <div>
           <strong>Color</strong>
           <span>${ElevenZeroApp.escapeHtml(item.color || "Not listed")}</span>
         </div>
         <div>
-          <strong>Thickness</strong>
-          <span>${ElevenZeroApp.escapeHtml(thickness || "Not listed")}</span>
-        </div>
-        <div>
-          <strong>Play style</strong>
-          <span>${ElevenZeroApp.escapeHtml(item.category || "Not listed")}</span>
-        </div>
-        <div>
-          <strong>Posted</strong>
+          <strong>Listed</strong>
           <span>${ElevenZeroApp.escapeHtml(formatPostedAge(item.created_at))}</span>
         </div>
       </div>
     </article>
 
     <article class="listing-detail-panel listing-review-panel" id="reviews">
-      <p class="eyebrow">Buyer feedback</p>
       <h2>Reviews</h2>
       <div class="listing-review-empty">
         <strong>No reviews yet</strong>
-        <span>Verified buyer reviews will appear here after completed purchases.</span>
+        <span>There are no buyer reviews for this paddle yet.</span>
       </div>
     </article>
   `;
@@ -1039,7 +1039,7 @@ function renderNotFound() {
       <p class="listing-detail-copy">
         This listing may have been removed, or the link is incomplete.
       </p>
-      <a class="button button-dark" href="./shop.html">Return to marketplace</a>
+      <a class="button button-dark" href="./shop.html">Back to shop</a>
     `;
   }
 
