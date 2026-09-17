@@ -64,9 +64,7 @@ const clearSellerDraftButton = document.querySelector("[data-clear-seller-draft]
 const sellerSubmitButton = listingForm?.querySelector("[data-seller-submit]");
 const sellerPayoutGate = document.querySelector("[data-seller-payout-gate]");
 const sellerPreflight = document.querySelector("[data-seller-preflight]");
-const sellerPreflightEyebrow = document.querySelector("[data-seller-preflight-eyebrow]");
 const sellerPreflightTitle = document.querySelector("[data-seller-preflight-title]");
-const sellerPreflightCopy = document.querySelector("[data-seller-preflight-copy]");
 const sellerPreflightAction = document.querySelector("[data-seller-preflight-action]");
 const sellerFeeSummary = document.querySelector("[data-seller-fee-summary]");
 const shippingModeInput = listingForm?.querySelector('[name="shippingMode"]');
@@ -466,22 +464,11 @@ function updateSellerNotesCounter() {
   const count = notes.length;
 
   if (!count) {
-    sellerNotesCounter.textContent =
-      "Optional · add wear, grip, or edge-guard details if helpful.";
+    sellerNotesCounter.textContent = "Optional · mention wear, grip, or edge damage.";
     return;
   }
 
-  if (count < 60) {
-    sellerNotesCounter.textContent = `${count} characters · add a little more detail so buyers trust the condition faster.`;
-    return;
-  }
-
-  if (count <= 320) {
-    sellerNotesCounter.textContent = `${count} characters · great length for a clear, buyer-friendly listing.`;
-    return;
-  }
-
-  sellerNotesCounter.textContent = `${count} characters · strong detail. Keep it skimmable so buyers can scan it quickly.`;
+  sellerNotesCounter.textContent = `${count} characters`;
 }
 
 function renderSellerDraftStatus(overrideMessage = "") {
@@ -501,20 +488,18 @@ function renderSellerDraftStatus(overrideMessage = "") {
   }
 
   if (listingState.sellerDraftSavedAt && formHasContent) {
-    sellerDraftStatus.textContent = `Draft saved on this device · updated ${formatSavedTimeLabel(
+    sellerDraftStatus.textContent = `Draft saved ${formatSavedTimeLabel(
       listingState.sellerDraftSavedAt
-    )}. ${hasPhotos ? "Photos and private shipping details stay only in this tab." : "Photos and private shipping details are not stored."}`;
+    )}. Photos and address stay in this tab.`;
     return;
   }
 
   if (hasPhotos) {
-    sellerDraftStatus.textContent =
-      "Photos are ready in this tab. Public listing details save automatically; private shipping details do not.";
+    sellerDraftStatus.textContent = "Photos ready in this tab.";
     return;
   }
 
-  sellerDraftStatus.textContent =
-    "Public listing details save on this device. Photos and private shipping details stay only in this tab.";
+  sellerDraftStatus.textContent = "Public details save automatically. Photos and address stay in this tab.";
 }
 
 function saveSellerDraft() {
@@ -601,7 +586,7 @@ function clearSellerDraft() {
   renderPhotoPreview();
   renderSellerReadiness();
   renderSellerLivePreview();
-  renderSellerDraftStatus("Saved draft cleared from this device. Start a fresh listing anytime.");
+  renderSellerDraftStatus("Draft cleared.");
 }
 
 function clearCheckoutParams() {
@@ -1578,8 +1563,9 @@ function renderSellerReadiness() {
   const accountReady = signedIn && emailVerified;
   const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
   const payoutsReady = Boolean(sellerProfile?.readyForPayouts);
+  const shippingSectionReady = buyerClarityReady && shippingReady;
 
-  const completedSteps = [accountReady, basicsReady, buyerClarityReady, shippingReady, photosReady, payoutsReady].filter(Boolean).length;
+  const completedSteps = [basicsReady, photosReady, shippingSectionReady].filter(Boolean).length;
 
   if (sellerSubmitButton && !listingSubmitInFlight) {
     sellerSubmitButton.disabled = false;
@@ -1588,8 +1574,8 @@ function renderSellerReadiness() {
       : !emailVerified
         ? "Verify email to submit"
       : !payoutsReady
-        ? "Set up Stripe to submit"
-        : "Submit listing for review";
+        ? "Set up payouts to submit"
+        : "Submit for review";
   }
 
   if (sellerPayoutGate) {
@@ -1601,36 +1587,21 @@ function renderSellerReadiness() {
 
     if (!signedIn) {
       sellerPreflight.dataset.state = "account";
-      if (sellerPreflightEyebrow) sellerPreflightEyebrow.textContent = "Start here";
       if (sellerPreflightTitle) sellerPreflightTitle.textContent = "Sign in or create an account";
-      if (sellerPreflightCopy) {
-        sellerPreflightCopy.textContent =
-          "Do this before adding photos so nothing is lost when you leave this page.";
-      }
       if (sellerPreflightAction) {
-        sellerPreflightAction.textContent = "Sign in or create account";
+        sellerPreflightAction.textContent = "Continue";
         sellerPreflightAction.href = "./auth.html?next=%2Fsell.html";
       }
     } else if (!emailVerified) {
       sellerPreflight.dataset.state = "verification";
-      if (sellerPreflightEyebrow) sellerPreflightEyebrow.textContent = "Secure your account";
       if (sellerPreflightTitle) sellerPreflightTitle.textContent = "Verify your email";
-      if (sellerPreflightCopy) {
-        sellerPreflightCopy.textContent =
-          "Open Account to resend the verification message, then return here to finish your listing.";
-      }
       if (sellerPreflightAction) {
         sellerPreflightAction.textContent = "Open account";
         sellerPreflightAction.href = "./account.html";
       }
     } else if (!payoutsReady) {
       sellerPreflight.dataset.state = "payouts";
-      if (sellerPreflightEyebrow) sellerPreflightEyebrow.textContent = "One-time seller setup";
       if (sellerPreflightTitle) sellerPreflightTitle.textContent = "Connect Stripe payouts";
-      if (sellerPreflightCopy) {
-        sellerPreflightCopy.textContent =
-          "Choose where Eleven Zero should send your money after a completed sale.";
-      }
       if (sellerPreflightAction) {
         sellerPreflightAction.textContent = "Set up payouts";
         sellerPreflightAction.href = "./account.html#seller-payouts";
@@ -1644,19 +1615,18 @@ function renderSellerReadiness() {
     const sellerPercent = Math.max(0, 100 - feePercent);
     const formatPercent = (value) => Number(value).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
     sellerFeeSummary.textContent =
-      `You keep ${formatPercent(sellerPercent)}% of the paddle price. ` +
-      `Eleven Zero keeps ${formatPercent(feePercent)}%; the buyer pays delivery. ` +
-      "Payout is released after confirmed delivery and the protection window.";
+      `${formatPercent(feePercent)}% seller fee · you keep ${formatPercent(sellerPercent)}%. ` +
+      "The buyer pays shipping. Payout follows confirmed delivery.";
   }
 
   if (listingStatus && !listingStatus.dataset.sessionSynced) {
     listingStatus.textContent = !signedIn
-      ? "Sign in first, then complete the three listing steps."
+      ? "Sign in above before submitting."
       : !emailVerified
-        ? "Verify your email before sending a paddle for review."
+        ? "Verify your email above before submitting."
       : !payoutsReady
-        ? "Connect Stripe payouts before sending your paddle for review."
-        : "Complete the steps, confirm your photos, and submit for review.";
+        ? "Set up payouts above before submitting."
+        : "Complete the remaining items, then submit.";
     listingStatus.dataset.sessionSynced = "true";
   }
 
@@ -1664,66 +1634,49 @@ function renderSellerReadiness() {
     return;
   }
 
-  sellerReadinessPill.textContent = `${completedSteps}/6 ready`;
+  sellerReadinessPill.textContent = `${completedSteps}/3 ready`;
+  const remainingSteps = 3 - completedSteps;
 
-  if (!signedIn) {
-    sellerReadinessTitle.textContent = "Sign in to start selling";
-    sellerReadinessCopy.textContent =
-      "Create or sign in so you can save public listing details and submit the paddle for Eleven Zero PB review.";
-  } else if (completedSteps < 6) {
-    sellerReadinessTitle.textContent = "You are building a strong listing";
-    sellerReadinessCopy.textContent =
-      payoutsReady
-        ? "Finish the remaining listing and shipping details below and this paddle will be ready to submit for review."
-        : "Finish the listing details below and connect Stripe payouts before submitting it for review.";
-  } else if (payoutsReady) {
-    sellerReadinessTitle.textContent = "Ready to submit";
-    sellerReadinessCopy.textContent =
-      "Your listing, shipping setup, and seller account all look complete. Submit it when you are ready and we’ll review it before it goes live.";
+  if (remainingSteps > 0) {
+    sellerReadinessTitle.textContent = `${remainingSteps} ${remainingSteps === 1 ? "thing" : "things"} left`;
+    sellerReadinessCopy.textContent = "Finish the items below to submit your listing.";
+  } else if (!accountReady || !payoutsReady) {
+    sellerReadinessTitle.textContent = "Listing ready";
+    sellerReadinessCopy.textContent = "Finish the account step above, then submit.";
   } else {
-    sellerReadinessTitle.textContent = "Stripe setup required";
-    sellerReadinessCopy.textContent =
-      "Your paddle details are ready. Finish Stripe payout setup before submitting the listing for review.";
+    sellerReadinessTitle.textContent = "Ready for review";
+    sellerReadinessCopy.textContent = "Submit when you are ready.";
   }
 
-  sellerReadinessGrid.innerHTML = [
-    sellerChecklistItem(
-      "Account",
-      accountReady,
-      !signedIn ? "Sign in to continue." : emailVerified ? "Signed in and verified." : "Verify your email to continue."
-    ),
-    sellerChecklistItem(
-      "Paddle details",
-      basicsReady,
-      basicsReady
-        ? "Paddle information is complete."
-        : "Add brand, model, style, color, and price."
-    ),
-    sellerChecklistItem(
-      "Buyer clarity",
-      buyerClarityReady,
-      buyerClarityReady ? "Shipping location is ready." : "Add the city/state this paddle ships from."
-    ),
-    sellerChecklistItem(
-      "Shipping",
-      shippingReady,
-      shippingReady ? shippingModeHelp(shippingConfig) : "Add the private ship-from address and ZIP."
-    ),
-    sellerChecklistItem(
-      "Photos",
-      photosReady,
-      photosReady
-        ? `${listingState.draftImages.length} photo${listingState.draftImages.length === 1 ? "" : "s"} confirmed.`
-        : listingState.draftImages.length
-          ? "Confirm these are current photos."
-          : "Add at least one photo."
-    ),
-    sellerChecklistItem(
-      "Stripe payouts",
-      payoutsReady,
-      payoutsReady ? "Seller payments are ready." : "Required before this listing can be submitted for review."
-    ),
-  ].join("");
+  const listingChecks = [
+    {
+      label: "Paddle details",
+      ready: basicsReady,
+      helper: "Add brand, model, style, color, and price.",
+    },
+    {
+      label: "Photos",
+      ready: photosReady,
+      helper: listingState.draftImages.length ? "Confirm the photos below." : "Add at least one photo.",
+    },
+    {
+      label: "Shipping",
+      ready: shippingSectionReady,
+      helper: "Add city, ZIP, and street address.",
+    },
+  ];
+  const remainingChecks = listingChecks.filter((check) => !check.ready);
+
+  sellerReadinessGrid.innerHTML = remainingChecks.length
+    ? remainingChecks
+        .map((check) => sellerChecklistItem(check.label, false, check.helper))
+        .join("")
+    : `
+      <div class="seller-all-ready">
+        <span aria-hidden="true">✓</span>
+        <strong>Details, photos, and shipping are complete.</strong>
+      </div>
+    `;
 }
 
 function bindListingActions() {

@@ -15106,3 +15106,406 @@ body.account-admin-mode {
     scroll-margin-top: 174px;
   }
 }
+
+/* SELL PAGE — CLEANER TRANSACTION FLOW */
+.sell-simple-page .seller-simple-section {
+  width: min(100%, 1080px);
+  margin: 24px auto 56px;
+}
+
+.sell-simple-page .seller-card-simple {
+  border-radius: 28px;
+  box-shadow: 0 18px 44px rgba(2, 30, 16, 0.065);
+}
+
+.sell-simple-page .seller-simple-heading {
+  align-items: center;
+  gap: 16px;
+  padding: 24px 30px 22px;
+  border-radius: 28px 28px 0 0;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(8, 233, 90, 0.17), transparent 35%),
+    linear-gradient(135deg, #f1fbea, #ffffff 76%);
+}
+
+.sell-simple-page .seller-simple-heading h1 {
+  font-size: clamp(2.8rem, 5vw, 4.5rem);
+  line-height: 0.9;
+}
+
+.sell-simple-page .seller-simple-heading p {
+  max-width: 44rem;
+  margin-top: 8px;
+  color: rgba(18, 18, 18, 0.64);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.sell-simple-page .seller-preflight {
+  gap: 11px;
+  margin: 14px 28px 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.sell-simple-page .seller-preflight-icon {
+  width: 34px;
+  height: 34px;
+  font-size: 0.9rem;
+}
+
+.sell-simple-page .seller-preflight strong {
+  font-size: 0.88rem;
+}
+
+.sell-simple-page .seller-preflight .button {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 0.76rem;
+}
+
+.sell-simple-page .seller-form-simple {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 18px;
+  padding: 18px 28px 28px;
+  background: #f7f8f5;
+}
+
+.sell-simple-page .seller-flow-main {
+  gap: 14px;
+}
+
+.sell-simple-page .seller-flow-panel {
+  gap: 16px;
+  padding: 22px;
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.sell-simple-page .seller-flow-panel-head {
+  align-items: center;
+  gap: 10px;
+}
+
+.sell-simple-page .seller-flow-number {
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.sell-simple-page .seller-flow-panel .seller-form-block-head h2 {
+  font-size: clamp(1.45rem, 2.4vw, 1.8rem);
+  line-height: 1;
+}
+
+.sell-simple-page .seller-flow-panel .seller-form-help {
+  margin-top: 3px;
+  font-size: 0.78rem;
+}
+
+.sell-simple-page .seller-basics-grid,
+.sell-simple-page .seller-shipping-compact-grid {
+  gap: 12px;
+}
+
+.sell-simple-page .seller-catalog-help {
+  margin-top: -5px;
+  font-size: 0.7rem;
+}
+
+.sell-simple-page .seller-photo-upload {
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.sell-simple-page .seller-file-dropzone {
+  min-height: 104px;
+  border-radius: 15px;
+}
+
+.sell-simple-page .seller-photo-toolbar {
+  min-height: 22px;
+}
+
+.sell-simple-page .seller-managed-shipping {
+  gap: 12px;
+  padding: 0;
+  background: transparent;
+}
+
+.sell-simple-page .seller-shipping-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #effbea;
+  color: rgba(3, 45, 23, 0.76);
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.sell-simple-page .seller-flow-sidebar {
+  position: sticky;
+  top: 88px;
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 14px 32px rgba(2, 30, 16, 0.07);
+}
+
+.sell-simple-page .seller-flow-summary {
+  gap: 9px;
+  padding: 16px;
+  border-radius: 0;
+  background: #effbea;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.sell-simple-page .seller-flow-summary .eyebrow {
+  color: rgba(3, 45, 23, 0.58);
+}
+
+.sell-simple-page .seller-flow-summary h2 {
+  color: var(--ink);
+  font-size: 1.62rem;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-pill {
+  min-height: 27px;
+  background: var(--ink);
+  color: #dfffd1;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-copy {
+  color: rgba(3, 45, 23, 0.64);
+  font-size: 0.74rem;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-grid {
+  gap: 5px;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item {
+  grid-template-columns: 1fr;
+  gap: 2px;
+  min-height: 44px;
+  padding: 7px 8px 7px 35px;
+  border: 1px solid rgba(3, 45, 23, 0.08);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item::before {
+  top: 12px;
+  background: rgba(3, 45, 23, 0.12);
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item strong {
+  color: var(--ink);
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item span {
+  overflow: hidden;
+  color: rgba(3, 45, 23, 0.62);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sell-simple-page .seller-all-ready {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+
+.sell-simple-page .seller-all-ready span {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--acid);
+  font-weight: 900;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-submit-strip {
+  gap: 9px;
+  padding: 15px 16px 16px;
+  border: 0;
+  border-top: 1px solid rgba(3, 45, 23, 0.08);
+  border-radius: 0;
+}
+
+.sell-simple-page .seller-fee-summary {
+  padding: 9px 10px;
+  font-size: 0.7rem;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-photo-attestation {
+  min-height: 42px;
+  padding: 9px;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-submit-button {
+  min-height: 46px;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-submit-meta {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-status {
+  grid-column: 1 / -1;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-draft-status-inline {
+  min-width: 0;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-draft-clear {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+@media (min-width: 961px) and (max-height: 900px) {
+  .sell-simple-page .seller-flow-sidebar {
+    position: sticky;
+  }
+}
+
+@media (max-width: 960px) {
+  .sell-simple-page .seller-form-simple {
+    grid-template-columns: 1fr;
+  }
+
+  .sell-simple-page .seller-flow-sidebar {
+    position: static;
+    grid-template-columns: 1fr;
+  }
+
+  .sell-simple-page .seller-flow-summary,
+  .sell-simple-page .seller-flow-sidebar .seller-submit-strip {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 700px) {
+  .sell-simple-page .seller-simple-section {
+    margin: 14px auto 40px;
+  }
+
+  .sell-simple-page .seller-card-simple {
+    border-radius: 22px;
+  }
+
+  .sell-simple-page .seller-simple-heading {
+    padding: 18px 20px 17px;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .sell-simple-page .seller-simple-heading h1 {
+    font-size: clamp(2.55rem, 12vw, 3.25rem);
+  }
+
+  .sell-simple-page .seller-simple-heading p {
+    margin-top: 7px;
+    font-size: 0.79rem;
+  }
+
+  .sell-simple-page .seller-preflight {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    margin: 10px 14px 0;
+    padding: 9px 10px;
+  }
+
+  .sell-simple-page .seller-preflight .button {
+    grid-column: auto;
+    width: auto;
+  }
+
+  .sell-simple-page .seller-form-simple {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .sell-simple-page .seller-flow-panel {
+    gap: 14px;
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .sell-simple-page .seller-flow-panel .seller-form-block-head h2 {
+    font-size: 1.38rem;
+  }
+
+  .sell-simple-page .seller-flow-summary {
+    order: 1;
+  }
+
+  .sell-simple-page .seller-flow-sidebar .seller-submit-strip {
+    order: 2;
+  }
+
+  .sell-simple-page .seller-flow-summary .seller-launch-copy {
+    display: block;
+  }
+
+  .sell-simple-page .seller-flow-summary .seller-launch-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .sell-simple-page .seller-simple-panel .seller-basics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sell-simple-page .seller-simple-panel .seller-mobile-wide,
+  .sell-simple-page .seller-simple-panel .seller-price-row,
+  .sell-simple-page .seller-simple-panel .seller-field-wide {
+    grid-column: 1 / -1;
+  }
+
+  .sell-simple-page .seller-shipping-compact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sell-simple-page .seller-shipping-compact-grid .seller-field-wide {
+    grid-column: 1 / -1;
+  }
+
+  .sell-simple-page .seller-file-dropzone {
+    min-height: 88px;
+  }
+}
+
+@media (max-width: 420px) {
+  .sell-simple-page .seller-preflight {
+    gap: 8px;
+  }
+
+  .sell-simple-page .seller-preflight-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .sell-simple-page .seller-preflight strong,
+  .sell-simple-page .seller-preflight .button {
+    font-size: 0.7rem;
+  }
+}
