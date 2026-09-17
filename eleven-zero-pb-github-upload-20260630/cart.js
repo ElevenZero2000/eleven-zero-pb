@@ -1,10 +1,12 @@
-const cartHeroCardNode = document.querySelector("[data-cart-hero-card]");
+const cartPageNode = document.querySelector(".cart-page");
+const cartStatusNode = document.querySelector("[data-cart-status]");
 const cartItemsPanelNode = document.querySelector("[data-cart-items-panel]");
 const cartCheckoutPanelNode = document.querySelector("[data-cart-checkout-panel]");
 const CART_ITEMS_STORAGE_KEY = "elevenZeroPbCartItems";
 const LEGACY_CART_DRAFT_STORAGE_KEY = "elevenZeroPbCartDraft";
 const SHIPPING_DRAFT_STORAGE_KEY = "elevenZeroPbShippingAddressDraft";
 const PENDING_CHECKOUT_LISTING_KEY = "elevenZeroPbPendingCheckoutListing";
+let shippingQuoteRequestVersion = 0;
 
 const cartState = {
   cartItems: [],
@@ -12,7 +14,7 @@ const cartState = {
   selectedListingId: 0,
   shipping: createDefaultShippingState(),
   busy: false,
-  statusMessage: "Choose a paddle, confirm shipping, then continue to secure checkout.",
+  statusMessage: "",
   statusTone: "neutral",
 };
 
@@ -68,7 +70,13 @@ function removeStorageItem(key) {
 }
 
 function formatMoneyFromCents(cents) {
-  return ElevenZeroApp.formatMoney(Number(cents || 0) / 100);
+  const amount = Number(cents || 0) / 100;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 function formatThickness(value) {
@@ -179,15 +187,8 @@ function getListingImages(item) {
   return Array.isArray(item.images) ? item.images.filter(Boolean) : item.primary_image ? [item.primary_image] : [];
 }
 
-function getCartSubtotalCents() {
-  return cartState.cartItems.reduce((sum, cartItem) => {
-    const item = getDisplayItem(cartItem.listingId);
-    return sum + Math.max(0, Number(item?.price_usd || cartItem.priceUsd || 0)) * 100;
-  }, 0);
-}
-
 function getSelectedSubtotalCents(item = getSelectedListing()) {
-  return Math.max(0, Number(item?.price_usd || 0)) * 100;
+  return Math.round(Math.max(0, Number(item?.price_usd || 0)) * 100);
 }
 
 function getSelectedTotalCents(item = getSelectedListing()) {
@@ -204,6 +205,21 @@ function getShippingAddressPayload() {
     postalCode: shipping.postalCode,
     country: shipping.country || "US",
   };
+}
+
+function getShippingQuoteKey() {
+  return JSON.stringify({
+    listingId: cartState.selectedListingId,
+    shippingAddress: getShippingAddressPayload(),
+  });
+}
+
+function invalidateShippingQuote(message = "Confirm shipping for the selected paddle.") {
+  shippingQuoteRequestVersion += 1;
+  cartState.shipping.quote = null;
+  cartState.shipping.busy = false;
+  cartState.shipping.statusMessage = message;
+  cartState.shipping.statusTone = "neutral";
 }
 
 function getShippingDraftSnapshot() {
@@ -403,8 +419,8 @@ function getCartActionState(item) {
 function setCartStatus(message, tone = "neutral") {
   cartState.statusMessage = message;
   cartState.statusTone = tone;
-  const statusNode = cartCheckoutPanelNode?.querySelector("[data-cart-status]");
-  ElevenZeroApp.setStatus(statusNode, message, tone);
+  if (cartStatusNode) cartStatusNode.hidden = !message;
+  ElevenZeroApp.setStatus(cartStatusNode, message, tone);
 }
 
 function setShippingStatus(message, tone = "neutral") {
@@ -414,50 +430,23 @@ function setShippingStatus(message, tone = "neutral") {
   ElevenZeroApp.setStatus(statusNode, message, tone);
 }
 
-function renderHeroCard() {
-  if (!cartHeroCardNode) return;
-
-  const itemCount = cartState.cartItems.length;
-  const subtotal = getCartSubtotalCents();
-  const selectedItem = getSelectedListing();
-
-  cartHeroCardNode.innerHTML = `
-    <span>${ElevenZeroApp.escapeHtml(`${itemCount} ${itemCount === 1 ? "paddle" : "paddles"} saved`)}</span>
-    <strong>${ElevenZeroApp.escapeHtml(formatMoneyFromCents(subtotal))} in saved gear</strong>
-    <p>${ElevenZeroApp.escapeHtml(
-      selectedItem
-        ? `Selected: ${selectedItem.brand} ${selectedItem.model}`
-        : "Pick a paddle below to continue."
-    )}</p>
-  `;
-}
-
 function renderEmptyCart() {
+  cartPageNode?.classList.add("is-empty");
   if (cartItemsPanelNode) {
     cartItemsPanelNode.innerHTML = `
-      <div class="cart-panel-head">
-        <div>
-          <p class="eyebrow">Cart items</p>
-          <h2>Your cart is empty.</h2>
-        </div>
-      </div>
       <div class="cart-empty-state">
-        <strong>No paddles saved yet</strong>
-        <span>Open the shop, choose a paddle, and click Buy now to add it here.</span>
+        <h2>No paddles yet</h2>
+        <p>Find a paddle you like and add it to your cart. It’ll be here when you’re ready.</p>
         <a class="button button-dark" href="./shop.html">Shop paddles</a>
       </div>
     `;
   }
 
   if (cartCheckoutPanelNode) {
-    cartCheckoutPanelNode.innerHTML = `
-      <p class="eyebrow">Checkout</p>
-      <h2>Nothing to checkout yet.</h2>
-      <p class="cart-muted-copy">Your checkout summary will appear once you add a paddle.</p>
-    `;
+    cartCheckoutPanelNode.hidden = true;
+    cartCheckoutPanelNode.innerHTML = "";
   }
-
-  renderHeroCard();
+  setCartStatus(cartState.statusMessage, cartState.statusTone);
 }
 
 function renderCartItems() {
@@ -479,6 +468,7 @@ function renderCartItems() {
         .filter(Boolean)
         .join(" · ");
       const isSelected = Number(cartState.selectedListingId) === Number(cartItem.listingId);
+      const isUnavailable = getBaseActionState(item).action === "disabled";
 
       return `
         <article class="cart-product-row${isSelected ? " is-selected" : ""}">
@@ -487,6 +477,7 @@ function renderCartItems() {
             type="button"
             data-select-listing="${ElevenZeroApp.escapeHtml(cartItem.listingId)}"
             aria-label="Select ${ElevenZeroApp.escapeHtml(title)}"
+            aria-pressed="${isSelected}"
           >
             <span class="cart-product-image">
               ${
@@ -498,10 +489,12 @@ function renderCartItems() {
             <span class="cart-product-info">
               <strong>${ElevenZeroApp.escapeHtml(title || "Saved paddle")}</strong>
               <em>${ElevenZeroApp.escapeHtml(meta || "Details available on listing page")}</em>
-              <small>${ElevenZeroApp.escapeHtml(isSelected ? "Selected for checkout" : "Saved in cart")}</small>
+              <small>${ElevenZeroApp.escapeHtml(
+                `${isSelected ? "Selected" : "Select for checkout"}${isUnavailable ? " · Checkout unavailable" : ""}`
+              )}</small>
             </span>
             <span class="cart-product-price">${ElevenZeroApp.escapeHtml(
-              ElevenZeroApp.formatMoney(item.price_usd || cartItem.priceUsd)
+              formatMoneyFromCents(Number(item.price_usd ?? cartItem.priceUsd) * 100)
             )}</span>
           </button>
           <div class="cart-product-actions">
@@ -522,10 +515,10 @@ function renderCartItems() {
   cartItemsPanelNode.innerHTML = `
     <div class="cart-panel-head">
       <div>
-        <p class="eyebrow">Cart items</p>
         <h2>${ElevenZeroApp.escapeHtml(
-          `${cartState.cartItems.length} ${cartState.cartItems.length === 1 ? "paddle" : "paddles"} saved`
+          `${cartState.cartItems.length} ${cartState.cartItems.length === 1 ? "paddle" : "paddles"}`
         )}</h2>
+        <p class="cart-muted-copy">Checkout is one paddle at a time.</p>
       </div>
       <div class="cart-panel-actions">
         <a class="text-link" href="./shop.html">Continue shopping</a>
@@ -535,15 +528,14 @@ function renderCartItems() {
     <div class="cart-product-list">
       ${itemsMarkup}
     </div>
-    <p class="cart-muted-copy">
-      Checkout currently runs one paddle at a time. Saved paddles stay here so buyers can compare before choosing.
-    </p>
   `;
 
   cartItemsPanelNode.querySelectorAll("[data-select-listing]").forEach((button) => {
     button.addEventListener("click", () => {
-      cartState.selectedListingId = Number(button.dataset.selectListing || 0);
-      cartState.shipping.quote = null;
+      const listingId = Number(button.dataset.selectListing || 0);
+      if (listingId === cartState.selectedListingId) return;
+      cartState.selectedListingId = listingId;
+      invalidateShippingQuote();
       replaceCartUrl(cartState.selectedListingId);
       renderCart();
     });
@@ -559,7 +551,7 @@ function renderCartItems() {
     cartState.cartItems = [];
     cartState.listings = [];
     cartState.selectedListingId = 0;
-    cartState.shipping.quote = null;
+    invalidateShippingQuote();
     saveCartItems();
     removeStorageItem(LEGACY_CART_DRAFT_STORAGE_KEY);
     replaceCartUrl(0);
@@ -575,6 +567,7 @@ function renderCheckoutPanel() {
     renderEmptyCart();
     return;
   }
+  cartCheckoutPanelNode.hidden = false;
 
   const quote = cartState.shipping.quote;
   const shippingPolicy = getShippingPolicy(selectedItem);
@@ -586,7 +579,7 @@ function renderCheckoutPanel() {
       : shippingPolicy.mode === "flat"
         ? shippingPolicy.label
         : "Estimate needed";
-  const totalLine = quote ? formatMoneyFromCents(getSelectedTotalCents(selectedItem)) : "Calculated after shipping";
+  const totalLine = quote ? formatMoneyFromCents(getSelectedTotalCents(selectedItem)) : "Confirm shipping";
   const estimateButtonLabel = cartState.shipping.busy
     ? shippingPolicy.mode === "calculated"
       ? "Calculating..."
@@ -594,31 +587,34 @@ function renderCheckoutPanel() {
     : shippingPolicy.mode === "calculated"
       ? "Estimate shipping"
       : "Confirm shipping";
-  const checkoutDisabled = actionState.action === "disabled" || cartState.busy || cartState.shipping.busy;
-  const checkoutLabel = cartState.busy ? "Opening checkout..." : actionState.buttonLabel;
+  const checkoutDisabled =
+    actionState.action === "disabled" || actionState.action === "estimate-needed" ||
+    cartState.busy || cartState.shipping.busy;
+  const checkoutLabel = cartState.busy
+    ? "Opening checkout..."
+    : actionState.action === "estimate-needed"
+      ? "Continue to checkout"
+      : actionState.buttonLabel;
 
   cartCheckoutPanelNode.innerHTML = `
     <div class="cart-panel-head">
       <div>
-        <p class="eyebrow">Checkout</p>
-        <h2>Selected paddle</h2>
+        <h2>Order summary</h2>
+        <p class="cart-muted-copy">For your selected paddle</p>
       </div>
-      <span class="listing-status-pill listing-status-${ElevenZeroApp.escapeHtml(actionState.tone)}">
-        ${ElevenZeroApp.escapeHtml(actionState.statusLabel)}
-      </span>
     </div>
 
     <div class="cart-summary-card">
       <div class="cart-summary-row">
         <span>${ElevenZeroApp.escapeHtml(selectedItem.brand)} ${ElevenZeroApp.escapeHtml(selectedItem.model)}</span>
-        <strong>${ElevenZeroApp.escapeHtml(ElevenZeroApp.formatMoney(selectedItem.price_usd))}</strong>
+        <strong>${ElevenZeroApp.escapeHtml(formatMoneyFromCents(getSelectedSubtotalCents(selectedItem)))}</strong>
       </div>
       <div class="cart-summary-row">
         <span>Shipping</span>
         <strong>${ElevenZeroApp.escapeHtml(shippingLine)}</strong>
       </div>
       <div class="cart-summary-row cart-summary-total">
-        <span>Total</span>
+        <span>${quote?.isEstimate ? "Estimated total" : "Total"}</span>
         <strong>${ElevenZeroApp.escapeHtml(totalLine)}</strong>
       </div>
     </div>
@@ -703,9 +699,6 @@ function renderCheckoutPanel() {
       <p>${ElevenZeroApp.escapeHtml(actionState.reason)}</p>
     </div>
 
-    <div class="seller-status listing-detail-status" aria-live="polite" data-cart-status>
-      ${ElevenZeroApp.escapeHtml(cartState.statusMessage)}
-    </div>
   `;
 
   ElevenZeroApp.setStatus(
@@ -713,17 +706,13 @@ function renderCheckoutPanel() {
     cartState.shipping.statusMessage,
     cartState.shipping.statusTone
   );
-  ElevenZeroApp.setStatus(
-    cartCheckoutPanelNode.querySelector("[data-cart-status]"),
-    cartState.statusMessage,
-    cartState.statusTone
-  );
   bindShippingForm();
   bindCheckoutButton();
 }
 
 function renderCart() {
-  renderHeroCard();
+  cartPageNode?.classList.toggle("is-empty", !cartState.cartItems.length);
+  setCartStatus(cartState.statusMessage, cartState.statusTone);
   renderCartItems();
   renderCheckoutPanel();
 }
@@ -749,12 +738,17 @@ function bindShippingForm() {
   form.addEventListener("submit", handleShippingQuoteSubmit);
   form.querySelectorAll("input").forEach((input) => {
     const handleDraftUpdate = () => {
+      const previousQuoteKey = getShippingQuoteKey();
       updateShippingDraftFromForm(form);
-      if (!cartState.shipping.quote) return;
-      cartState.shipping.quote = null;
-      cartState.shipping.statusMessage = "Address updated. Estimate shipping again before checkout.";
+      if (getShippingQuoteKey() === previousQuoteKey) return;
+      if (!cartState.shipping.quote && !cartState.shipping.busy) return;
+      const cursor = input.selectionStart;
+      invalidateShippingQuote("Address updated. Confirm shipping again before checkout.");
       cartState.shipping.statusTone = "warning";
       renderCart();
+      const replacement = cartCheckoutPanelNode.querySelector(`input[name="${input.name}"]`);
+      replacement?.focus();
+      if (cursor !== null) replacement?.setSelectionRange(cursor, cursor);
     };
 
     input.addEventListener("input", handleDraftUpdate);
@@ -795,7 +789,13 @@ async function handleShippingQuoteSubmit(event) {
   if (!selectedItem) return;
 
   updateShippingDraftFromForm(event.currentTarget);
+  const requestVersion = ++shippingQuoteRequestVersion;
+  const quoteKey = getShippingQuoteKey();
+  const shippingAddress = getShippingAddressPayload();
+  cartState.shipping.quote = null;
   cartState.shipping.busy = true;
+  cartState.shipping.statusMessage = "Confirming shipping…";
+  cartState.shipping.statusTone = "neutral";
   renderCart();
 
   try {
@@ -803,25 +803,31 @@ async function handleShippingQuoteSubmit(event) {
       method: "POST",
       body: {
         listingId: selectedItem.id,
-        shippingAddress: getShippingAddressPayload(),
+        shippingAddress,
       },
     });
 
+    // A slow response must not price a different paddle or delivery address.
+    if (requestVersion !== shippingQuoteRequestVersion || quoteKey !== getShippingQuoteKey()) return;
     cartState.shipping.quote = response.quote || null;
     setShippingStatus(
-      response.message || "Shipping estimate is ready. Your total is updated below.",
+      response.message || "Shipping is ready. Your order total is updated.",
       "success"
     );
   } catch (error) {
+    if (requestVersion !== shippingQuoteRequestVersion || quoteKey !== getShippingQuoteKey()) return;
     cartState.shipping.quote = null;
     setShippingStatus(error.message, "error");
   } finally {
-    cartState.shipping.busy = false;
-    renderCart();
+    if (requestVersion === shippingQuoteRequestVersion) {
+      cartState.shipping.busy = false;
+      renderCart();
+    }
   }
 }
 
 async function handleCheckout() {
+  if (cartState.busy || cartState.shipping.busy) return;
   const selectedItem = getSelectedListing();
   if (!selectedItem) return;
 
@@ -862,7 +868,7 @@ function removeCartItem(listingId) {
 
   if (Number(cartState.selectedListingId) === Number(listingId)) {
     cartState.selectedListingId = cartState.cartItems[0]?.listingId || 0;
-    cartState.shipping.quote = null;
+    invalidateShippingQuote();
   }
 
   saveCartItems();

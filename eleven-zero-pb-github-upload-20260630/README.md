@@ -77,3 +77,27 @@ in this release. Trainers and clients remain responsible for agreeing on lesson 
 Deployment note:
 
 For the smoothest Render setup, upload the contents of this folder as the root of your GitHub repo.
+
+### Operational checks
+
+Local regression checks: `python3 -m unittest discover` and
+`node --test test_cart.cjs test_listing.cjs`. These use temporary data and mocked
+providers, not live orders or charges.
+
+- Public static files use an explicit allowlist. Server code, tests, environment settings,
+  databases, repository files, and directory listings must not be accessible over HTTP.
+- `GET /api/health` performs a bounded, read-only database readiness check and returns
+  HTTP 503 when it fails. It does not create a database or contact payment/shipping providers.
+- The owner's Account page includes Website status. Its authenticated
+  `/api/admin/system-health` endpoint reports database and background order-processing
+  status without exposing credentials. A configured provider is not proof of a successful
+  live transaction; connection checks are deliberately not made by this endpoint.
+- Background order-processing failures are recorded in server logs with safe issue codes.
+  Investigate repeated failures in Render's Logs and the owner status panel before retrying
+  financial or shipping actions. Worker history is in memory and resets on a restart.
+- `render.yaml` specifies `/api/health` as the health check path. For an existing service
+  not managed by this Blueprint, set that path in Render's service health-check settings.
+  This repository change alone does not change a manually configured service.
+- The owner panel is on-demand visibility, not a paging/uptime service. External alerts,
+  database backup restoration, load testing, and a full live purchase-to-delivery test
+  remain separate launch checks.

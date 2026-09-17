@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Eleven Zero PB Dashboard</title>
+    <title>Your account · Eleven Zero PB</title>
     <meta
       name="description"
       content="Manage your Eleven Zero PB listings, purchases, sales, payouts, and account settings."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260820traininghub1" />
+    <link rel="stylesheet" href="./styles.css?v=20260917marketpolish1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -77,7 +77,7 @@
             </div>
 
             <div class="hero-actions" data-account-actions>
-              <a class="button button-primary" href="./shop.html">Browse paddles</a>
+              <a class="button button-primary" href="./shop.html">Shop paddles</a>
               <a class="button button-secondary" href="./sell.html">Sell a paddle</a>
               <a class="button button-secondary" href="#training-hub" data-paused-feature="trainers" hidden>Training Hub</a>
               <a class="button button-secondary" href="./trainers.html#join" data-paused-feature="trainers" hidden>Join as Trainer</a>
@@ -419,6 +419,22 @@
                 </div>
               </div>
 
+              <section class="admin-system-health" aria-labelledby="system-health-title" data-system-health>
+                <div class="admin-system-health-heading">
+                  <div>
+                    <h3 id="system-health-title">Website status</h3>
+                    <p data-system-health-summary aria-live="polite">Checking website status…</p>
+                  </div>
+                  <button type="button" class="button button-secondary" data-system-health-refresh>Refresh status</button>
+                </div>
+                <div class="admin-system-health-checks" data-system-health-checks></div>
+                <details class="admin-system-health-details">
+                  <summary>Connection and processing details</summary>
+                  <div data-system-health-details></div>
+                  <p>Connection settings do not confirm a completed payment or delivery. Refresh to check the latest status.</p>
+                </details>
+              </section>
+
               <div class="admin-commerce-grid">
                 <article class="dashboard-card admin-notifications-card" id="admin-activity">
                   <div class="admin-commerce-head">
@@ -541,16 +557,15 @@
             alt="Eleven Zero"
           />
           <p class="footer-copy">
-            Your Eleven Zero PB dashboard is the control center for the live
-            marketplace foundation.
+            Manage your listings, purchases, sales, and payouts in one place.
           </p>
         </div>
 
         <div class="footer-links">
-          <a href="./index.html">Marketplace</a>
+          <a href="./index.html">Home</a>
           <a href="./shop.html">Shop</a>
           <a href="./sell.html">Sell</a>
-          <a href="./auth.html">Sign in</a>
+          <a href="./account.html">Account</a>
           <a href="./privacy.html">Privacy</a>
           <a href="./terms.html">Terms</a>
         </div>
@@ -619,7 +634,7 @@
     </dialog>
 
     <script src="./app.js?v=20260916marketfocus1"></script>
-    <script src="./account.js?v=20260916launch1"></script>
+    <script src="./account.js?v=20260917health1"></script>
     <script src="./header-tweaks.js?v=20260916marketfocus1"></script>
   </body>
 </html>

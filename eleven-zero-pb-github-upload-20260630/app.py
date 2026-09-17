@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -33,6 +34,69 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 APP_ROOT = Path(__file__).resolve().parent
 PADDLE_CATALOG_PATH = APP_ROOT / "paddle-catalog.json"
+
+# Only reviewed browser entry points are public. Never expose the application
+# directory wholesale: it also contains source, configuration, tests and data.
+PUBLIC_ROOT_FILES = frozenset({
+    "index.html", "shop.html", "listing.html", "sell.html", "cart.html",
+    "account.html", "auth.html", "courts.html", "trainers.html",
+    "trainer-profile.html", "privacy.html", "terms.html",
+    "app.js", "marketplace.js", "listing.js", "cart.js", "cart-redirect.js",
+    "account.js", "auth.js", "courts.js", "trainers.js", "trainer-profile.js",
+    "header-tweaks.js", "styles.css", "cart.css", "header-tweaks.css",
+    "split-preview.css", "paddle-catalog.json", "robots.txt", "sitemap.xml",
+})
+PUBLIC_ASSET_SUFFIXES = frozenset({
+    ".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif", ".svg", ".ico",
+    ".woff", ".woff2", ".ttf", ".otf",
+})
+LOGGER = logging.getLogger("eleven_zero")
+HEALTH_DB_TIMEOUT_SECONDS = 0.25
+HEALTH_DB_DEADLINE_SECONDS = 0.5
+WORKER_HEALTH_LOCK = threading.Lock()
+WORKER_HEALTH: dict[str, dict] = {}
+
+
+def log_operational_event(event: str, *, error: Exception | None = None, **fields) -> None:
+    """Log controlled fields only; exception messages can contain credentials/PII."""
+    payload = {"event": event, "time": utc_now(), **fields}
+    if error is not None:
+        payload["errorType"] = (
+            "database" if isinstance(error, sqlite3.Error)
+            else "network" if isinstance(error, OSError)
+            else "provider" if isinstance(error, (RuntimeError, ValueError))
+            else "internal"
+        )
+    LOGGER.log(logging.WARNING if error is not None else logging.INFO, json.dumps(payload))
+
+
+def public_static_path(request_path: str) -> Path | None:
+    # No decoding/normalization: alternate encodings and traversal are rejected,
+    # not translated into a potentially sensitive filesystem path.
+    if not request_path.startswith("/") or any(
+        character in request_path for character in ("%", "\\", "\x00", ";")
+    ):
+        return None
+    parts = request_path[1:].split("/")
+    if any(not part or part.startswith(".") for part in parts):
+        return None
+    if not (
+        len(parts) == 1 and parts[0] in PUBLIC_ROOT_FILES
+        or len(parts) > 1 and parts[0] == "assets"
+        and Path(parts[-1]).suffix.lower() in PUBLIC_ASSET_SUFFIXES
+    ):
+        return None
+    root = APP_ROOT.resolve()
+    candidate = root.joinpath(*parts)
+    try:
+        # Reject symlinks even if their destination is currently inside root:
+        # public asset names must never alias a private file.
+        if any(root.joinpath(*parts[:index]).is_symlink() for index in range(1, len(parts) + 1)):
+            return None
+        candidate.resolve(strict=True).relative_to(root)
+        return candidate if candidate.is_file() else None
+    except (OSError, RuntimeError, ValueError):
+        return None
 
 
 def paddle_catalog_key(value) -> str:
@@ -512,6 +576,113 @@ def connect_db() -> sqlite3.Connection:
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 35000")
     return connection
+
+
+def connect_health_db() -> sqlite3.Connection:
+    """A bounded, read-only connection that cannot create a missing database."""
+    deadline = time.monotonic() + HEALTH_DB_DEADLINE_SECONDS
+    connection = sqlite3.connect(
+        DB_PATH.resolve().as_uri() + "?mode=ro",
+        uri=True,
+        timeout=HEALTH_DB_TIMEOUT_SECONDS,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 100)
+    try:
+        connection.execute("PRAGMA query_only = ON")
+    except sqlite3.Error:
+        connection.close()
+        raise
+    return connection
+
+
+def database_readiness() -> dict:
+    """Probe required schema and a bounded read; never migrate or reconcile."""
+    try:
+        with closing(connect_health_db()) as connection:
+            for query in (
+                "SELECT id, email, account_status FROM users LIMIT 1",
+                "SELECT token, user_id, created_at FROM sessions LIMIT 1",
+                "SELECT id, approval_status, sale_status FROM listings LIMIT 1",
+                "SELECT id, payout_status, tracking_status FROM orders LIMIT 1",
+                "SELECT id, approval_status FROM trainers LIMIT 1",
+                "SELECT setting_key, setting_value FROM app_settings LIMIT 1",
+            ):
+                connection.execute(query).fetchone()
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+        log_operational_event("database_readiness_failed", error=error)
+        return {"status": "unavailable", "readOnly": True}
+    return {"status": "ready", "readOnly": True}
+
+
+def worker_health_started(name: str) -> None:
+    with WORKER_HEALTH_LOCK:
+        state = WORKER_HEALTH.setdefault(name, {})
+        state.setdefault("startedAt", utc_now())
+        state.update(status="running", lastStartedAt=utc_now())
+
+
+def worker_health_finished(
+    name: str, *, result: dict | None = None, error_code: str = ""
+) -> None:
+    with WORKER_HEALTH_LOCK:
+        state = WORKER_HEALTH.setdefault(name, {})
+        state["lastFinishedAt"] = utc_now()
+        if result is not None:
+            state["lastResult"] = dict(result)
+        if error_code:
+            state.update(
+                status="degraded" if result is not None else "error",
+                lastFailureAt=utc_now(),
+                lastErrorCode=error_code,
+                consecutiveFailures=state.get("consecutiveFailures", 0) + 1,
+            )
+        else:
+            state.update(status="ok", lastSuccessAt=utc_now(), consecutiveFailures=0)
+
+
+def worker_health_snapshot(name: str, interval: int) -> dict:
+    with WORKER_HEALTH_LOCK:
+        state = dict(WORKER_HEALTH.get(name, {}))
+    snapshot = {
+        "status": "not_started", "startedAt": None, "lastStartedAt": None,
+        "lastFinishedAt": None, "lastSuccessAt": None, "lastFailureAt": None,
+        "lastErrorCode": "", "consecutiveFailures": 0,
+        "lastResult": {"refreshed": 0, "released": 0, "trackingFailures": 0, "payoutFailures": 0},
+        **state, "intervalSeconds": interval,
+    }
+    last_run = parse_activity_datetime(snapshot["lastStartedAt"])
+    if last_run and (datetime.now(timezone.utc) - last_run).total_seconds() > max(interval * 3, 900):
+        snapshot["status"] = "stale"
+    return snapshot
+
+
+def system_health_payload() -> dict:
+    database = database_readiness()
+    providers = {
+        "stripe": {"configured": bool(STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY),
+                   "webhookConfigured": bool(STRIPE_WEBHOOK_SECRET)},
+        "shippo": {"configured": shippo_is_configured()},
+        "email": {"configured": transactional_email_is_configured()},
+        "googlePlaces": {"configured": google_places_is_configured()},
+    }
+    for provider in providers.values():
+        # Presence of a setting is not evidence that credentials or a service work.
+        provider["validation"] = "not_checked"
+    workers = {
+        "orderMaintenance": worker_health_snapshot("orderMaintenance", PAYOUT_RELEASE_CHECK_SECONDS),
+        "shippoWebhook": worker_health_snapshot("shippoWebhook", 6 * 60 * 60),
+    }
+    degraded = (
+        any(not providers[name]["configured"] for name in ("stripe", "shippo", "email"))
+        or not providers["stripe"]["webhookConfigured"]
+        or any(worker["status"] not in {"ok", "running"} for worker in workers.values())
+    )
+    status = "unavailable" if database["status"] != "ready" else "degraded" if degraded else "ready"
+    return {
+        "ok": status == "ready", "status": status, "checkedAt": utc_now(),
+        "database": database, "providers": providers, "workers": workers,
+    }
 
 
 def app_setting(setting_key: str) -> str:
@@ -3905,6 +4076,8 @@ def reconcile_order_tracking_and_payouts(limit: int = 12) -> dict:
     """Bounded maintenance pass used by the background worker and dashboards."""
     refreshed = 0
     released = 0
+    tracking_failures = 0
+    payout_failures = 0
     with closing(connect_db()) as connection:
         tracking_rows = connection.execute(
             """
@@ -3929,7 +4102,9 @@ def reconcile_order_tracking_and_payouts(limit: int = 12) -> dict:
         try:
             if refresh_shippo_tracking_for_order(int(row["id"])):
                 refreshed += 1
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError) as error:
+            tracking_failures += 1
+            log_operational_event("tracking_refresh_failed", error=error)
             continue
 
     with closing(connect_db()) as connection:
@@ -3959,7 +4134,13 @@ def reconcile_order_tracking_and_payouts(limit: int = 12) -> dict:
         result = release_seller_transfer_for_order(before_id)
         if result and row_value(result, "payout_status") == "released":
             released += 1
-    return {"refreshed": refreshed, "released": released}
+        elif result and row_value(result, "payout_status") == "attention_needed":
+            payout_failures += 1
+            log_operational_event("payout_release_needs_attention", error=RuntimeError())
+    return {
+        "refreshed": refreshed, "released": released,
+        "trackingFailures": tracking_failures, "payoutFailures": payout_failures,
+    }
 
 
 def shippo_tracking_webhook_url() -> str:
@@ -5976,6 +6157,59 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
         super().do_GET()
 
+    def do_HEAD(self):
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/"):
+            # Only observational API routes support HEAD. Some existing GET
+            # routes refresh checkout/provider state and must not run for HEAD.
+            media_route = re.fullmatch(
+                r"/api/(?:account/profile-(?:pending-)?image|"
+                r"admin/profiles/\d+/pending-image|listings/\d+/images/\d+|"
+                r"trainers/\d+/(?:image|(?:pending-)?images/\d+))",
+                parsed.path,
+            )
+            if parsed.path in {"/api/health", "/api/admin/system-health", "/api/paddle-catalog"} or media_route:
+                self.handle_api_get(parsed)
+            else:
+                self.send_json({"error": "HEAD is not supported for this API route."}, status=HTTPStatus.METHOD_NOT_ALLOWED)
+            return
+        if parsed.path in {"", "/"}:
+            self.path = "/index.html"
+        super().do_HEAD()
+
+    def send_head(self):
+        parsed = urlparse(self.path)
+        path = None if parsed.params else public_static_path(parsed.path)
+        if path is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return None
+        try:
+            source = path.open("rb")
+        except OSError:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return None
+        try:
+            stat = os.fstat(source.fileno())
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", self.guess_type(str(path)))
+            self.send_header("Content-Length", str(stat.st_size))
+            self.send_header("Last-Modified", self.date_time_string(stat.st_mtime))
+            self.end_headers()
+            return source
+        except Exception:
+            source.close()
+            raise
+
+    def log_message(self, format, *args):
+        # Base logging includes the raw URL (e.g. webhook tokens in queries).
+        # Keep useful status/method data without cookies, URLs, IPs or payloads.
+        status = str(args[1]) if len(args) > 1 else ""
+        log_operational_event(
+            "http_request", method=self.command if self.command in {"GET", "HEAD", "POST"} else "other",
+            status=int(status) if status.isdigit() else None,
+            routeType="api" if self.path.startswith("/api/") else "static",
+        )
+
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
@@ -6040,7 +6274,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if cookie:
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
-        self.wfile.write(body)
+        if getattr(self, "command", "GET") != "HEAD":
+            self.wfile.write(body)
 
     def send_bytes(
         self,
@@ -6055,7 +6290,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if cache_control:
             self._cache_control_override = cache_control
         self.end_headers()
-        self.wfile.write(body)
+        if getattr(self, "command", "GET") != "HEAD":
+            self.wfile.write(body)
         self._cache_control_override = None
 
     def parse_cookies(self) -> SimpleCookie:
@@ -6269,7 +6505,41 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
 
     def handle_api_get(self, parsed):
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "time": utc_now(), "environment": APP_ENV})
+            ready = database_readiness()["status"] == "ready"
+            self.send_json(
+                {"ok": ready, "time": utc_now()},
+                status=HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        if parsed.path == "/api/admin/system-health":
+            # Authenticate without normal session cleanup writes, external
+            # validation, dashboard building, or payment reconciliation.
+            morsel = self.parse_cookies().get(SESSION_COOKIE)
+            if not morsel:
+                self.send_json({"error": "Please sign in first."}, status=HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                with closing(connect_health_db()) as connection:
+                    user = connection.execute(
+                        """SELECT users.email, users.account_status, sessions.created_at
+                           FROM sessions JOIN users ON users.id = sessions.user_id
+                           WHERE sessions.token = ?""",
+                        (morsel.value,),
+                    ).fetchone()
+            except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+                log_operational_event("health_authentication_unavailable", error=error)
+                self.send_json({"error": "Service temporarily unavailable."}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            created_at = parse_activity_datetime(user["created_at"]) if user else None
+            if not user or user["account_status"] == "suspended" or not created_at or (
+                datetime.now(timezone.utc) - created_at
+            ).total_seconds() > SESSION_MAX_AGE_SECONDS:
+                self.send_json({"error": "Please sign in first."}, status=HTTPStatus.UNAUTHORIZED)
+                return
+            if not self.require_admin({"isAdmin": email_is_admin(user["email"])}):
+                return
+            self.send_json(system_health_payload())
             return
 
         if parsed.path == "/api/site-config":
@@ -12927,30 +13197,46 @@ def maintenance_worker() -> None:
     while True:
         now = time.monotonic()
         if now >= next_webhook_check:
+            worker_health_started("shippoWebhook")
             try:
                 result = ensure_shippo_tracking_webhook()
-                if result.get("configured"):
+                if result.get("configured") and result.get("webhookId"):
                     set_app_setting("shippo_tracking_webhook_last_error", "")
+                    worker_health_finished("shippoWebhook")
+                else:
+                    worker_health_finished("shippoWebhook", error_code="webhook_not_configured")
+                    log_operational_event("webhook_not_configured", error=RuntimeError())
             except (RuntimeError, ValueError, sqlite3.Error) as error:
+                worker_health_finished("shippoWebhook", error_code="webhook_registration_failed")
+                log_operational_event("webhook_registration_failed", error=error)
                 try:
                     set_app_setting(
                         "shippo_tracking_webhook_last_error",
                         compact_whitespace(str(error))[:500],
                     )
-                except sqlite3.Error:
-                    pass
+                except sqlite3.Error as storage_error:
+                    log_operational_event("webhook_failure_storage_failed", error=storage_error)
             next_webhook_check = now + 6 * 60 * 60
 
+        worker_health_started("orderMaintenance")
         try:
-            reconcile_order_tracking_and_payouts(limit=12)
-        except (RuntimeError, ValueError, sqlite3.Error):
+            result = reconcile_order_tracking_and_payouts(limit=12)
+            failed = bool(result.get("trackingFailures") or result.get("payoutFailures"))
+            worker_health_finished(
+                "orderMaintenance", result=result,
+                error_code="maintenance_jobs_failed" if failed else "",
+            )
+            log_operational_event("order_maintenance_finished", **result)
+        except (RuntimeError, ValueError, sqlite3.Error) as error:
             # Each pass is bounded and idempotent. A later pass will retry any
             # Shippo, Stripe, or transient database failure.
-            pass
+            worker_health_finished("orderMaintenance", error_code="maintenance_pass_failed")
+            log_operational_event("order_maintenance_failed", error=error)
         time.sleep(PAYOUT_RELEASE_CHECK_SECONDS)
 
 
 def run() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_database()
     threading.Thread(
         target=maintenance_worker,

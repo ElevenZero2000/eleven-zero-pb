@@ -5549,7 +5549,36 @@ body[data-nav="sell"] .seller-file-dropzone {
 
 .listing-simple-details .listing-detail-bullets {
   margin-top: 14px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.listing-seller-note {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.listing-note-specs {
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.listing-note-specs > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(3, 45, 23, 0.08);
+  overflow-wrap: anywhere;
+}
+
+.listing-note-specs dt {
+  color: rgba(18, 18, 18, 0.65);
+}
+
+.listing-note-specs dd {
+  margin: 0;
+  font-weight: 600;
 }
 
 .listing-review-panel h2,
@@ -6289,6 +6318,85 @@ body[data-nav="sell"] .seller-file-dropzone {
   grid-template-columns: minmax(300px, 0.86fr) minmax(0, 1.5fr);
   gap: 20px;
   min-width: 0;
+}
+
+.admin-system-health {
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid #d6e3ef;
+  border-radius: 20px;
+  background: #f5f9fd;
+  color: #173b60;
+}
+
+.admin-system-health-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.admin-system-health-heading h3 {
+  margin: 0;
+  font-family: var(--body);
+  font-size: 1.1rem;
+  text-transform: none;
+}
+
+.admin-system-health-heading p,
+.admin-system-health-details p {
+  margin: 7px 0 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.admin-system-health-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.admin-system-health-check {
+  display: grid;
+  gap: 5px;
+  padding: 13px 16px;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 0.88rem;
+}
+
+.admin-system-health-check[data-tone="warning"] strong {
+  color: #8a4300;
+}
+
+.admin-system-health-details {
+  font-size: 0.88rem;
+}
+
+.admin-system-health-details summary {
+  padding: 5px 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.admin-system-health-details dl {
+  margin: 12px 0;
+}
+
+.admin-system-health-details dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 20px;
+  padding: 8px 0;
+  border-bottom: 1px solid #d6e3ef;
+}
+
+.admin-system-health-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .admin-commerce-grid > *,
@@ -10486,8 +10594,8 @@ body.has-modal-open {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 620px;
-  padding: clamp(40px, 5.3vw, 70px);
+  min-height: 520px;
+  padding: clamp(30px, 4vw, 52px);
   overflow: hidden;
   background:
     radial-gradient(circle at 88% 10%, rgba(255, 255, 255, 0.5), transparent 25%),
@@ -10501,12 +10609,12 @@ body.has-modal-open {
 }
 
 .home-simple-page .home-simple-hero-copy h1 {
-  max-width: 7.5ch;
+  max-width: 11ch;
   margin: 0;
   font-family: var(--display);
-  font-size: clamp(4.6rem, 8.1vw, 8rem);
+  font-size: clamp(3.5rem, 6vw, 5.8rem);
   letter-spacing: -0.01em;
-  line-height: 0.84;
+  line-height: 0.95;
   text-transform: uppercase;
 }
 
@@ -10867,9 +10975,9 @@ body.has-modal-open {
   }
 
   .home-simple-page .home-simple-hero-copy h1 {
-    max-width: 8ch;
-    font-size: clamp(3.85rem, 18vw, 5.3rem);
-    line-height: 0.86;
+    max-width: 11ch;
+    font-size: clamp(3.2rem, 14vw, 4.3rem);
+    line-height: 0.96;
   }
 
   .home-simple-page .home-simple-lead {

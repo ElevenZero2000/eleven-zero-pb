@@ -1234,13 +1234,14 @@ function renderListingEmptyState() {
 
   listingGrid.innerHTML = `
     <article class="empty-state reveal is-visible">
-      <p class="eyebrow">No matches</p>
-      <h3>No listings match this search yet.</h3>
+      <p class="eyebrow">${filterSummary ? "No matches" : "Check back soon"}</p>
+      <h3>${filterSummary ? "No paddles match your search." : "More paddles are on the way."}</h3>
       <p>${
         filterSummary
           ? `Nothing matched ${ElevenZeroApp.escapeHtml(filterSummary)}. Try widening the filters or checking a different brand, color, or price range.`
-          : "Try another filter or sign in to create a new paddle listing."
+          : "There are no paddles for sale right now. Have one to sell?"
       }</p>
+      ${!filterSummary ? '<a class="button button-dark" href="./sell.html">Sell a paddle</a>' : ""}
     </article>
   `;
 }
@@ -1481,6 +1482,7 @@ function renderBrandPills() {
   if (!listingBrandPills) return;
 
   const brandCounts = listingState.items.reduce((counts, item) => {
+    if (item.sale_status === "sold") return counts;
     const brand = String(item.brand || "").trim();
     if (!brand) return counts;
     counts[brand] = (counts[brand] || 0) + 1;
@@ -1616,7 +1618,7 @@ function renderSellerReadiness() {
     const formatPercent = (value) => Number(value).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
     sellerFeeSummary.textContent =
       `${formatPercent(feePercent)}% seller fee · you keep ${formatPercent(sellerPercent)}%. ` +
-      "The buyer pays shipping. Payout follows confirmed delivery.";
+      "The buyer pays shipping. Payout follows delivery and the buyer protection period.";
   }
 
   if (listingStatus && !listingStatus.dataset.sessionSynced) {
@@ -1799,7 +1801,10 @@ function renderSearchSummary(visible) {
   const filtersLabel = activeFilters.length ? activeFilters.join(" · ") : "all marketplace listings";
   const sortedLabel = describeSortMode(listingState.sortMode);
 
-  listingSearchSummary.textContent = `Showing ${visible.length} of ${listingState.items.length} paddles · ${filtersLabel} · ${sortedLabel}.`;
+  const availableCount = listingState.items.filter((item) => item.sale_status !== "sold").length;
+  listingSearchSummary.textContent = availableCount
+    ? `Showing ${visible.length} of ${availableCount} paddles · ${filtersLabel} · ${sortedLabel}.`
+    : "New listings appear here after review.";
 }
 
 function renderListings() {

@@ -25,6 +25,10 @@ const adminPill = document.querySelector("[data-admin-pill]");
 const adminSummary = document.querySelector("[data-admin-summary]");
 const adminStats = document.querySelector("[data-admin-stats]");
 const adminStatus = document.querySelector("[data-admin-status]");
+const systemHealthSummary = document.querySelector("[data-system-health-summary]");
+const systemHealthChecks = document.querySelector("[data-system-health-checks]");
+const systemHealthDetails = document.querySelector("[data-system-health-details]");
+const systemHealthRefresh = document.querySelector("[data-system-health-refresh]");
 const adminProfiles = document.querySelector("[data-admin-profiles]");
 const adminListings = document.querySelector("[data-admin-listings]");
 const adminCourts = document.querySelector("[data-admin-courts]");
@@ -2172,6 +2176,65 @@ function renderAdminSalesChart(period = activeSalesPeriod) {
   }
 }
 
+async function loadSystemHealth() {
+  if (!ElevenZeroApp.session?.user?.isAdmin || !systemHealthSummary) return;
+  systemHealthRefresh.disabled = true;
+  systemHealthSummary.textContent = "Checking website status…";
+  const healthPanel = systemHealthSummary.closest("[data-system-health]");
+  try {
+    const result = await ElevenZeroApp.request("/api/admin/system-health");
+    const worker = result.workers?.orderMaintenance || {};
+    const shippingWorker = result.workers?.shippoWebhook || {};
+    const databaseReady = result.database?.status === "ready";
+    const workerReady = ["running", "ok"].includes(worker.status);
+    const labels = {
+      not_started: "Waiting to start",
+      running: "Checking orders",
+      ok: "Running normally",
+      degraded: "Needs attention",
+      error: "Last check failed",
+      stale: "Overdue",
+    };
+    const stamp = (value) => {
+      const date = new Date(value || "");
+      return Number.isNaN(date.getTime()) ? "Not yet recorded" : date.toLocaleString();
+    };
+    healthPanel.dataset.tone = result.status === "ready" ? "ready" : "warning";
+    systemHealthSummary.textContent =
+      (result.status === "ready" ? "Core checks passed." : "Some checks need attention.") +
+      " Checked " + stamp(result.checkedAt) + ".";
+    const check = (label, value, ready) =>
+      `<div class="admin-system-health-check" data-tone="${ready ? "ready" : "warning"}"><span>${escapeAttr(label)}</span><strong>${escapeAttr(value)}</strong></div>`;
+    systemHealthChecks.innerHTML = [
+      check("Database", databaseReady ? "Connected" : "Unavailable", databaseReady),
+      check("Order processing", labels[worker.status] || "Unknown", workerReady),
+      check("Delivery update connection", labels[shippingWorker.status] || "Unknown", ["running", "ok"].includes(shippingWorker.status)),
+    ].join("");
+    const providers = [
+      ["stripe", "Payments"],
+      ["shippo", "Shipping"],
+      ["email", "Order emails"],
+    ].map(([key, label]) =>
+      `<div><dt>${label}</dt><dd>${result.providers?.[key]?.configured ? "Connection configured" : "Setup needed"}</dd></div>`
+    ).join("");
+    systemHealthDetails.innerHTML = `<dl>
+      ${providers}
+      <div><dt>Payment notifications</dt><dd>${result.providers?.stripe?.webhookConfigured ? "Connection configured" : "Setup needed"}</dd></div>
+      <div><dt>Last successful order check</dt><dd>${escapeAttr(stamp(worker.lastSuccessAt))}</dd></div>
+      <div><dt>Last failed order check</dt><dd>${escapeAttr(stamp(worker.lastFailureAt))}</dd></div>
+      ${worker.lastErrorCode ? `<div><dt>Most recent order issue</dt><dd>${escapeAttr(worker.lastErrorCode)}</dd></div>` : ""}
+      ${shippingWorker.lastErrorCode ? `<div><dt>Most recent delivery connection issue</dt><dd>${escapeAttr(shippingWorker.lastErrorCode)}</dd></div>` : ""}
+    </dl>`;
+  } catch {
+    healthPanel.dataset.tone = "warning";
+    systemHealthSummary.textContent = "Website status could not be checked. Try refreshing, or sign in again.";
+    systemHealthChecks.replaceChildren();
+    systemHealthDetails.replaceChildren();
+  } finally {
+    systemHealthRefresh.disabled = false;
+  }
+}
+
 async function loadAdminDashboard() {
   if (!ElevenZeroApp.session?.user?.isAdmin) {
     adminPanel?.classList.add("is-hidden");
@@ -2181,6 +2244,7 @@ async function loadAdminDashboard() {
 
   adminPanel?.classList.remove("is-hidden");
   adminAnchor?.classList.remove("is-hidden");
+  void loadSystemHealth();
 
   try {
     setAdminStatus("Loading owner tools…", "warning");
@@ -2782,6 +2846,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   bindAdminPanel();
+  systemHealthRefresh?.addEventListener("click", loadSystemHealth);
   if (!MARKETPLACE_FOCUS_MODE) {
     bindTrainingHub();
     bindTrainerGalleryManager();
