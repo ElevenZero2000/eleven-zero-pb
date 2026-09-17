@@ -39,7 +39,6 @@ const adminCommerceNotifications = document.querySelector("[data-admin-commerce-
 const adminSalesSummary = document.querySelector("[data-admin-sales-summary]");
 const adminSalesChart = document.querySelector("[data-admin-sales-chart]");
 const adminChartNote = document.querySelector("[data-admin-chart-note]");
-const ownerHelpCopy = document.querySelector("[data-owner-help-copy]");
 const verificationBanner = document.querySelector("[data-email-verification-banner]");
 const verificationBannerStatus = document.querySelector("[data-verification-banner-status]");
 const accountModeTag = document.querySelector("[data-account-mode-tag]");
@@ -345,7 +344,7 @@ function applyAccountMode(user = {}) {
 
   const bannerEmail = adminModeBanner?.querySelector("span:last-child");
   if (bannerEmail && isAdmin) {
-    bannerEmail.textContent = user.email || "11zeropb@gmail.com";
+    bannerEmail.textContent = user.email || "";
   }
 }
 
@@ -2730,13 +2729,6 @@ async function loadDashboard() {
       accountCopy.textContent = user.isAdmin
         ? "Review marketplace activity, sales, and website content from your private control center."
         : "This dashboard tracks the live activity tied to your Eleven Zero PB account.";
-    }
-    if (ownerHelpCopy) {
-      ownerHelpCopy.innerHTML = user.isAdmin
-        ? "You’re already signed in with the owner account, so the moderator tools below are active for live listings, orders, and customer accounts."
-        : `If you sign in with <strong>${ElevenZeroApp.escapeHtml(
-            ElevenZeroApp.config.supportEmail || "11zeropb@gmail.com"
-          )}</strong>, this dashboard unlocks the live moderator panel for listings, orders, and customer accounts.`;
     }
     if (accountEmail) accountEmail.textContent = user.email;
     if (statListings) statListings.textContent = String(stats.listings);

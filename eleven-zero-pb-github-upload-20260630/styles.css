@@ -15344,6 +15344,23 @@ body.account-admin-mode {
   background: transparent;
 }
 
+.sell-simple-page #paddle-shipping .seller-flow-panel-head {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+}
+
+.sell-simple-page #paddle-shipping .seller-form-block-head {
+  text-align: center;
+}
+
+.sell-simple-page #paddle-shipping .seller-shipping-compact-grid > label:not(.seller-field-wide) {
+  grid-template-rows: 32px auto;
+}
+
+.sell-simple-page #paddle-shipping .seller-optional-label {
+  color: #526056;
+}
+
 .sell-simple-page .seller-shipping-note {
   margin: 0;
   padding: 10px 12px;
@@ -15353,6 +15370,7 @@ body.account-admin-mode {
   font-size: 0.72rem;
   font-weight: 750;
   line-height: 1.4;
+  text-align: center;
 }
 
 .sell-simple-page .seller-flow-sidebar {
