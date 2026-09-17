@@ -15353,12 +15353,36 @@ body.account-admin-mode {
   text-align: center;
 }
 
-.sell-simple-page #paddle-shipping .seller-shipping-compact-grid > label:not(.seller-field-wide) {
-  grid-template-rows: 32px auto;
+.sell-simple-page #paddle-shipping .seller-shipping-field {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 7px;
 }
 
-.sell-simple-page #paddle-shipping .seller-optional-label {
+.sell-simple-page #paddle-shipping .seller-shipping-field > label {
+  display: block;
+  margin: 0;
+  color: var(--forest);
+  font-family: var(--body);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-align: center;
+  text-transform: none;
+}
+
+.sell-simple-page #paddle-shipping .seller-shipping-field > small {
+  margin: 0;
   color: #526056;
+  font-family: var(--body);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-align: center;
+  text-transform: none;
 }
 
 .sell-simple-page .seller-shipping-note {
