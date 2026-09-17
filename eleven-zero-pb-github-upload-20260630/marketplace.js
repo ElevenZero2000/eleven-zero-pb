@@ -63,6 +63,12 @@ const sellerDraftStatus = document.querySelector("[data-seller-draft-status]");
 const clearSellerDraftButton = document.querySelector("[data-clear-seller-draft]");
 const sellerSubmitButton = listingForm?.querySelector("[data-seller-submit]");
 const sellerPayoutGate = document.querySelector("[data-seller-payout-gate]");
+const sellerPreflight = document.querySelector("[data-seller-preflight]");
+const sellerPreflightEyebrow = document.querySelector("[data-seller-preflight-eyebrow]");
+const sellerPreflightTitle = document.querySelector("[data-seller-preflight-title]");
+const sellerPreflightCopy = document.querySelector("[data-seller-preflight-copy]");
+const sellerPreflightAction = document.querySelector("[data-seller-preflight-action]");
+const sellerFeeSummary = document.querySelector("[data-seller-fee-summary]");
 const shippingModeInput = listingForm?.querySelector('[name="shippingMode"]');
 const shippingFlatField = listingForm?.querySelector("[data-shipping-flat-field]");
 const sellerBrandSelect = listingForm?.querySelector('select[name="brand"]');
@@ -90,10 +96,16 @@ const MARKETPLACE_SORT_MODES = new Set(["relevance", "newest", "price-asc", "pri
 const DEFAULT_MARKETPLACE_SORT_MODE = "newest";
 const MARKETPLACE_PHOTO_MODES = new Set(["", "1", "2", "3"]);
 const SELLER_DRAFT_DEFAULTS = {
-  category: "control",
+  category: "",
   condition: "Excellent",
   shippingMode: "calculated",
 };
+const SELLER_DRAFT_PRIVATE_FIELDS = new Set([
+  "photos",
+  "photoAttestation",
+  "shippingOriginStreet1",
+  "shippingOriginZip",
+]);
 const MAX_LISTING_PHOTOS = 4;
 const MAX_LISTING_IMAGE_DATA_URL_LENGTH = 950_000;
 const SUPPORTED_LISTING_PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
@@ -104,6 +116,7 @@ const LISTING_IMAGE_OPTIMIZATION_STEPS = [
   { maxSide: 720, quality: 0.6 },
   { maxSide: 640, quality: 0.56 },
 ];
+let listingSubmitInFlight = false;
 
 function safeParseJson(value) {
   if (!value) return null;
@@ -409,7 +422,7 @@ function getSellerDraftFieldSnapshot() {
   const formData = new FormData(listingForm);
 
   for (const [key, value] of formData.entries()) {
-    if (key === "photos") continue;
+    if (SELLER_DRAFT_PRIVATE_FIELDS.has(key)) continue;
     snapshot[key] = String(value || "").trim();
   }
 
@@ -490,17 +503,18 @@ function renderSellerDraftStatus(overrideMessage = "") {
   if (listingState.sellerDraftSavedAt && formHasContent) {
     sellerDraftStatus.textContent = `Draft saved on this device · updated ${formatSavedTimeLabel(
       listingState.sellerDraftSavedAt
-    )}. ${hasPhotos ? "Photos stay in this tab until you submit for review." : "Add photos whenever you’re ready."}`;
+    )}. ${hasPhotos ? "Photos and private shipping details stay only in this tab." : "Photos and private shipping details are not stored."}`;
     return;
   }
 
   if (hasPhotos) {
     sellerDraftStatus.textContent =
-      "Photos are ready in this tab. Listing details save automatically on this device while you work.";
+      "Photos are ready in this tab. Public listing details save automatically; private shipping details do not.";
     return;
   }
 
-  sellerDraftStatus.textContent = "Your listing details can be saved on this device while you work.";
+  sellerDraftStatus.textContent =
+    "Public listing details save on this device. Photos and private shipping details stay only in this tab.";
 }
 
 function saveSellerDraft() {
@@ -533,12 +547,29 @@ function restoreSellerDraft() {
     return;
   }
 
-  const draftBrand = String(draft.fields.brand || "");
-  const draftModel = String(draft.fields.model || "");
+  const sanitizedFields = Object.fromEntries(
+    Object.entries(draft.fields).filter(([name]) => !SELLER_DRAFT_PRIVATE_FIELDS.has(name))
+  );
+  const removedPrivateFields = Object.keys(draft.fields).some((name) =>
+    SELLER_DRAFT_PRIVATE_FIELDS.has(name)
+  );
+  if (removedPrivateFields) {
+    if (sellerDraftHasContent(sanitizedFields)) {
+      writeStorageJson(SELLER_DRAFT_STORAGE_KEY, {
+        fields: sanitizedFields,
+        savedAt: String(draft.savedAt || new Date().toISOString()),
+      });
+    } else {
+      removeStorageItem(SELLER_DRAFT_STORAGE_KEY);
+    }
+  }
+
+  const draftBrand = String(sanitizedFields.brand || "");
+  const draftModel = String(sanitizedFields.model || "");
   if (sellerBrandSelect) sellerBrandSelect.value = draftBrand;
   syncSellerModelOptions(draftModel);
 
-  Object.entries(draft.fields).forEach(([name, value]) => {
+  Object.entries(sanitizedFields).forEach(([name, value]) => {
     if (name === "brand" || name === "model") return;
     const field = listingForm.elements?.namedItem?.(name);
     if (!field || !("value" in field)) return;
@@ -784,9 +815,9 @@ function valueIncludesAllTokens(value, query) {
 
 function sellerChecklistItem(label, ready, helper) {
   return `
-    <article class="seller-launch-item ${ready ? "is-ready" : "is-pending"}">
+    <article class="seller-launch-item ${ready ? "is-ready" : "is-pending"}" title="${ElevenZeroApp.escapeHtml(helper)}">
       <strong>${ElevenZeroApp.escapeHtml(label)}</strong>
-      <span>${ElevenZeroApp.escapeHtml(helper)}</span>
+      <span>${ready ? "Ready" : ElevenZeroApp.escapeHtml(helper)}</span>
     </article>
   `;
 }
@@ -1515,37 +1546,118 @@ function renderBrandPills() {
 }
 
 function renderSellerReadiness() {
+  const rawPrice = Number(listingForm?.querySelector('input[name="price"]')?.value || 0);
   const basicsReady = Boolean(
     listingForm?.querySelector('select[name="brand"]')?.value?.trim() &&
       listingForm?.querySelector('select[name="model"]')?.value?.trim() &&
       listingForm?.querySelector('select[name="color"]')?.value?.trim() &&
-      listingForm?.querySelector('input[name="price"]')?.value?.trim()
+      listingForm?.querySelector('select[name="category"]')?.value?.trim() &&
+      Number.isInteger(rawPrice) &&
+      rawPrice >= 1 &&
+      rawPrice <= 1000
   );
+  const publicLocation = listingForm?.querySelector('input[name="location"]')?.value?.trim() || "";
   const buyerClarityReady = Boolean(
-    listingForm?.querySelector('input[name="location"]')?.value?.trim()
+    /^[^,]+,\s*[A-Za-z .]{2,}$/.test(publicLocation)
   );
   const shippingConfig = getDraftShippingConfig();
   const flatShippingAmount = Number((shippingConfig.flat || "").replace(/[^\d]/g, ""));
-  const calculatedShippingReady = Boolean(shippingConfig.originZip && shippingConfig.originStreet1);
+  const calculatedShippingReady = Boolean(
+    /^\d{5}(?:-\d{4})?$/.test(shippingConfig.originZip) && shippingConfig.originStreet1
+  );
   const shippingReady =
     shippingConfig.mode === "free" ||
     (shippingConfig.mode === "flat" && flatShippingAmount > 0) ||
     (shippingConfig.mode === "calculated" && calculatedShippingReady);
-  const photosReady = listingState.draftImages.length > 0;
+  const photoAttestationReady = Boolean(
+    listingForm?.querySelector('input[name="photoAttestation"]')?.checked
+  );
+  const photosReady = listingState.draftImages.length > 0 && photoAttestationReady;
   const signedIn = Boolean(ElevenZeroApp.session?.authenticated);
+  const emailVerified = signedIn && ElevenZeroApp.session?.user?.emailVerified !== false;
+  const accountReady = signedIn && emailVerified;
   const sellerProfile = ElevenZeroApp.session?.user?.sellerProfile;
   const payoutsReady = Boolean(sellerProfile?.readyForPayouts);
 
-  const completedSteps = [signedIn, basicsReady, buyerClarityReady, shippingReady, photosReady, payoutsReady].filter(Boolean).length;
+  const completedSteps = [accountReady, basicsReady, buyerClarityReady, shippingReady, photosReady, payoutsReady].filter(Boolean).length;
 
-  if (sellerSubmitButton) {
-    sellerSubmitButton.textContent = signedIn && !payoutsReady
-      ? "Set up Stripe to submit"
-      : "Submit listing for review";
+  if (sellerSubmitButton && !listingSubmitInFlight) {
+    sellerSubmitButton.disabled = false;
+    sellerSubmitButton.textContent = !signedIn
+      ? "Sign in to submit"
+      : !emailVerified
+        ? "Verify email to submit"
+      : !payoutsReady
+        ? "Set up Stripe to submit"
+        : "Submit listing for review";
   }
 
   if (sellerPayoutGate) {
     sellerPayoutGate.classList.toggle("is-hidden", !signedIn || payoutsReady);
+  }
+
+  if (sellerPreflight) {
+    sellerPreflight.hidden = accountReady && payoutsReady;
+
+    if (!signedIn) {
+      sellerPreflight.dataset.state = "account";
+      if (sellerPreflightEyebrow) sellerPreflightEyebrow.textContent = "Start here";
+      if (sellerPreflightTitle) sellerPreflightTitle.textContent = "Sign in or create an account";
+      if (sellerPreflightCopy) {
+        sellerPreflightCopy.textContent =
+          "Do this before adding photos so nothing is lost when you leave this page.";
+      }
+      if (sellerPreflightAction) {
+        sellerPreflightAction.textContent = "Sign in or create account";
+        sellerPreflightAction.href = "./auth.html?next=%2Fsell.html";
+      }
+    } else if (!emailVerified) {
+      sellerPreflight.dataset.state = "verification";
+      if (sellerPreflightEyebrow) sellerPreflightEyebrow.textContent = "Secure your account";
+      if (sellerPreflightTitle) sellerPreflightTitle.textContent = "Verify your email";
+      if (sellerPreflightCopy) {
+        sellerPreflightCopy.textContent =
+          "Open Account to resend the verification message, then return here to finish your listing.";
+      }
+      if (sellerPreflightAction) {
+        sellerPreflightAction.textContent = "Open account";
+        sellerPreflightAction.href = "./account.html";
+      }
+    } else if (!payoutsReady) {
+      sellerPreflight.dataset.state = "payouts";
+      if (sellerPreflightEyebrow) sellerPreflightEyebrow.textContent = "One-time seller setup";
+      if (sellerPreflightTitle) sellerPreflightTitle.textContent = "Connect Stripe payouts";
+      if (sellerPreflightCopy) {
+        sellerPreflightCopy.textContent =
+          "Choose where Eleven Zero should send your money after a completed sale.";
+      }
+      if (sellerPreflightAction) {
+        sellerPreflightAction.textContent = "Set up payouts";
+        sellerPreflightAction.href = "./account.html#seller-payouts";
+      }
+    }
+  }
+
+  if (sellerFeeSummary) {
+    const configuredFee = Number(ElevenZeroApp.config?.platformFeePercent);
+    const feePercent = Number.isFinite(configuredFee) ? configuredFee : 8.5;
+    const sellerPercent = Math.max(0, 100 - feePercent);
+    const formatPercent = (value) => Number(value).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+    sellerFeeSummary.textContent =
+      `You keep ${formatPercent(sellerPercent)}% of the paddle price. ` +
+      `Eleven Zero keeps ${formatPercent(feePercent)}%; the buyer pays delivery. ` +
+      "Payout is released after confirmed delivery and the protection window.";
+  }
+
+  if (listingStatus && !listingStatus.dataset.sessionSynced) {
+    listingStatus.textContent = !signedIn
+      ? "Sign in first, then complete the three listing steps."
+      : !emailVerified
+        ? "Verify your email before sending a paddle for review."
+      : !payoutsReady
+        ? "Connect Stripe payouts before sending your paddle for review."
+        : "Complete the steps, confirm your photos, and submit for review.";
+    listingStatus.dataset.sessionSynced = "true";
   }
 
   if (!sellerReadinessTitle || !sellerReadinessPill || !sellerReadinessCopy || !sellerReadinessGrid) {
@@ -1557,7 +1669,7 @@ function renderSellerReadiness() {
   if (!signedIn) {
     sellerReadinessTitle.textContent = "Sign in to start selling";
     sellerReadinessCopy.textContent =
-      "Create or sign in to your account so you can save your listing and submit it for Eleven Zero PB review.";
+      "Create or sign in so you can save public listing details and submit the paddle for Eleven Zero PB review.";
   } else if (completedSteps < 6) {
     sellerReadinessTitle.textContent = "You are building a strong listing";
     sellerReadinessCopy.textContent =
@@ -1575,13 +1687,17 @@ function renderSellerReadiness() {
   }
 
   sellerReadinessGrid.innerHTML = [
-    sellerChecklistItem("Account", signedIn, signedIn ? "Signed in and ready." : "Sign in to continue."),
+    sellerChecklistItem(
+      "Account",
+      accountReady,
+      !signedIn ? "Sign in to continue." : emailVerified ? "Signed in and verified." : "Verify your email to continue."
+    ),
     sellerChecklistItem(
       "Paddle details",
       basicsReady,
       basicsReady
-        ? "Brand, model, color, and price added."
-        : "Add brand, model, color, and price."
+        ? "Paddle information is complete."
+        : "Add brand, model, style, color, and price."
     ),
     sellerChecklistItem(
       "Buyer clarity",
@@ -1591,12 +1707,16 @@ function renderSellerReadiness() {
     sellerChecklistItem(
       "Shipping",
       shippingReady,
-      shippingReady ? shippingModeHelp(shippingConfig) : "Choose free, flat, or calculated shipping."
+      shippingReady ? shippingModeHelp(shippingConfig) : "Add the private ship-from address and ZIP."
     ),
     sellerChecklistItem(
       "Photos",
       photosReady,
-      photosReady ? `${listingState.draftImages.length} photo${listingState.draftImages.length === 1 ? "" : "s"} ready.` : "Add at least one photo."
+      photosReady
+        ? `${listingState.draftImages.length} photo${listingState.draftImages.length === 1 ? "" : "s"} confirmed.`
+        : listingState.draftImages.length
+          ? "Confirm these are current photos."
+          : "Add at least one photo."
     ),
     sellerChecklistItem(
       "Stripe payouts",
@@ -1633,18 +1753,15 @@ function bindListingActions() {
 }
 
 function renderEmptyPhotoSlots(startIndex = 0) {
-  return Array.from({ length: Math.max(0, MAX_LISTING_PHOTOS - startIndex) }, (_, offset) => {
-    const index = startIndex + offset;
-    const isCover = index === 0;
+  if (startIndex <= 0 || startIndex >= MAX_LISTING_PHOTOS) return "";
 
-    return `
-      <label class="seller-photo-empty-slot ${isCover ? "is-cover-slot" : ""}" for="listing-photos-input">
-        <span class="seller-photo-slot-number" aria-hidden="true">${index + 1}</span>
-        <strong>${isCover ? "Cover photo" : `Photo ${index + 1}`}</strong>
-        <small>${isCover ? "Required" : "Optional"}</small>
-      </label>
-    `;
-  }).join("");
+  return `
+    <label class="seller-photo-empty-slot" for="listing-photos-input">
+      <span class="seller-photo-slot-number" aria-hidden="true">+</span>
+      <strong>Add another</strong>
+      <small>${startIndex} of ${MAX_LISTING_PHOTOS} added</small>
+    </label>
+  `;
 }
 
 function renderPhotoPreview() {
@@ -1685,7 +1802,7 @@ function renderPhotoPreview() {
           >
             ×
           </button>
-          <span class="seller-photo-badge">${index === 0 ? "Cover photo" : `Photo ${index + 1}`}</span>
+          <span class="seller-photo-badge">${index === 0 ? "Cover" : `Photo ${index + 1}`}</span>
           <img src="${ElevenZeroApp.escapeHtml(image)}" alt="Listing photo preview ${index + 1}" />
           ${
             index > 0
@@ -2076,10 +2193,109 @@ async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
   }
 }
 
+function clearSellerFieldError(field) {
+  if (!field || typeof field !== "object") return;
+  field.removeAttribute?.("aria-invalid");
+  field.setCustomValidity?.("");
+}
+
+function focusSellerField(fieldName, message) {
+  const field = listingForm?.elements?.namedItem?.(fieldName);
+  ElevenZeroApp.setStatus(listingStatus, message, "warning");
+
+  if (!field || typeof field !== "object") return;
+
+  field.setAttribute?.("aria-invalid", "true");
+  field.setCustomValidity?.(message);
+  field.focus?.({ preventScroll: true });
+  field.reportValidity?.();
+
+  window.requestAnimationFrame(() => {
+    const stickyHeaderHeight = document.querySelector(".site-header")?.getBoundingClientRect?.().height || 70;
+    const fieldTop = field.getBoundingClientRect?.().top || 0;
+    const targetTop = Math.max(0, window.scrollY + fieldTop - stickyHeaderHeight - 22);
+    window.scrollTo({ top: targetTop, behavior: "auto" });
+    field.focus?.({ preventScroll: true });
+  });
+}
+
+function validateSellerPayload(payload) {
+  const requiredFields = [
+    ["brand", "Choose the paddle brand."],
+    ["model", "Choose the paddle model."],
+    ["color", "Choose the paddle’s primary color."],
+    ["category", "Choose whether this is a control, power, or hybrid paddle."],
+    ["condition", "Choose the paddle’s condition."],
+  ];
+
+  for (const [fieldName, message] of requiredFields) {
+    if (!String(payload[fieldName] || "").trim()) return { fieldName, message };
+  }
+
+  const price = Number(payload.price);
+  if (!Number.isInteger(price) || price < 1 || price > 1000) {
+    return {
+      fieldName: "price",
+      message: "Enter a whole-dollar paddle price between $1 and $1,000.",
+    };
+  }
+
+  if (!Array.isArray(payload.images) || !payload.images.length) {
+    return {
+      fieldName: "photos",
+      message: "Add at least one clear photo of the actual paddle.",
+    };
+  }
+
+  const location = String(payload.location || "").trim();
+  if (!/^[^,]+,\s*[A-Za-z .]{2,}$/.test(location)) {
+    return {
+      fieldName: "location",
+      message: "Enter the public ship-from location as City, ST (for example, Miami, FL).",
+    };
+  }
+
+  if (!/^\d{5}(?:-\d{4})?$/.test(String(payload.shippingOriginZip || "").trim())) {
+    return {
+      fieldName: "shippingOriginZip",
+      message: "Enter a valid 5-digit U.S. ZIP code (ZIP+4 also works).",
+    };
+  }
+
+  if (!String(payload.shippingOriginStreet1 || "").trim()) {
+    return {
+      fieldName: "shippingOriginStreet1",
+      message: "Add the private street address used for the prepaid label and returns.",
+    };
+  }
+
+  if (String(payload.photoAttestation || "") !== "1") {
+    return {
+      fieldName: "photoAttestation",
+      message: "Confirm that these are current photos of the paddle you are selling.",
+    };
+  }
+
+  return null;
+}
+
 async function handleListingSubmit(event) {
   event.preventDefault();
 
+  if (listingSubmitInFlight) return;
+
   if (!ElevenZeroApp.requireAuth(listingStatus, "Sign in to submit your listing for review.")) {
+    return;
+  }
+
+  if (ElevenZeroApp.session?.user?.emailVerified === false) {
+    ElevenZeroApp.setStatus(
+      listingStatus,
+      "Verify your email before submitting a paddle for review.",
+      "warning"
+    );
+    sellerPreflight?.scrollIntoView({ behavior: "smooth", block: "center" });
+    sellerPreflightAction?.focus();
     return;
   }
 
@@ -2089,8 +2305,11 @@ async function handleListingSubmit(event) {
       "Finish Stripe payout setup before submitting this paddle for review. Your draft will stay saved here.";
     ElevenZeroApp.setStatus(listingStatus, payoutMessage, "warning");
     sellerPayoutGate?.classList.remove("is-hidden");
-    sellerPayoutGate?.scrollIntoView({ behavior: "smooth", block: "center" });
-    sellerPayoutGate?.querySelector("a")?.focus();
+    const payoutAction = sellerPreflight && !sellerPreflight.hidden
+      ? sellerPreflight
+      : sellerPayoutGate;
+    payoutAction?.scrollIntoView({ behavior: "smooth", block: "center" });
+    (sellerPreflightAction || sellerPayoutGate?.querySelector("a"))?.focus();
     return;
   }
 
@@ -2103,59 +2322,31 @@ async function handleListingSubmit(event) {
     return;
   }
 
-  if (!listingState.draftImages.length) {
-    const photoMessage =
-      "Please add at least one paddle photo before submitting the listing for review.";
-    ElevenZeroApp.setStatus(
-      listingStatus,
-      photoMessage,
-      "warning"
-    );
-    setPhotoMetaStatus(photoMessage, "error");
+  const formData = new FormData(listingForm);
+  const payload = Object.fromEntries(formData.entries());
+  delete payload.photos;
+  payload.category = String(payload.category || "").trim().toLowerCase();
+  payload.notes = String(payload.notes || "").trim() || "No extra condition notes added yet.";
+  payload.images = listingState.draftImages;
+
+  const validationError = validateSellerPayload(payload);
+  if (validationError?.fieldName === "photos") {
+    ElevenZeroApp.setStatus(listingStatus, validationError.message, "warning");
+    setPhotoMetaStatus(validationError.message, "error");
     photoDropzone?.scrollIntoView({ behavior: "smooth", block: "center" });
     photoDropzone?.focus();
     return;
   }
-
-  const formData = new FormData(listingForm);
-  const payload = Object.fromEntries(formData.entries());
-  delete payload.photos;
-  payload.category = String(payload.category || "control").trim() || "control";
-  payload.notes = String(payload.notes || "").trim() || "No extra condition notes added yet.";
-  payload.images = listingState.draftImages;
-
-  const missingBasics = [];
-  if (!String(payload.brand || "").trim()) missingBasics.push("brand");
-  if (!String(payload.model || "").trim()) missingBasics.push("model");
-  if (!String(payload.color || "").trim()) missingBasics.push("color");
-  if (!String(payload.price || "").trim()) missingBasics.push("price");
-  if (!String(payload.location || "").trim()) missingBasics.push("ships from");
-
-  if (missingBasics.length) {
-    ElevenZeroApp.setStatus(
-      listingStatus,
-      `Add ${missingBasics.join(", ")} before submitting your paddle for review.`,
-      "warning"
-    );
+  if (validationError) {
+    focusSellerField(validationError.fieldName, validationError.message);
     return;
   }
 
-  if (payload.shippingMode === "calculated" && !String(payload.shippingOriginZip || "").trim()) {
-    ElevenZeroApp.setStatus(
-      listingStatus,
-      "Add the ZIP code your paddle ships from.",
-      "warning"
-    );
-    return;
-  }
-
-  if (payload.shippingMode === "calculated" && !String(payload.shippingOriginStreet1 || "").trim()) {
-    ElevenZeroApp.setStatus(
-      listingStatus,
-      "Add the private street address the paddle will ship from so we can create the prepaid label.",
-      "warning"
-    );
-    return;
+  listingSubmitInFlight = true;
+  listingForm.setAttribute("aria-busy", "true");
+  if (sellerSubmitButton) {
+    sellerSubmitButton.disabled = true;
+    sellerSubmitButton.textContent = "Submitting for review…";
   }
 
   try {
@@ -2169,6 +2360,7 @@ async function handleListingSubmit(event) {
     listingState.draftImages = [];
     listingState.sellerDraftSavedAt = "";
     removeStorageItem(SELLER_DRAFT_STORAGE_KEY);
+    Array.from(listingForm.elements || []).forEach(clearSellerFieldError);
     syncShippingFormState();
     updateSellerNotesCounter();
     renderPhotoPreview();
@@ -2179,11 +2371,13 @@ async function handleListingSubmit(event) {
       `${payload.brand} ${payload.model} was submitted for review. Once approved, it will go live with its own detail page.`,
       "success"
     );
-    await loadListings();
-    renderSellerReadiness();
-    renderSellerLivePreview();
   } catch (error) {
     ElevenZeroApp.setStatus(listingStatus, error.message, "error");
+  } finally {
+    listingSubmitInFlight = false;
+    listingForm.removeAttribute("aria-busy");
+    renderSellerReadiness();
+    renderSellerLivePreview();
   }
 }
 
@@ -2279,15 +2473,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderPhotoPreview();
   renderSellerReadiness();
   renderSellerLivePreview();
-  try {
-    await loadListings();
-  } catch (error) {
-    const previewMessage =
-      window.location.protocol === "file:"
-        ? "Listings load when this page is opened through the local preview server or live site."
-        : error.message;
+  if (listingGrid) {
+    try {
+      await loadListings();
+    } catch (error) {
+      const previewMessage =
+        window.location.protocol === "file:"
+          ? "Listings load when this page is opened through the local preview server or live site."
+          : error.message;
 
-    setMarketplaceStatus(previewMessage, "warning");
+      setMarketplaceStatus(previewMessage, "warning");
+    }
   }
 
   try {
@@ -2332,13 +2528,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   sellerBrandSelect?.addEventListener("change", () => {
     syncSellerModelOptions();
   });
-  listingForm?.addEventListener("input", () => {
+  listingForm?.addEventListener("input", (event) => {
+    clearSellerFieldError(event.target);
     updateSellerNotesCounter();
     saveSellerDraft();
     renderSellerReadiness();
     renderSellerLivePreview();
   });
-  listingForm?.addEventListener("change", () => {
+  listingForm?.addEventListener("change", (event) => {
+    clearSellerFieldError(event.target);
     syncShippingFormState();
     updateSellerNotesCounter();
     saveSellerDraft();

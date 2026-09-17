@@ -14486,3 +14486,623 @@ body.account-admin-mode {
     grid-template-columns: 1fr;
   }
 }
+
+/* SELL PAGE — GUIDED LISTING FLOW */
+.sell-simple-page .seller-card-simple {
+  overflow: visible;
+}
+
+.sell-simple-page .seller-simple-heading {
+  border-radius: 32px 32px 0 0;
+}
+
+.sell-simple-page .seller-flow-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  padding: 0 34px;
+  border-bottom: 1px solid rgba(3, 45, 23, 0.09);
+  background: #ffffff;
+}
+
+.sell-simple-page .seller-flow-steps a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 66px;
+  border-bottom: 3px solid transparent;
+  color: rgba(18, 18, 18, 0.55);
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+
+.sell-simple-page .seller-flow-steps a:hover,
+.sell-simple-page .seller-flow-steps a:focus-visible {
+  border-bottom-color: var(--acid);
+  color: var(--ink);
+}
+
+.sell-simple-page .seller-flow-steps span,
+.sell-simple-page .seller-flow-number {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e5f9df;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.sell-simple-page .seller-flow-steps strong {
+  color: inherit;
+}
+
+.sell-simple-page .seller-preflight {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 15px;
+  margin: 24px 34px 0;
+  padding: 16px 18px;
+  border: 1px solid rgba(3, 45, 23, 0.13);
+  border-radius: 18px;
+  background: #effbea;
+  color: var(--ink);
+}
+
+.sell-simple-page .seller-preflight[hidden] {
+  display: none;
+}
+
+.sell-simple-page .seller-preflight[data-state="payouts"],
+.sell-simple-page .seller-preflight[data-state="verification"] {
+  border-color: rgba(154, 119, 0, 0.24);
+  background: #fff8d6;
+}
+
+.sell-simple-page .seller-preflight-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--acid);
+  color: var(--ink);
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.sell-simple-page .seller-preflight[data-state="payouts"] .seller-preflight-icon,
+.sell-simple-page .seller-preflight[data-state="verification"] .seller-preflight-icon {
+  background: var(--sun);
+}
+
+.sell-simple-page .seller-preflight .eyebrow {
+  margin: 0 0 3px;
+  color: rgba(3, 45, 23, 0.56);
+  font-size: 0.64rem;
+}
+
+.sell-simple-page .seller-preflight strong {
+  display: block;
+  font-size: 0.98rem;
+}
+
+.sell-simple-page .seller-preflight p:not(.eyebrow) {
+  margin: 3px 0 0;
+  color: rgba(18, 18, 18, 0.62);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.sell-simple-page .seller-preflight .button {
+  min-height: 42px;
+  padding: 0 17px;
+  white-space: nowrap;
+}
+
+.sell-simple-page .seller-form-simple {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 356px);
+  align-items: start;
+  gap: 24px;
+  padding: 24px 34px 34px;
+  background: #f5f7f3;
+}
+
+.sell-simple-page .seller-flow-main {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.sell-simple-page .seller-flow-panel {
+  scroll-margin-top: 94px;
+  gap: 22px;
+  padding: 26px;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(2, 30, 16, 0.045);
+}
+
+.sell-simple-page .seller-flow-main .seller-simple-panel + .seller-simple-panel {
+  border: 1px solid rgba(3, 45, 23, 0.1);
+}
+
+.sell-simple-page .seller-flow-panel-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.sell-simple-page .seller-flow-number {
+  width: 36px;
+  height: 36px;
+  margin-top: 1px;
+  background: var(--acid);
+}
+
+.sell-simple-page .seller-flow-panel-head .eyebrow {
+  margin: 0 0 4px;
+  color: rgba(3, 45, 23, 0.54);
+  font-size: 0.64rem;
+}
+
+.sell-simple-page .seller-flow-panel .seller-form-block-head h2 {
+  font-size: clamp(1.7rem, 3vw, 2.25rem);
+}
+
+.sell-simple-page .seller-price-field {
+  position: relative;
+  display: block;
+}
+
+.sell-simple-page .seller-price-field > span {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 14px;
+  color: rgba(3, 45, 23, 0.52);
+  font-size: 0.92rem;
+  font-weight: 900;
+  transform: translateY(-50%);
+}
+
+.sell-simple-page .seller-price-field input {
+  width: 100%;
+  padding-left: 29px;
+}
+
+.sell-simple-page .seller-form [aria-invalid="true"] {
+  border-color: #b63c17;
+  background: #fff7f3;
+  box-shadow: 0 0 0 3px rgba(182, 60, 23, 0.1);
+}
+
+.sell-simple-page .seller-photo-preview:empty {
+  display: none;
+}
+
+.sell-simple-page .seller-photo-empty-slot {
+  min-height: 118px;
+}
+
+.sell-simple-page .seller-photo-remove {
+  top: 8px;
+  right: 8px;
+  width: 44px;
+  height: 44px;
+}
+
+.sell-simple-page .seller-photo-badge {
+  top: 10px;
+  left: 10px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 0.62rem;
+}
+
+.sell-simple-page .seller-photo-cover {
+  min-height: 42px;
+}
+
+.sell-simple-page .seller-managed-shipping {
+  gap: 16px;
+  padding: 20px;
+  border-radius: 18px;
+  background: #f7f9f5;
+}
+
+.sell-simple-page .seller-shipping-compact-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.55fr);
+}
+
+.sell-simple-page .seller-managed-shipping-note {
+  margin: 0;
+}
+
+.sell-simple-page .seller-shipping-compact-grid label small {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.sell-simple-page .seller-flow-sidebar {
+  position: sticky;
+  top: 88px;
+  display: grid;
+  gap: 14px;
+  scroll-margin-top: 94px;
+}
+
+.sell-simple-page .seller-flow-summary {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 22px;
+  background: var(--ink);
+  color: #ffffff;
+  box-shadow: 0 18px 36px rgba(2, 30, 16, 0.12);
+}
+
+.sell-simple-page .seller-flow-summary .eyebrow {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.64rem;
+}
+
+.sell-simple-page .seller-flow-summary h2 {
+  margin: 0;
+  color: #ffffff;
+  font-family: var(--display);
+  font-size: 1.72rem;
+  line-height: 0.98;
+  text-transform: uppercase;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-pill {
+  min-height: 29px;
+  color: #dfffd1;
+  font-size: 0.65rem;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-copy {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-grid {
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 7px 9px 7px 36px;
+  border-radius: 13px;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item::before {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  content: "";
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item.is-ready::before {
+  content: "✓";
+  background: var(--acid);
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item strong {
+  font-size: 0.78rem;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item span {
+  margin-top: 0;
+  font-size: 0.65rem;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.sell-simple-page .seller-flow-summary .seller-launch-item.is-ready span {
+  color: #c9ffb7;
+  font-weight: 800;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-payout-gate {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 11px;
+  padding: 15px;
+  border-radius: 18px;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-payout-gate .button {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 43px;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-payout-gate p {
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-submit-strip {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 11px;
+  margin: 0;
+  padding: 17px;
+  border: 1px solid rgba(3, 45, 23, 0.1);
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.sell-simple-page .seller-review-note {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 850;
+  line-height: 1.4;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-submit-meta {
+  order: 1;
+  display: grid;
+  gap: 6px;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-photo-attestation {
+  order: 2;
+  padding: 11px;
+  border-radius: 12px;
+  font-size: 0.74rem;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-submit-button {
+  order: 3;
+  width: 100%;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-status {
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-draft-status-inline {
+  font-size: 0.69rem;
+  line-height: 1.35;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-draft-clear {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(3, 45, 23, 0.7);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.sell-simple-page .seller-flow-sidebar .seller-draft-clear:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.sell-simple-page .seller-fee-summary {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: #f7f9f5;
+  color: rgba(18, 18, 18, 0.66);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 960px) {
+  .sell-simple-page .seller-form-simple {
+    grid-template-columns: 1fr;
+  }
+
+  .sell-simple-page .seller-flow-sidebar {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sell-simple-page .seller-flow-summary,
+  .sell-simple-page .seller-flow-sidebar .seller-payout-gate {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .sell-simple-page .seller-simple-heading {
+    gap: 12px;
+    padding: 20px 20px 18px;
+  }
+
+  .sell-simple-page .seller-simple-heading {
+    border-radius: 24px 24px 0 0;
+  }
+
+  .sell-simple-page .seller-simple-heading h1 {
+    font-size: clamp(2.65rem, 14vw, 3.75rem);
+  }
+
+  .sell-simple-page .seller-simple-heading > div > p:last-child {
+    font-size: 0.83rem;
+    line-height: 1.45;
+  }
+
+  .sell-simple-page .seller-simple-heading .seller-review-badge {
+    min-height: 42px;
+    padding: 9px 12px;
+  }
+
+  .sell-simple-page .seller-flow-steps {
+    padding: 0 16px;
+  }
+
+  .sell-simple-page .seller-flow-steps a {
+    justify-content: center;
+    gap: 6px;
+    min-height: 58px;
+    font-size: 0.68rem;
+  }
+
+  .sell-simple-page .seller-flow-steps span {
+    width: 25px;
+    height: 25px;
+    font-size: 0.7rem;
+  }
+
+  .sell-simple-page .seller-preflight {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    margin: 12px 18px 0;
+    padding: 12px;
+  }
+
+  .sell-simple-page .seller-preflight-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .sell-simple-page .seller-preflight p:not(.eyebrow) {
+    font-size: 0.74rem;
+  }
+
+  .sell-simple-page .seller-preflight .button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .sell-simple-page .seller-form-simple {
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .sell-simple-page .seller-flow-panel {
+    gap: 18px;
+    padding: 20px;
+    border-radius: 19px;
+  }
+
+  .sell-simple-page .seller-flow-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .sell-simple-page .seller-flow-sidebar > * {
+    grid-column: 1;
+  }
+
+  .sell-simple-page .seller-flow-sidebar .seller-submit-strip {
+    order: 1;
+  }
+
+  .sell-simple-page .seller-flow-summary {
+    order: 2;
+  }
+
+  .sell-simple-page .seller-flow-summary .seller-launch-copy {
+    display: none;
+  }
+
+  .sell-simple-page .seller-flow-summary .seller-launch-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sell-simple-page .seller-flow-summary .seller-launch-item {
+    grid-template-columns: 1fr;
+    align-content: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 7px 8px 7px 34px;
+  }
+
+  .sell-simple-page .seller-flow-summary .seller-launch-item span {
+    overflow: hidden;
+    max-width: 100%;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 620px) {
+  .sell-simple-page .seller-simple-panel .seller-basics-grid,
+  .sell-simple-page .seller-shipping-compact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sell-simple-page .seller-flow-steps a {
+    flex-direction: column;
+    gap: 3px;
+    min-height: 62px;
+    padding: 7px 1px 5px;
+    line-height: 1;
+  }
+
+  .sell-simple-page .seller-flow-steps strong {
+    display: block;
+    max-width: 100%;
+    font-size: 0.58rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sell-simple-page .seller-flow-panel-head {
+    gap: 10px;
+  }
+
+  .sell-simple-page .seller-flow-number {
+    width: 32px;
+    height: 32px;
+  }
+
+  .sell-simple-page .seller-file-dropzone {
+    min-height: 94px;
+  }
+
+  .sell-simple-page .seller-photo-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 961px) and (max-height: 900px) {
+  .sell-simple-page .seller-flow-sidebar {
+    position: static;
+  }
+}
+
+@media (min-width: 961px) {
+  .sell-simple-page .seller-flow-panel,
+  .sell-simple-page .seller-flow-sidebar {
+    scroll-margin-top: 174px;
+  }
+}

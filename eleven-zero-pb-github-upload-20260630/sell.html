@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260722catalog1" />
+    <link rel="stylesheet" href="./styles.css?v=20260916sellflow2" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -39,7 +39,7 @@
               <div>
                 <p class="eyebrow">Sell on Eleven Zero PB</p>
                 <h1>Sell your paddle</h1>
-                <p>Tell buyers what it is, add clear photos, and choose shipping.</p>
+                <p>Create a clear listing in a few minutes. Your public details save as you go.</p>
               </div>
               <div class="seller-review-badge" aria-label="Every listing is reviewed before it goes live">
                 <span aria-hidden="true">✓</span>
@@ -47,189 +47,269 @@
               </div>
             </div>
 
-            <form class="seller-form seller-form-focused seller-form-simple" data-seller-form>
-              <article class="seller-form-block seller-form-block-primary seller-simple-panel">
-                <div class="seller-form-block-head">
-                  <h2>Paddle</h2>
-                  <p class="seller-form-help">The basics buyers use to decide.</p>
-                </div>
+            <nav class="seller-flow-steps" aria-label="Seller listing steps">
+              <a href="#paddle-details"><span>1</span><strong>Paddle</strong></a>
+              <a href="#paddle-photos"><span>2</span><strong>Photos</strong></a>
+              <a href="#paddle-shipping"><span>3</span><strong>Shipping</strong></a>
+              <a href="#paddle-review"><span>4</span><strong>Review</strong></a>
+            </nav>
 
-                <div class="seller-basics-grid">
-                  <label>
-                    Brand
-                    <select name="brand" required aria-describedby="paddle-catalog-help">
-                      <option value="">Choose a brand</option>
-                    </select>
-                  </label>
-                  <label>
-                    Model
-                    <select name="model" required disabled aria-describedby="paddle-catalog-help">
-                      <option value="">Choose a brand first</option>
-                    </select>
-                  </label>
-                  <p class="seller-field-wide seller-catalog-help" id="paddle-catalog-help">
-                    Choose the closest primary color. Can’t find a brand, model, or thickness?
-                    <a href="mailto:11zeropb@gmail.com?subject=Missing%20paddle%20option">Tell us what’s missing.</a>
-                  </p>
-                  <label>
-                    Color
-                    <select name="color" required aria-describedby="paddle-catalog-help">
-                      <option value="">Choose a color</option>
-                    </select>
-                  </label>
-                  <label>
-                    Thickness <span class="seller-optional-label">Optional</span>
-                    <select name="thickness" aria-describedby="paddle-catalog-help">
-                      <option value="">Not specified</option>
-                    </select>
-                  </label>
-                  <label>
-                    Condition
-                    <select name="condition">
-                      <option value="Excellent">Excellent</option>
-                      <option value="Very Good">Very Good</option>
-                      <option value="Good">Good</option>
-                    </select>
-                  </label>
-                  <label>
-                    Price
-                    <input
-                      type="number"
-                      name="price"
-                      min="1"
-                      max="1000"
-                      step="1"
-                      inputmode="numeric"
-                      placeholder="140"
-                      required
-                    />
-                  </label>
-                  <label class="seller-field-wide">
-                    Ships from
-                    <input type="text" name="location" placeholder="Ex: Miami, FL" />
-                  </label>
-                  <details class="seller-extra-details seller-field-wide">
-                    <summary>Add notes for buyers <span>Optional</span></summary>
+            <section class="seller-preflight" data-seller-preflight aria-live="polite" hidden>
+              <span class="seller-preflight-icon" aria-hidden="true">→</span>
+              <div>
+                <p class="eyebrow" data-seller-preflight-eyebrow>Before you list</p>
+                <strong data-seller-preflight-title>Sign in or create an account</strong>
+                <p data-seller-preflight-copy>Your details can save on this device, but photos stay only in this tab.</p>
+              </div>
+              <a class="button button-dark" data-seller-preflight-action href="./auth.html?next=%2Fsell.html">Continue</a>
+            </section>
+
+            <form
+              class="seller-form seller-form-focused seller-form-simple"
+              data-seller-form
+              method="post"
+              action="./api/listings"
+              novalidate
+            >
+              <div class="seller-flow-main">
+                <article class="seller-form-block seller-form-block-primary seller-simple-panel seller-flow-panel" id="paddle-details">
+                  <div class="seller-flow-panel-head">
+                    <span class="seller-flow-number" aria-hidden="true">1</span>
+                    <div class="seller-form-block-head">
+                      <p class="eyebrow">Paddle details</p>
+                      <h2>What are you selling?</h2>
+                      <p class="seller-form-help">Add the information buyers compare first.</p>
+                    </div>
+                  </div>
+
+                  <div class="seller-basics-grid">
                     <label>
-                      Condition notes
-                      <textarea
-                        class="seller-notes-compact"
-                        name="notes"
-                        rows="3"
-                        placeholder="Ex: Light edge wear, fresh grip, no cracks."
-                      ></textarea>
-                      <span class="seller-field-meta" data-seller-notes-counter>
-                        Mention wear, grip, or anything else a buyer should know.
+                      Brand
+                      <select name="brand" required aria-describedby="paddle-catalog-help">
+                        <option value="">Choose a brand</option>
+                      </select>
+                    </label>
+                    <label>
+                      Model
+                      <select name="model" required disabled aria-describedby="paddle-catalog-help">
+                        <option value="">Choose a brand first</option>
+                      </select>
+                    </label>
+                    <p class="seller-field-wide seller-catalog-help" id="paddle-catalog-help">
+                      Can’t find an option?
+                      <a href="mailto:11zeropb@gmail.com?subject=Missing%20paddle%20option">Tell us what’s missing.</a>
+                    </p>
+                    <label>
+                      Color
+                      <select name="color" required aria-describedby="paddle-catalog-help">
+                        <option value="">Choose a color</option>
+                      </select>
+                    </label>
+                    <label>
+                      Thickness <span class="seller-optional-label">Optional</span>
+                      <select name="thickness" aria-describedby="paddle-catalog-help">
+                        <option value="">Not specified</option>
+                      </select>
+                    </label>
+                    <label>
+                      Condition
+                      <select name="condition" required>
+                        <option value="Excellent">Excellent</option>
+                        <option value="Very Good">Very Good</option>
+                        <option value="Good">Good</option>
+                      </select>
+                    </label>
+                    <label>
+                      Playing style
+                      <select name="category" required>
+                        <option value="">Choose a style</option>
+                        <option value="control">Control</option>
+                        <option value="power">Power</option>
+                        <option value="hybrid">Hybrid</option>
+                      </select>
+                    </label>
+                    <label>
+                      Price
+                      <span class="seller-price-field">
+                        <span aria-hidden="true">$</span>
+                        <input
+                          type="number"
+                          name="price"
+                          min="1"
+                          max="1000"
+                          step="1"
+                          inputmode="numeric"
+                          placeholder="140"
+                          required
+                        />
                       </span>
                     </label>
-                  </details>
-                </div>
-              </article>
-
-              <article class="seller-form-block seller-form-block-primary seller-simple-panel">
-                <div class="seller-form-block-head">
-                  <h2>Photos &amp; delivery</h2>
-                  <p class="seller-form-help">Add photos, then your shipping address.</p>
-                </div>
-
-                <div class="seller-photo-upload seller-photo-upload-compact">
-                  <div class="seller-photo-step-head">
-                    <div class="seller-photo-step-title">
-                      <h3>Product photos</h3>
-                    </div>
-                    <span class="seller-photo-requirement">1–4 photos</span>
+                    <details class="seller-extra-details seller-field-wide">
+                      <summary>Add condition notes <span>Optional</span></summary>
+                      <label>
+                        Notes for buyers
+                        <textarea
+                          class="seller-notes-compact"
+                          name="notes"
+                          rows="3"
+                          placeholder="Ex: Light edge wear, fresh grip, no cracks."
+                        ></textarea>
+                        <span class="seller-field-meta" data-seller-notes-counter>
+                          Mention wear, grip, or anything else a buyer should know.
+                        </span>
+                      </label>
+                    </details>
                   </div>
+                </article>
 
-                  <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
-                    <span class="seller-upload-icon" aria-hidden="true">+</span>
-                    <span class="seller-upload-copy">
-                      <strong>Add photos</strong>
-                      <span>Tap or drag here</span>
-                    </span>
-                  </label>
-                  <input
-                    class="seller-native-file-input"
-                    id="listing-photos-input"
-                    type="file"
-                    name="photos"
-                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                    multiple
-                    aria-label="Choose up to 4 listing photos"
-                  />
-                  <div class="seller-photo-toolbar seller-photo-toolbar-compact">
-                    <span class="seller-photo-meta" data-photo-meta role="status">Add at least 1 photo.</span>
-                  </div>
-                </div>
-
-                <div
-                  class="seller-photo-preview seller-photo-preview-compact"
-                  data-photo-preview
-                  aria-label="Selected product photos"
-                  aria-live="polite"
-                ></div>
-
-                <div class="seller-managed-shipping">
-                  <input type="hidden" name="shippingMode" value="calculated" data-shipping-mode />
-                  <div class="seller-managed-shipping-copy">
-                    <span class="seller-managed-shipping-icon" aria-hidden="true">↗</span>
-                    <div>
-                      <strong>Prepaid shipping handled by Eleven Zero</strong>
-                      <p>We calculate the buyer’s rate and create your label after the paddle sells.</p>
+                <article class="seller-form-block seller-form-block-primary seller-simple-panel seller-flow-panel" id="paddle-photos">
+                  <div class="seller-flow-panel-head">
+                    <span class="seller-flow-number" aria-hidden="true">2</span>
+                    <div class="seller-form-block-head">
+                      <p class="eyebrow">Photos</p>
+                      <h2>Show the actual paddle</h2>
+                      <p class="seller-form-help">Add up to four clear photos. The first one is your cover.</p>
                     </div>
                   </div>
-                  <div class="seller-shipping-compact-grid">
-                    <label class="seller-field-wide">
-                      Ship-from street address
-                      <input
-                        type="text"
-                        name="shippingOriginStreet1"
-                        placeholder="123 Main Street"
-                        autocomplete="shipping address-line1"
-                      />
-                      <small>Private—used only for the prepaid label and return address.</small>
+
+                  <div class="seller-photo-upload seller-photo-upload-compact">
+                    <div class="seller-photo-step-head">
+                      <div class="seller-photo-step-title">
+                        <h3>Product photos</h3>
+                      </div>
+                      <span class="seller-photo-requirement">1–4 photos</span>
+                    </div>
+
+                    <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
+                      <span class="seller-upload-icon" aria-hidden="true">+</span>
+                      <span class="seller-upload-copy">
+                        <strong>Add photos</strong>
+                        <span>Choose or drag JPG, PNG, or WebP files</span>
+                      </span>
                     </label>
-                    <label>
-                      Ship-from ZIP code
-                      <input
-                        type="text"
-                        name="shippingOriginZip"
-                        placeholder="33101"
-                        inputmode="numeric"
-                        autocomplete="shipping postal-code"
-                      />
-                    </label>
+                    <input
+                      class="seller-native-file-input"
+                      id="listing-photos-input"
+                      type="file"
+                      name="photos"
+                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      multiple
+                      aria-label="Choose up to 4 listing photos"
+                    />
+                    <div class="seller-photo-toolbar seller-photo-toolbar-compact">
+                      <span class="seller-photo-meta" data-photo-meta role="status">Add at least 1 photo.</span>
+                    </div>
                   </div>
-                  <p class="seller-managed-shipping-note">
-                    Standard paddle packaging is selected automatically. You will never need to shop for a rate or buy a label yourself.
+
+                  <div
+                    class="seller-photo-preview seller-photo-preview-compact"
+                    data-photo-preview
+                    aria-label="Selected product photos"
+                    aria-live="polite"
+                  ></div>
+                </article>
+
+                <article class="seller-form-block seller-form-block-primary seller-simple-panel seller-flow-panel" id="paddle-shipping">
+                  <div class="seller-flow-panel-head">
+                    <span class="seller-flow-number" aria-hidden="true">3</span>
+                    <div class="seller-form-block-head">
+                      <p class="eyebrow">Shipping</p>
+                      <h2>Where will it ship from?</h2>
+                      <p class="seller-form-help">We use this to calculate delivery and create your prepaid label after a sale.</p>
+                    </div>
+                  </div>
+
+                  <div class="seller-managed-shipping">
+                    <input type="hidden" name="shippingMode" value="calculated" data-shipping-mode />
+                    <div class="seller-managed-shipping-copy">
+                      <span class="seller-managed-shipping-icon" aria-hidden="true">↗</span>
+                      <div>
+                        <strong>Eleven Zero handles the prepaid label</strong>
+                        <p>The buyer pays the calculated shipping rate at checkout.</p>
+                      </div>
+                    </div>
+                    <div class="seller-shipping-compact-grid">
+                      <label>
+                        Public city &amp; state
+                        <input
+                          type="text"
+                          name="location"
+                          placeholder="Ex: Miami, FL"
+                          autocomplete="address-level2"
+                          maxlength="80"
+                          required
+                        />
+                        <small>Shown on your listing. Your street address stays private.</small>
+                      </label>
+                      <label>
+                        Ship-from ZIP code
+                        <input
+                          type="text"
+                          name="shippingOriginZip"
+                          placeholder="33101"
+                          inputmode="numeric"
+                          autocomplete="shipping postal-code"
+                          maxlength="10"
+                          required
+                        />
+                      </label>
+                      <label class="seller-field-wide">
+                        Private ship-from street address
+                        <input
+                          type="text"
+                          name="shippingOriginStreet1"
+                          placeholder="123 Main Street"
+                          autocomplete="shipping address-line1"
+                          maxlength="140"
+                          required
+                        />
+                        <small>Not shown publicly; shared with Shippo and the carrier as needed for labels and returns.</small>
+                      </label>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <aside class="seller-flow-sidebar" id="paddle-review" aria-label="Listing readiness">
+                <div class="seller-flow-summary">
+                  <div class="seller-launch-head">
+                    <p class="eyebrow">Final check</p>
+                    <span class="seller-launch-pill" data-seller-readiness-pill aria-live="polite">0/6 ready</span>
+                  </div>
+                  <h2 data-seller-readiness-title>Sign in to start selling</h2>
+                  <p class="seller-launch-copy" data-seller-readiness-copy>
+                    Your public listing details save on this device while you work.
                   </p>
+                  <div class="seller-launch-grid" data-seller-readiness-grid></div>
                 </div>
-              </article>
 
-              <div class="seller-payout-gate is-hidden" data-seller-payout-gate>
-                <span class="seller-payout-gate-icon" aria-hidden="true">$</span>
-                <div>
-                  <strong>Stripe payouts are required before review</strong>
-                  <p>Connect the bank account where you want to receive paddle-sale payouts. Your listing draft stays saved while you complete setup.</p>
-                </div>
-                <a class="button button-secondary" href="./account.html#seller-payouts">Set up Stripe payouts</a>
-              </div>
+                <div class="seller-submit-strip seller-submit-strip-focused">
+                  <p class="seller-review-note">
+                    Submit once. We check the listing before it appears in the shop.
+                  </p>
+                  <p class="seller-fee-summary" data-seller-fee-summary>
+                    Your seller fee and payout details will appear here.
+                  </p>
+                  <label class="seller-photo-attestation">
+                    <input type="checkbox" name="photoAttestation" value="1" required />
+                    <span>These are current photos of the actual paddle I am selling.</span>
+                  </label>
+                  <button class="button button-dark seller-submit-button" type="submit" data-seller-submit>
+                    Sign in to submit
+                  </button>
 
-              <div class="seller-submit-strip seller-submit-strip-focused">
-                <label class="seller-photo-attestation">
-                  <input type="checkbox" name="photoAttestation" value="1" required />
-                  <span>These are current photos of the actual paddle I am selling.</span>
-                </label>
-                <button class="button button-dark seller-submit-button" type="submit" data-seller-submit>
-                  Submit listing for review
-                </button>
-
-                <div class="seller-submit-meta">
-                  <div class="seller-status seller-status-inline seller-status-compact" aria-live="polite" data-seller-status>
-                    Sign in to submit your paddle for review.
+                  <div class="seller-submit-meta">
+                    <div class="seller-status seller-status-inline seller-status-compact" aria-live="polite" data-seller-status>
+                      Sign in to submit your paddle for review.
+                    </div>
+                    <div class="seller-draft-status seller-draft-status-inline" data-seller-draft-status>Draft saved on this device.</div>
+                    <button class="seller-draft-clear" type="button" data-clear-seller-draft>
+                      Clear saved draft
+                    </button>
                   </div>
-                  <div class="seller-draft-status seller-draft-status-inline" data-seller-draft-status>Draft saved on this device.</div>
                 </div>
-              </div>
+
+              </aside>
             </form>
           </div>
         </section>
@@ -260,7 +340,7 @@
     </div>
 
     <script src="./app.js?v=20260916marketfocus1"></script>
-    <script src="./marketplace.js?v=20260723checkout1"></script>
+    <script src="./marketplace.js?v=20260916sellflow2"></script>
     <script src="./header-tweaks.js?v=20260916marketfocus1"></script>
   </body>
 </html>

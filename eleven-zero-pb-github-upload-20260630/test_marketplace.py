@@ -164,6 +164,17 @@ class MarketplaceSafetyTests(unittest.TestCase):
     def test_public_catalog_only_returns_approved_real_seller_listings(self):
         seller_id = self.create_user()
         visible_id = self.create_listing(seller_id, "Visible")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            connection.execute(
+                """
+                UPDATE listings
+                SET shipping_origin_zip = '22201',
+                    shipping_origin_street1 = '123 Private Street'
+                WHERE id = ?
+                """,
+                (visible_id,),
+            )
+            connection.commit()
         self.create_listing(None, "Anonymous")
         self.create_listing(seller_id, "Pending", approval="pending")
         sold_id = self.create_listing(seller_id, "Sold", sale_status="sold")
@@ -173,6 +184,8 @@ class MarketplaceSafetyTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in items], [visible_id, sold_id])
         self.assertEqual(items[0]["seller_name"], "Real Seller")
         self.assertEqual(items[0]["images"], [f"/api/listings/{visible_id}/images/0"])
+        self.assertNotIn("originZip", items[0]["shipping"])
+        self.assertTrue(items[0]["shipping"]["originStreetReady"])
 
     def test_suspended_seller_listing_is_not_public_or_purchasable(self):
         seller_id = self.create_user("suspended-seller@example.com")
@@ -2331,6 +2344,88 @@ class MarketplaceSafetyTests(unittest.TestCase):
                 (seller_id,),
             ).fetchone()[0]
         self.assertIsNone(thickness)
+
+    def test_listing_submission_requires_playing_style(self):
+        captured = {}
+        seller_id = self.create_user()
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": seller_id},
+            {
+                "photoAttestation": "1",
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Black",
+                "category": "",
+                "condition": "Excellent",
+                "price": "150",
+                "location": "Arlington, VA",
+                "shippingOriginZip": "22201",
+                "shippingOriginStreet1": "123 Test Street",
+                "images": [self.trainer_image_data(width=20, height=20)],
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "incomplete_listing")
+        with sqlite3.connect(app.DB_PATH) as connection:
+            listing_count = connection.execute(
+                "SELECT COUNT(*) FROM listings WHERE user_id = ?",
+                (seller_id,),
+            ).fetchone()[0]
+        self.assertEqual(listing_count, 0)
+
+    def test_listing_submission_rejects_unknown_condition(self):
+        captured = {}
+        seller_id = self.create_user()
+
+        class StubHandler:
+            def fetch_seller_profile(self, _user_id, force_refresh=False):
+                return {
+                    "sellerProfile": {
+                        "readyForPayouts": True,
+                        "connectedAccountId": "acct_ready",
+                    }
+                }
+
+            def send_json(self, payload, status=200, **_kwargs):
+                captured["payload"] = payload
+                captured["status"] = status
+
+        app.ElevenZeroHandler.handle_create_listing(
+            StubHandler(),
+            {"id": seller_id},
+            {
+                "photoAttestation": "1",
+                "brand": "JOOLA",
+                "model": "Pro V Perseus",
+                "color": "Black",
+                "category": "control",
+                "condition": "Almost perfect",
+                "price": "150",
+                "location": "Arlington, VA",
+                "shippingOriginZip": "22201",
+                "shippingOriginStreet1": "123 Test Street",
+                "images": [self.trainer_image_data(width=20, height=20)],
+            },
+        )
+
+        self.assertEqual(captured["status"], app.HTTPStatus.BAD_REQUEST)
+        self.assertEqual(captured["payload"]["code"], "invalid_listing_condition")
 
 
 if __name__ == "__main__":
