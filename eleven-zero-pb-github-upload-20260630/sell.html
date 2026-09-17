@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260916sellflow2" />
+    <link rel="stylesheet" href="./styles.css?v=20260917sellclean1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -37,29 +37,15 @@
           <div class="seller-card seller-card-focused seller-card-simple reveal">
             <div class="seller-copy seller-copy-focused seller-simple-heading">
               <div>
-                <p class="eyebrow">Sell on Eleven Zero PB</p>
-                <h1>Sell your paddle</h1>
-                <p>Create a clear listing in a few minutes. Your public details save as you go.</p>
-              </div>
-              <div class="seller-review-badge" aria-label="Every listing is reviewed before it goes live">
-                <span aria-hidden="true">✓</span>
-                <strong>Reviewed before it goes live</strong>
+                <h1>List your paddle</h1>
+                <p>Add details, photos, and a ship-from address. We review every listing before it goes live.</p>
               </div>
             </div>
-
-            <nav class="seller-flow-steps" aria-label="Seller listing steps">
-              <a href="#paddle-details"><span>1</span><strong>Paddle</strong></a>
-              <a href="#paddle-photos"><span>2</span><strong>Photos</strong></a>
-              <a href="#paddle-shipping"><span>3</span><strong>Shipping</strong></a>
-              <a href="#paddle-review"><span>4</span><strong>Review</strong></a>
-            </nav>
 
             <section class="seller-preflight" data-seller-preflight aria-live="polite" hidden>
               <span class="seller-preflight-icon" aria-hidden="true">→</span>
               <div>
-                <p class="eyebrow" data-seller-preflight-eyebrow>Before you list</p>
                 <strong data-seller-preflight-title>Sign in or create an account</strong>
-                <p data-seller-preflight-copy>Your details can save on this device, but photos stay only in this tab.</p>
               </div>
               <a class="button button-dark" data-seller-preflight-action href="./auth.html?next=%2Fsell.html">Continue</a>
             </section>
@@ -76,20 +62,19 @@
                   <div class="seller-flow-panel-head">
                     <span class="seller-flow-number" aria-hidden="true">1</span>
                     <div class="seller-form-block-head">
-                      <p class="eyebrow">Paddle details</p>
-                      <h2>What are you selling?</h2>
-                      <p class="seller-form-help">Add the information buyers compare first.</p>
+                      <h2>Paddle details</h2>
+                      <p class="seller-form-help">The information buyers compare first.</p>
                     </div>
                   </div>
 
                   <div class="seller-basics-grid">
-                    <label>
+                    <label class="seller-mobile-wide">
                       Brand
                       <select name="brand" required aria-describedby="paddle-catalog-help">
                         <option value="">Choose a brand</option>
                       </select>
                     </label>
-                    <label>
+                    <label class="seller-mobile-wide">
                       Model
                       <select name="model" required disabled aria-describedby="paddle-catalog-help">
                         <option value="">Choose a brand first</option>
@@ -128,7 +113,7 @@
                         <option value="hybrid">Hybrid</option>
                       </select>
                     </label>
-                    <label>
+                    <label class="seller-price-row">
                       Price
                       <span class="seller-price-field">
                         <span aria-hidden="true">$</span>
@@ -166,25 +151,17 @@
                   <div class="seller-flow-panel-head">
                     <span class="seller-flow-number" aria-hidden="true">2</span>
                     <div class="seller-form-block-head">
-                      <p class="eyebrow">Photos</p>
-                      <h2>Show the actual paddle</h2>
-                      <p class="seller-form-help">Add up to four clear photos. The first one is your cover.</p>
+                      <h2>Photos</h2>
+                      <p class="seller-form-help">Add up to four. The first photo is the cover.</p>
                     </div>
                   </div>
 
                   <div class="seller-photo-upload seller-photo-upload-compact">
-                    <div class="seller-photo-step-head">
-                      <div class="seller-photo-step-title">
-                        <h3>Product photos</h3>
-                      </div>
-                      <span class="seller-photo-requirement">1–4 photos</span>
-                    </div>
-
                     <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
                       <span class="seller-upload-icon" aria-hidden="true">+</span>
                       <span class="seller-upload-copy">
-                        <strong>Add photos</strong>
-                        <span>Choose or drag JPG, PNG, or WebP files</span>
+                        <strong>Add 1–4 photos</strong>
+                        <span>JPG, PNG, or WebP</span>
                       </span>
                     </label>
                     <input
@@ -213,24 +190,16 @@
                   <div class="seller-flow-panel-head">
                     <span class="seller-flow-number" aria-hidden="true">3</span>
                     <div class="seller-form-block-head">
-                      <p class="eyebrow">Shipping</p>
-                      <h2>Where will it ship from?</h2>
-                      <p class="seller-form-help">We use this to calculate delivery and create your prepaid label after a sale.</p>
+                      <h2>Shipping</h2>
+                      <p class="seller-form-help">Your private address is used for rates and the prepaid label.</p>
                     </div>
                   </div>
 
                   <div class="seller-managed-shipping">
                     <input type="hidden" name="shippingMode" value="calculated" data-shipping-mode />
-                    <div class="seller-managed-shipping-copy">
-                      <span class="seller-managed-shipping-icon" aria-hidden="true">↗</span>
-                      <div>
-                        <strong>Eleven Zero handles the prepaid label</strong>
-                        <p>The buyer pays the calculated shipping rate at checkout.</p>
-                      </div>
-                    </div>
                     <div class="seller-shipping-compact-grid">
                       <label>
-                        Public city &amp; state
+                        City &amp; state <span class="seller-optional-label">Public</span>
                         <input
                           type="text"
                           name="location"
@@ -239,10 +208,9 @@
                           maxlength="80"
                           required
                         />
-                        <small>Shown on your listing. Your street address stays private.</small>
                       </label>
                       <label>
-                        Ship-from ZIP code
+                        ZIP code
                         <input
                           type="text"
                           name="shippingOriginZip"
@@ -254,7 +222,7 @@
                         />
                       </label>
                       <label class="seller-field-wide">
-                        Private ship-from street address
+                        Street address
                         <input
                           type="text"
                           name="shippingOriginStreet1"
@@ -263,9 +231,12 @@
                           maxlength="140"
                           required
                         />
-                        <small>Not shown publicly; shared with Shippo and the carrier as needed for labels and returns.</small>
+                        <small>Private — used only for labels and returns.</small>
                       </label>
                     </div>
+                    <p class="seller-shipping-note">
+                      Buyer pays shipping. We email your prepaid label after the sale.
+                    </p>
                   </div>
                 </article>
               </div>
@@ -274,35 +245,32 @@
                 <div class="seller-flow-summary">
                   <div class="seller-launch-head">
                     <p class="eyebrow">Final check</p>
-                    <span class="seller-launch-pill" data-seller-readiness-pill aria-live="polite">0/6 ready</span>
+                    <span class="seller-launch-pill" data-seller-readiness-pill aria-live="polite">0/3 ready</span>
                   </div>
-                  <h2 data-seller-readiness-title>Sign in to start selling</h2>
+                  <h2 data-seller-readiness-title>Finish your listing</h2>
                   <p class="seller-launch-copy" data-seller-readiness-copy>
-                    Your public listing details save on this device while you work.
+                    Complete the remaining items below.
                   </p>
                   <div class="seller-launch-grid" data-seller-readiness-grid></div>
                 </div>
 
                 <div class="seller-submit-strip seller-submit-strip-focused">
-                  <p class="seller-review-note">
-                    Submit once. We check the listing before it appears in the shop.
-                  </p>
                   <p class="seller-fee-summary" data-seller-fee-summary>
                     Your seller fee and payout details will appear here.
                   </p>
                   <label class="seller-photo-attestation">
                     <input type="checkbox" name="photoAttestation" value="1" required />
-                    <span>These are current photos of the actual paddle I am selling.</span>
+                    <span>I confirm these photos show this paddle.</span>
                   </label>
                   <button class="button button-dark seller-submit-button" type="submit" data-seller-submit>
-                    Sign in to submit
+                    Submit for review
                   </button>
 
                   <div class="seller-submit-meta">
                     <div class="seller-status seller-status-inline seller-status-compact" aria-live="polite" data-seller-status>
                       Sign in to submit your paddle for review.
                     </div>
-                    <div class="seller-draft-status seller-draft-status-inline" data-seller-draft-status>Draft saved on this device.</div>
+                    <div class="seller-draft-status seller-draft-status-inline" data-seller-draft-status>Public details save automatically.</div>
                     <button class="seller-draft-clear" type="button" data-clear-seller-draft>
                       Clear saved draft
                     </button>
@@ -340,7 +308,7 @@
     </div>
 
     <script src="./app.js?v=20260916marketfocus1"></script>
-    <script src="./marketplace.js?v=20260916sellflow2"></script>
+    <script src="./marketplace.js?v=20260917sellclean1"></script>
     <script src="./header-tweaks.js?v=20260916marketfocus1"></script>
   </body>
 </html>
