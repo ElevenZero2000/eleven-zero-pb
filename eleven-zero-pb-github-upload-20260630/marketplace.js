@@ -53,6 +53,8 @@ const photoPreview = document.querySelector("[data-photo-preview]");
 const photoDropzone = document.querySelector("[data-photo-dropzone]");
 const photoMeta = document.querySelector("[data-photo-meta]");
 const photoTrigger = document.querySelector("[data-photo-trigger]");
+const takePhotosButton = document.querySelector("[data-take-photos]");
+const sellerCameraDialog = document.querySelector("#seller-camera-dialog");
 const sellerReadinessTitle = document.querySelector("[data-seller-readiness-title]");
 const sellerReadinessPill = document.querySelector("[data-seller-readiness-pill]");
 const sellerReadinessCopy = document.querySelector("[data-seller-readiness-copy]");
@@ -115,6 +117,7 @@ const LISTING_IMAGE_OPTIMIZATION_STEPS = [
   { maxSide: 640, quality: 0.56 },
 ];
 let listingSubmitInFlight = false;
+let sellerCamera = null;
 
 function safeParseJson(value) {
   if (!value) return null;
@@ -1722,6 +1725,9 @@ function renderEmptyPhotoSlots(startIndex = 0) {
 function renderPhotoPreview() {
   if (!photoPreview) return;
 
+  if (photoInput) photoInput.disabled = listingState.imageProcessing;
+  if (takePhotosButton) takePhotosButton.disabled = listingState.imageProcessing;
+
   if (listingState.imageProcessing) {
     photoPreview.innerHTML = `
       <div class="seller-photo-placeholder seller-photo-processing">
@@ -2035,6 +2041,8 @@ async function prepareListingPhotos(fileList, remainingSlots = MAX_LISTING_PHOTO
 }
 
 async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
+  // Serialize camera captures and uploads so they share the four-photo limit.
+  if (listingState.imageProcessing) return false;
   const fileList =
     fileListOrEvent?.currentTarget?.files ||
     fileListOrEvent?.target?.files ||
@@ -2043,7 +2051,7 @@ async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
 
   if (!fileList?.length) {
     renderPhotoPreview();
-    return;
+    return false;
   }
 
   const remainingSlots = Math.max(0, MAX_LISTING_PHOTOS - listingState.draftImages.length);
@@ -2054,7 +2062,7 @@ async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
       "warning"
     );
     if (photoInput) photoInput.value = "";
-    return;
+    return false;
   }
 
   listingState.imageProcessing = true;
@@ -2076,6 +2084,7 @@ async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
       );
     }
     listingState.draftImages = [...listingState.draftImages, ...prepared.images];
+    clearSellerFieldError(photoInput);
     renderPhotoPreview();
     setPhotoMetaStatus(
       `${listingState.draftImages.length} photo${
@@ -2110,10 +2119,12 @@ async function handlePhotoSelection(fileListOrEvent = photoInput?.files) {
         ? "warning"
         : "success"
     );
+    return true;
   } catch (error) {
     renderPhotoPreview();
     setPhotoMetaStatus(error.message, "error");
     ElevenZeroApp.setStatus(listingStatus, error.message, "error");
+    return false;
   } finally {
     listingState.imageProcessing = false;
     if (photoInput) photoInput.value = "";
@@ -2455,6 +2466,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   photoInput?.addEventListener("change", (event) => {
     handlePhotoSelection(event.currentTarget?.files);
   });
+  if (takePhotosButton && sellerCameraDialog && window.ElevenZeroSellerCamera) {
+    sellerCamera = window.ElevenZeroSellerCamera.create({
+      dialog: sellerCameraDialog,
+      video: sellerCameraDialog.querySelector("[data-camera-video]"),
+      status: sellerCameraDialog.querySelector("[data-camera-status]"),
+      captureButton: sellerCameraDialog.querySelector("[data-camera-capture]"),
+      closeButton: sellerCameraDialog.querySelector("[data-camera-close]"),
+      uploadButton: sellerCameraDialog.querySelector("[data-camera-upload]"),
+      getRemaining: () => Math.max(0, MAX_LISTING_PHOTOS - listingState.draftImages.length),
+      onPhoto: (file) => handlePhotoSelection([file]),
+      onUpload: () => photoInput?.click(),
+    });
+    takePhotosButton.addEventListener("click", () => {
+      if (listingState.imageProcessing) {
+        setPhotoMetaStatus("Finishing your photos. Try again in a moment.", "warning");
+        return;
+      }
+      if (listingState.draftImages.length >= MAX_LISTING_PHOTOS) {
+        setPhotoMetaStatus("Four photos added. Remove one to take another.", "warning");
+        return;
+      }
+      sellerCamera.open();
+    });
+  } else if (takePhotosButton) {
+    takePhotosButton.hidden = true;
+  }
   listingForm?.addEventListener("submit", handleListingSubmit);
   sellerBrandSelect?.addEventListener("change", () => {
     syncSellerModelOptions();

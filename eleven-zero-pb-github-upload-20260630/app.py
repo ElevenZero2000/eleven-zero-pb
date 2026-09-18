@@ -41,7 +41,7 @@ PUBLIC_ROOT_FILES = frozenset({
     "index.html", "shop.html", "listing.html", "sell.html", "cart.html",
     "account.html", "auth.html", "courts.html", "trainers.html",
     "trainer-profile.html", "privacy.html", "terms.html",
-    "app.js", "marketplace.js", "listing.js", "cart.js", "cart-redirect.js",
+    "app.js", "marketplace.js", "seller-camera.js", "listing.js", "cart.js", "cart-redirect.js",
     "account.js", "auth.js", "courts.js", "trainers.js", "trainer-profile.js",
     "header-tweaks.js", "styles.css", "cart.css", "header-tweaks.css",
     "split-preview.css", "paddle-catalog.json", "robots.txt", "sitemap.xml",
@@ -6275,6 +6275,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             return None
         try:
             stat = os.fstat(source.fileno())
+            # Only the successfully served selling document can request its
+            # same-origin camera. Scripts, APIs and error pages remain blocked.
+            self._seller_camera_document = parsed.path == "/sell.html"
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", self.guess_type(str(path)))
             self.send_header("Content-Length", str(stat.st_size))
@@ -6311,7 +6314,9 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-        self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        camera_policy = "(self)" if getattr(self, "_seller_camera_document", False) else "()"
+        self._seller_camera_document = False
+        self.send_header("Permissions-Policy", f"geolocation=(), microphone=(), camera={camera_policy}")
         self.send_header("Content-Security-Policy", build_content_security_policy())
         if SESSION_COOKIE_SECURE:
             self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

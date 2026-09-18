@@ -52,7 +52,7 @@ class HealthAndStaticHTTPTests(unittest.TestCase):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(SECRET)
-        for name in ("index.html", "app.js", "styles.css", "paddle-catalog.json", "robots.txt", "sitemap.xml"):
+        for name in ("index.html", "sell.html", "app.js", "seller-camera.js", "styles.css", "paddle-catalog.json", "robots.txt", "sitemap.xml"):
             (self.root / name).write_text("public-" + name)
         (self.root / "assets" / "logo.png").write_bytes(IMAGE_DATA)
         (self.root / "assets" / "nested" / "photo.webp").write_bytes(IMAGE_DATA)
@@ -205,6 +205,45 @@ class HealthAndStaticHTTPTests(unittest.TestCase):
                     self.assertEqual(head_status, 200)
                     self.assertEqual(head_headers["Content-Length"], headers["Content-Length"])
                     self.assertEqual(head_body, b"")
+
+    def test_camera_is_allowed_only_on_the_successful_selling_document(self):
+        for method in ("GET", "HEAD"):
+            for path in ("/sell.html", "/sell.html?fresh=camera-test"):
+                with self.subTest(method=method, path=path):
+                    status, headers, body = self.request(path, method)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(headers["Content-Type"], "text/html")
+                    self.assertEqual(headers["Permissions-Policy"], "geolocation=(), microphone=(), camera=(self)")
+                    self.assertEqual(headers["Content-Security-Policy"], app.build_content_security_policy())
+                    self.assertEqual(headers["X-Frame-Options"], "DENY")
+                    self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+                    self.assertIn("no-store", headers["Cache-Control"])
+                    if method == "HEAD":
+                        self.assertEqual(body, b"")
+
+    def test_camera_script_is_public_javascript_without_camera_permissions(self):
+        for method in ("GET", "HEAD"):
+            with self.subTest(method=method):
+                status, headers, body = self.request("/seller-camera.js?v=camera-test", method)
+                self.assertEqual(status, 200)
+                self.assertIn(headers["Content-Type"], {"text/javascript", "application/javascript"})
+                self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+                self.assertEqual(headers["Permissions-Policy"], "geolocation=(), microphone=(), camera=()")
+                self.assertEqual(body, b"public-seller-camera.js" if method == "GET" else b"")
+
+    def test_camera_remains_blocked_on_other_documents_apis_and_errors(self):
+        for method in ("GET", "HEAD"):
+            for path in ("/", "/index.html", "/app.js", "/api/paddle-catalog", "/missing.html", "/sell.html;not-document", "/%73ell.html"):
+                with self.subTest(method=method, path=path):
+                    _, headers, _ = self.request(path, method)
+                    self.assertEqual(headers["Permissions-Policy"], "geolocation=(), microphone=(), camera=()")
+                    self.assertEqual(headers["Content-Security-Policy"], app.build_content_security_policy())
+        # Rejected POSTs and unavailable selling documents must not grant it.
+        self.assertEqual(self.request("/sell.html", "POST")[1]["Permissions-Policy"], "geolocation=(), microphone=(), camera=()")
+        (self.root / "sell.html").unlink()
+        status, headers, _ = self.request("/sell.html")
+        self.assertEqual(status, 404)
+        self.assertEqual(headers["Permissions-Policy"], "geolocation=(), microphone=(), camera=()")
 
     def test_nested_asset_is_allowed_and_api_catalog_still_works(self):
         self.assertEqual(self.request("/assets/nested/photo.webp")[2], IMAGE_DATA)

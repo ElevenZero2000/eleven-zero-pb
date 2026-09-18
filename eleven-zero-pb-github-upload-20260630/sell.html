@@ -8,7 +8,7 @@
       name="description"
       content="Sell your pickleball paddle with clear photos, simple shipping, and a quick review flow on Eleven Zero PB."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260917shippinglabels1" />
+    <link rel="stylesheet" href="./styles.css?v=20260918camera1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body class="sell-simple-page" data-nav="sell">
@@ -157,13 +157,22 @@
                   </div>
 
                   <div class="seller-photo-upload seller-photo-upload-compact">
-                    <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
-                      <span class="seller-upload-icon" aria-hidden="true">+</span>
-                      <span class="seller-upload-copy">
-                        <strong>Add 1–4 photos</strong>
-                        <span>JPG, PNG, or WebP</span>
-                      </span>
-                    </label>
+                    <div class="seller-photo-sources">
+                      <label class="seller-file-dropzone seller-file-dropzone-compact" data-photo-dropzone tabindex="0" for="listing-photos-input">
+                        <span class="seller-upload-icon" aria-hidden="true">+</span>
+                        <span class="seller-upload-copy">
+                          <strong>Upload photos</strong>
+                          <span>JPG, PNG, or WebP</span>
+                        </span>
+                      </label>
+                      <button class="seller-camera-open" type="button" data-take-photos aria-haspopup="dialog" aria-controls="seller-camera-dialog">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M8 5l1.5-2h5L16 5h4a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z" />
+                          <circle cx="12" cy="12" r="4" />
+                        </svg>
+                        <strong>Take photos</strong>
+                      </button>
+                    </div>
                     <input
                       class="seller-native-file-input"
                       id="listing-photos-input"
@@ -311,8 +320,22 @@
       </footer>
     </div>
 
+    <dialog class="seller-camera-dialog" id="seller-camera-dialog" aria-labelledby="seller-camera-title" aria-describedby="seller-camera-status">
+      <div class="seller-camera-head">
+        <h2 id="seller-camera-title">Photograph your paddle</h2>
+        <button class="seller-camera-close" type="button" data-camera-close aria-label="Close camera">×</button>
+      </div>
+      <video class="seller-camera-video" data-camera-video autoplay muted playsinline aria-label="Live camera preview"></video>
+      <p class="seller-camera-status" id="seller-camera-status" data-camera-status role="status" aria-live="polite">Allow camera access to take a photo.</p>
+      <div class="seller-camera-actions">
+        <button class="button button-dark" type="button" data-camera-capture disabled>Take photo</button>
+        <button class="button button-light" type="button" data-camera-upload>Upload instead</button>
+      </div>
+    </dialog>
+
     <script src="./app.js?v=20260918flowfix1"></script>
-    <script src="./marketplace.js?v=20260918flowfix1"></script>
+    <script src="./seller-camera.js?v=20260918camera1"></script>
+    <script src="./marketplace.js?v=20260918camera1"></script>
     <script src="./header-tweaks.js?v=20260916marketfocus1"></script>
   </body>
 </html>
