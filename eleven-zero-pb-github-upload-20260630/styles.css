@@ -11710,6 +11710,39 @@ body.account-admin-mode {
   background: rgba(8, 233, 90, 0.1);
 }
 
+.account-profile-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-profile-controls .account-settings-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.account-profile-controls .account-settings-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.account-logout-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.account-logout-status {
+  width: min(100%, 590px);
+  margin: 10px 0 0;
+  padding: 12px 15px;
+  border: 1px solid #e5bea6;
+  border-radius: 12px;
+  background: #fff2e9;
+  color: #812e14;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
 .account-admin-mode .account-profile-card {
   border-color: rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.1);
@@ -11938,6 +11971,17 @@ body.account-admin-mode {
   .account-settings-button {
     grid-column: 1 / -1;
     width: 100%;
+  }
+
+  .account-profile-controls {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .account-profile-controls .account-settings-button {
+    grid-column: auto;
+    padding-inline: 10px;
   }
 
   .profile-settings-dialog {
