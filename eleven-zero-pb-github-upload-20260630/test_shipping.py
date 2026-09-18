@@ -324,7 +324,7 @@ class ManagedShippingTests(unittest.TestCase):
 
         def fake_failed_transaction(path, payload):
             calls.append((path, payload))
-            raise ValueError("Carrier rejected this parcel.")
+            return {"status": "ERROR", "messages": [{"text": "Carrier rejected this parcel."}]}
 
         app.shippo_request = fake_failed_transaction
         first = app.purchase_shippo_label_for_order("cs_test_shipping_failure")
@@ -556,7 +556,7 @@ class ManagedShippingTests(unittest.TestCase):
                 WHERE stripe_checkout_session_id = 'cs_test_label_claim_recovery'
                 """
             ).fetchone()
-        self.assertEqual(shipping_status, "attention_needed")
+        self.assertEqual(shipping_status, "purchase_unknown")
         self.assertIn("Check Shippo", shipping_error)
         self.assertIn("duplicate label", shipping_error)
 
@@ -817,7 +817,7 @@ class ManagedShippingTests(unittest.TestCase):
         app.smtplib.SMTP = FakeSMTP
 
         def fail_label(_path, _payload):
-            raise ValueError("Shippo billing needs attention.")
+            return {"status": "ERROR", "messages": [{"text": "Shippo billing needs attention."}]}
 
         app.shippo_request = fail_label
         result = app.finalize_paid_order("cs_test_email_before_label")

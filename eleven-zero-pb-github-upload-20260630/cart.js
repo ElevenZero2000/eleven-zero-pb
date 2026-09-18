@@ -14,6 +14,8 @@ const cartState = {
   selectedListingId: 0,
   shipping: createDefaultShippingState(),
   busy: false,
+  reservations: [],
+  confirmedOrder: null,
   statusMessage: "",
   statusTone: "neutral",
 };
@@ -126,6 +128,7 @@ function loadCartItemsFromStorage() {
 
 function saveCartItems() {
   writeStorageJson(CART_ITEMS_STORAGE_KEY, cartState.cartItems);
+  window.dispatchEvent?.(new Event("elevenzero:cart-updated"));
 }
 
 function getRequestedListingId() {
@@ -340,6 +343,21 @@ function getBaseActionState(item) {
     };
   }
 
+  const reservation = cartState.reservations.find((entry) => Number(entry.listingId) === Number(item.id));
+  if (reservation?.status === "processing") {
+    return { action: "resume", buttonLabel: "Check payment status", statusLabel: "Payment processing",
+      reason: "Your payment is being confirmed. Please don’t start another checkout. Check the status here or in your account.", tone: "pending" };
+  }
+  if (reservation) {
+    return { action: "resume", buttonLabel: "Resume checkout", statusLabel: "Reserved for you",
+      reason: "Your checkout is still open. Resume it, or cancel below to change your delivery address.", tone: "ready" };
+  }
+  if (["reserved", "pending", "sold"].includes(item.sale_status)) {
+    return { action: "disabled", buttonLabel: item.sale_status === "reserved" ? "Reserved" : "No longer available",
+      statusLabel: item.sale_status === "reserved" ? "Another buyer is checking out" : "Purchased",
+      reason: item.sale_status === "reserved" ? "Another buyer has reserved this paddle. Please check back shortly." : "This paddle has already been purchased.", tone: "neutral" };
+  }
+
   if (item.checkout_available) {
     if (ElevenZeroApp.session?.authenticated) {
       return {
@@ -435,8 +453,9 @@ function renderEmptyCart() {
   if (cartItemsPanelNode) {
     cartItemsPanelNode.innerHTML = `
       <div class="cart-empty-state">
-        <h2>No paddles yet</h2>
-        <p>Find a paddle you like and add it to your cart. It’ll be here when you’re ready.</p>
+        <h2>${cartState.confirmedOrder ? "Order confirmed" : "No paddles yet"}</h2>
+        <p>${cartState.confirmedOrder ? "Thank you! Your order and shipping updates are in your account." : "Find a paddle you like and add it to your cart. It’ll be here when you’re ready."}</p>
+        ${cartState.confirmedOrder ? '<a class="button button-secondary" href="./account.html#orders">View your order</a>' : ""}
         <a class="button button-dark" href="./shop.html">Shop paddles</a>
       </div>
     `;
@@ -548,6 +567,10 @@ function renderCartItems() {
   });
 
   cartItemsPanelNode.querySelector("[data-clear-cart]")?.addEventListener("click", () => {
+    if (cartState.reservations.length) {
+      setCartStatus("Cancel your open checkout before clearing the cart.", "warning");
+      return;
+    }
     cartState.cartItems = [];
     cartState.listings = [];
     cartState.selectedListingId = 0;
@@ -570,16 +593,17 @@ function renderCheckoutPanel() {
   cartCheckoutPanelNode.hidden = false;
 
   const quote = cartState.shipping.quote;
+  const reservation = cartState.reservations.find((entry) => Number(entry.listingId) === Number(selectedItem.id));
   const shippingPolicy = getShippingPolicy(selectedItem);
   const actionState = getCartActionState(selectedItem);
-  const shippingLine = quote
+  const shippingLine = reservation ? formatMoneyFromCents(reservation.shippingAmountCents) : quote
     ? formatMoneyFromCents(quote.amountCents)
     : shippingPolicy.mode === "free"
       ? "$0"
       : shippingPolicy.mode === "flat"
         ? shippingPolicy.label
         : "Estimate needed";
-  const totalLine = quote ? formatMoneyFromCents(getSelectedTotalCents(selectedItem)) : "Confirm shipping";
+  const totalLine = reservation ? formatMoneyFromCents(reservation.amountTotalCents) : quote ? formatMoneyFromCents(getSelectedTotalCents(selectedItem)) : "Confirm shipping";
   const estimateButtonLabel = cartState.shipping.busy
     ? shippingPolicy.mode === "calculated"
       ? "Calculating..."
@@ -619,7 +643,7 @@ function renderCheckoutPanel() {
       </div>
     </div>
 
-    <form class="cart-shipping-form" data-cart-shipping-form>
+    <form class="cart-shipping-form" data-cart-shipping-form ${reservation ? 'hidden' : ''}>
       <div class="cart-form-head">
         <strong>Delivery address</strong>
         <span>${ElevenZeroApp.escapeHtml(shippingPolicy.label)}</span>
@@ -688,7 +712,7 @@ function renderCheckoutPanel() {
 
     <div class="cart-checkout-action">
       <button
-        class="${actionState.action === "checkout" || actionState.action === "auth" ? "button button-dark" : "button button-secondary"}"
+        class="${["checkout", "auth", "resume"].includes(actionState.action) ? "button button-dark" : "button button-secondary"}"
         type="button"
         data-cart-checkout
         data-cart-action="${ElevenZeroApp.escapeHtml(actionState.action)}"
@@ -697,6 +721,7 @@ function renderCheckoutPanel() {
         ${ElevenZeroApp.escapeHtml(checkoutLabel)}
       </button>
       <p>${ElevenZeroApp.escapeHtml(actionState.reason)}</p>
+      ${reservation && reservation.status !== "processing" ? `<button class="button button-secondary" type="button" data-cancel-checkout ${cartState.busy ? "disabled" : ""}>Cancel checkout</button>` : ""}
     </div>
 
   `;
@@ -708,6 +733,7 @@ function renderCheckoutPanel() {
   );
   bindShippingForm();
   bindCheckoutButton();
+  cartCheckoutPanelNode.querySelector("[data-cancel-checkout]")?.addEventListener("click", () => handleReservationAction("cancel"));
 }
 
 function renderCart() {
@@ -776,6 +802,10 @@ function bindCheckoutButton() {
 
     if (action === "checkout") {
       handleCheckout();
+      return;
+    }
+    if (action === "resume") {
+      handleReservationAction("resume");
       return;
     }
 
@@ -862,7 +892,68 @@ async function handleCheckout() {
   }
 }
 
+async function loadReservations() {
+  cartState.reservations = [];
+  if (!ElevenZeroApp.session?.authenticated) return;
+  try {
+    const response = await ElevenZeroApp.request("/api/checkout/reservations");
+    cartState.reservations = response.items || [];
+    for (const reservation of cartState.reservations) {
+      if (!cartState.cartItems.some((item) => Number(item.listingId) === Number(reservation.listingId))) {
+        cartState.cartItems.push({ listingId: reservation.listingId });
+      }
+    }
+    saveCartItems();
+  } catch {
+    setCartStatus("We couldn’t check your open checkouts. Refresh this page before starting another payment.", "warning");
+  }
+}
+
+function applyConfirmedOrder(order) {
+  if (order?.status !== "paid" || !Number(order.listingId)) return;
+  ElevenZeroApp.removePurchasedCartItem(order);
+  cartState.cartItems = cartState.cartItems.filter((item) => Number(item.listingId) !== Number(order.listingId));
+  cartState.listings = cartState.listings.filter((item) => Number(item.id) !== Number(order.listingId));
+  cartState.confirmedOrder = order;
+  if (Number(cartState.selectedListingId) === Number(order.listingId)) {
+    cartState.selectedListingId = cartState.cartItems[0]?.listingId || 0;
+    invalidateShippingQuote();
+  }
+  saveCartItems();
+}
+
+async function handleReservationAction(action) {
+  if (cartState.busy) return;
+  const reservation = cartState.reservations.find((entry) => Number(entry.listingId) === Number(cartState.selectedListingId));
+  if (!reservation) return;
+  cartState.busy = true;
+  renderCart();
+  try {
+    const response = await ElevenZeroApp.request("/api/checkout/reservation", {
+      method: "POST", body: { action, sessionId: reservation.sessionId },
+    });
+    if (response.checkoutUrl) {
+      window.location.href = response.checkoutUrl;
+      return;
+    }
+    applyConfirmedOrder(response.order);
+    invalidateShippingQuote();
+    await loadReservations();
+    await hydrateCartListings();
+    setCartStatus(response.message || "Checkout updated.", response.order?.status === "processing" ? "warning" : "success");
+  } catch (error) {
+    setCartStatus(error.message, "error");
+  } finally {
+    cartState.busy = false;
+    renderCart();
+  }
+}
+
 function removeCartItem(listingId) {
+  if (cartState.reservations.some((entry) => Number(entry.listingId) === Number(listingId))) {
+    setCartStatus("Cancel this paddle’s open checkout before removing it.", "warning");
+    return;
+  }
   cartState.cartItems = cartState.cartItems.filter((item) => Number(item.listingId) !== Number(listingId));
   cartState.listings = cartState.listings.filter((item) => Number(item.id) !== Number(listingId));
 
@@ -894,7 +985,6 @@ function pickInitialSelectedListing() {
   );
   cartState.selectedListingId =
     requestedListingId && cartHasRequested ? requestedListingId : cartState.cartItems[0]?.listingId || 0;
-  replaceCartUrl(cartState.selectedListingId);
 }
 
 async function handleCheckoutReturn() {
@@ -905,7 +995,7 @@ async function handleCheckoutReturn() {
   if (!checkoutState) return;
 
   if (checkoutState === "cancel") {
-    setCartStatus("Checkout was canceled. Your cart is still here when you’re ready.", "warning");
+    setCartStatus("You haven’t paid yet. Resume your checkout below, or cancel it to release the paddle.", "warning");
     clearCheckoutParams();
     return;
   }
@@ -913,8 +1003,8 @@ async function handleCheckoutReturn() {
   if (checkoutState !== "success") return;
 
   if (!ElevenZeroApp.session?.authenticated || !sessionId) {
-    setCartStatus("Checkout finished. Sign in if you want to confirm the order details here.", "warning");
-    clearCheckoutParams();
+    setCartStatus("Sign in to confirm your payment and view your order.", "warning");
+    if (sessionId) ElevenZeroApp.redirectToAuth(`${window.location.pathname}${window.location.search}`);
     return;
   }
 
@@ -927,20 +1017,11 @@ async function handleCheckoutReturn() {
     const summary = [response.message, order.listingTitle, amountLabel].filter(Boolean).join(" · ");
     setCartStatus(summary, order.status === "paid" ? "success" : "warning");
 
-    if (order.status === "paid") {
-      const pending = readStorageJson(PENDING_CHECKOUT_LISTING_KEY);
-      if (pending?.listingId) {
-        cartState.cartItems = cartState.cartItems.filter(
-          (item) => Number(item.listingId) !== Number(pending.listingId)
-        );
-        saveCartItems();
-        removeStorageItem(PENDING_CHECKOUT_LISTING_KEY);
-      }
-    }
+    applyConfirmedOrder(order);
+    if (order.status === "paid" || order.status === "expired") clearCheckoutParams();
   } catch (error) {
     setCartStatus(error.message, "error");
   } finally {
-    clearCheckoutParams();
     renderCart();
   }
 }
@@ -948,6 +1029,8 @@ async function handleCheckoutReturn() {
 async function loadCartPage() {
   cartState.cartItems = loadCartItemsFromStorage();
   cartState.shipping = restoreShippingDraftState();
+  await handleCheckoutReturn();
+  await loadReservations();
 
   if (!cartState.cartItems.length) {
     renderEmptyCart();
@@ -958,7 +1041,6 @@ async function loadCartPage() {
   renderCart();
   await hydrateCartListings();
   renderCart();
-  await handleCheckoutReturn();
 }
 
 document.addEventListener("DOMContentLoaded", async () => {

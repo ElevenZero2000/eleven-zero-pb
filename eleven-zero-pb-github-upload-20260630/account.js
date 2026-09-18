@@ -92,6 +92,7 @@ const trainingGalleryProfiles = document.querySelector("[data-training-gallery-p
 const trainingGalleryStatus = document.querySelector("[data-training-gallery-status]");
 
 let latestSellerProfile = null;
+let sellerProfileRefreshPending = false;
 let latestSalesAnalytics = {};
 let activeSalesPeriod = "day";
 let latestAccountUser = null;
@@ -1186,12 +1187,12 @@ function getPayoutState(item, perspective = "seller") {
       tone: "pending",
     };
   }
-  if (item.status === "paid") {
+  if (item.status === "paid" || item.stripe_payment_status === "paid") {
     return {
       label: isBuyer ? "Paid · preparing shipment" : "Paid · proceeds held",
       copy: isBuyer
         ? "The seller is preparing your prepaid-label shipment."
-        : "Print the prepaid label and ship the paddle. Proceeds remain held until delivery.",
+        : "Payment is confirmed. Proceeds remain held until delivery.",
       tone: "pending",
     };
   }
@@ -1199,6 +1200,29 @@ function getPayoutState(item, perspective = "seller") {
     label: item.status === "expired" ? "Checkout expired" : "Awaiting payment",
     copy: "No seller proceeds will be released until payment is confirmed.",
     tone: "neutral",
+  };
+}
+
+function getShippingState(item) {
+  const status = String(item.shipping_status || "");
+  if (status === "purchase_unknown") {
+    return {
+      label: "Label purchase under review",
+      copy: "The carrier response could not be confirmed. Contact Eleven Zero PB support so the existing purchase can be checked before another label is purchased.",
+      canRetry: false,
+    };
+  }
+  if (["rate_refreshing", "purchasing"].includes(status)) {
+    return {
+      label: status === "rate_refreshing" ? "Refreshing shipping rate" : "Purchasing prepaid label",
+      copy: "A shipping request is in progress. Refresh your dashboard shortly to see the result.",
+      canRetry: false,
+    };
+  }
+  return {
+    label: cleanStatus(status),
+    copy: "",
+    canRetry: ["error", "attention_needed"].includes(status),
   };
 }
 
@@ -1283,8 +1307,9 @@ function renderPurchaseItem(item) {
 function renderSaleItem(item) {
   const title = [item.brand, item.model].filter(Boolean).join(" ") || "Paddle order";
   const isLabelReady = Boolean(item.shippo_label_url);
-  const isPaid = item.status === "paid";
+  const isPaid = item.status === "paid" || item.stripe_payment_status === "paid";
   const payoutState = getPayoutState(item, "seller");
+  const shippingState = getShippingState(item);
   const shippingLine = [item.shipping_carrier, item.shipping_service].filter(Boolean).join(" · ");
   const actions = [];
   const salePriceCents = Math.max(
@@ -1304,7 +1329,7 @@ function renderSaleItem(item) {
       `<a href="${ElevenZeroApp.escapeHtml(item.tracking_url)}" target="_blank" rel="noopener noreferrer">Track package</a>`
     );
   }
-  if (isPaid && ["error", "attention_needed"].includes(item.shipping_status)) {
+  if (isPaid && shippingState.canRetry) {
     actions.push(
       `<button class="seller-sale-retry" type="button" data-retry-shipping="${ElevenZeroApp.escapeHtml(
         item.stripe_checkout_session_id
@@ -1334,6 +1359,7 @@ function renderSaleItem(item) {
       </div>
       <span><strong>${ElevenZeroApp.escapeHtml(formatCents(proceedsCents))} estimated proceeds</strong></span>
       <p class="order-state-copy">${escapeAttr(payoutState.copy)}</p>
+      ${shippingState.copy ? `<p class="order-state-copy"><strong>${escapeAttr(shippingState.label)}.</strong> ${escapeAttr(shippingState.copy)}</p>` : ""}
       ${shippingLine ? `<span>${ElevenZeroApp.escapeHtml(shippingLine)}</span>` : ""}
       ${
         item.tracking_number
@@ -1361,6 +1387,9 @@ function sellerProgressItem(label, isReady, helper) {
 
 function renderSellerProfile(profile) {
   latestSellerProfile = profile || null;
+  if (ElevenZeroApp.session?.user) {
+    ElevenZeroApp.session.user.sellerProfile = latestSellerProfile;
+  }
 
   if (!profile) {
     if (sellerPill) sellerPill.textContent = "Unavailable";
@@ -1369,6 +1398,9 @@ function renderSellerProfile(profile) {
         "Seller payout details are not available yet for this account.";
     }
     if (sellerProgress) sellerProgress.innerHTML = "";
+    sellerConnectButton?.setAttribute("disabled", "disabled");
+    sellerRefreshButton?.setAttribute("disabled", "disabled");
+    ElevenZeroApp.setStatus(sellerConnectStatus, "Seller payout status is unavailable. Reload your dashboard to try again.", "warning");
     return;
   }
 
@@ -1413,6 +1445,7 @@ function renderSellerProfile(profile) {
     }
     sellerConnectButton?.setAttribute("disabled", "disabled");
     sellerRefreshButton?.setAttribute("disabled", "disabled");
+    ElevenZeroApp.setStatus(sellerConnectStatus, "Seller onboarding is not available while the payment connection is being configured.", "warning");
     return;
   }
 
@@ -1429,6 +1462,7 @@ function renderSellerProfile(profile) {
       sellerSummary.textContent = `Stripe is ready. Eleven Zero PB keeps a ${profile.platformFeePercent}% marketplace fee, then releases seller proceeds after confirmed delivery and the buyer protection period.`;
     }
     if (sellerConnectButton) sellerConnectButton.textContent = "Stripe ready";
+    ElevenZeroApp.setStatus(sellerConnectStatus, "Stripe payouts are ready. You can submit a paddle for sale.", "success");
     return;
   }
 
@@ -1445,6 +1479,7 @@ function renderSellerProfile(profile) {
       sellerSummary.textContent = `Your seller profile has started. ${outstanding} The marketplace fee is ${profile.platformFeePercent}%; proceeds release after confirmed delivery.`;
     }
     if (sellerConnectButton) sellerConnectButton.textContent = "Continue Stripe onboarding";
+    ElevenZeroApp.setStatus(sellerConnectStatus, "Your Stripe account is connected, but payout setup is not complete yet. Continue onboarding or refresh the status after Stripe finishes its checks.", "warning");
     return;
   }
 
@@ -1453,6 +1488,7 @@ function renderSellerProfile(profile) {
     sellerSummary.textContent = `Start Stripe onboarding before selling. The marketplace fee is ${profile.platformFeePercent}%, and proceeds release after confirmed delivery.`;
   }
   if (sellerConnectButton) sellerConnectButton.textContent = "Start Stripe onboarding";
+  ElevenZeroApp.setStatus(sellerConnectStatus, "Start Stripe onboarding to connect seller payouts.", "neutral");
 }
 
 async function handleSellerOnboarding() {
@@ -1485,6 +1521,8 @@ async function handleSellerOnboarding() {
 }
 
 async function refreshSellerProfile() {
+  if (sellerProfileRefreshPending) return false;
+  sellerProfileRefreshPending = true;
   try {
     ElevenZeroApp.setStatus(
       sellerConnectStatus,
@@ -1499,13 +1537,22 @@ async function refreshSellerProfile() {
       }
     );
     renderSellerProfile(response.sellerProfile);
-    ElevenZeroApp.setStatus(
-      sellerConnectStatus,
-      "Stripe payout status refreshed.",
-      "success"
-    );
+    return true;
   } catch (error) {
     ElevenZeroApp.setStatus(sellerConnectStatus, error.message, "error");
+    return false;
+  } finally {
+    sellerProfileRefreshPending = false;
+  }
+}
+
+async function refreshSellerProfileAfterOnboarding() {
+  const url = new URL(window.location.href);
+  if (!["return", "refresh"].includes(url.searchParams.get("stripe_onboarding"))) return;
+  // Returning from Stripe is not proof of readiness. Read current provider state.
+  if (await refreshSellerProfile()) {
+    url.searchParams.delete("stripe_onboarding");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }
 }
 
@@ -2053,6 +2100,7 @@ function renderAdminCommerceNotifications(items) {
       const sellerEmailSent = sellerEmailStatus === "sent";
       const sessionId = item.stripe_checkout_session_id || "";
       const payoutState = isPurchase ? getPayoutState(item, "seller") : null;
+      const shippingState = getShippingState(item);
       const orderControls = adminOrderControls(item);
       const purchaseActions = isPurchase
         ? `
@@ -2068,7 +2116,7 @@ function renderAdminCommerceNotifications(items) {
                   : `<button type="button" data-admin-send-seller-confirmation="${escapeAttr(sessionId)}">Send seller confirmation</button>`
               }
               ${
-                ["error", "attention_needed"].includes(item.shipping_status)
+                shippingState.canRetry
                   ? `<button type="button" data-retry-shipping="${escapeAttr(sessionId)}">Retry label</button>`
                   : ""
               }
@@ -2080,7 +2128,8 @@ function renderAdminCommerceNotifications(items) {
         ? [
             confirmationSent ? "Buyer confirmation sent" : `Buyer email: ${confirmationStatus.replaceAll("_", " ")}`,
             sellerEmailSent ? "Seller confirmation sent" : `Seller email: ${sellerEmailStatus.replaceAll("_", " ")}`,
-            item.shipping_status ? `Label: ${String(item.shipping_status).replaceAll("_", " ")}` : "",
+            shippingState.label ? `Label: ${shippingState.label}` : "",
+            shippingState.copy,
             payoutState ? `Payout: ${payoutState.label}` : "",
           ]
             .filter(Boolean)
@@ -2785,8 +2834,9 @@ async function handleAccountLogout() {
     accountLogoutStatus.textContent = "";
   }
   try {
-    // End the server session; keep the customer's cart and drafts intact.
+    // Clear account-private browser data only after the server session ends.
     await ElevenZeroApp.request("/api/auth/signout", { method: "POST" });
+    ElevenZeroApp.clearPrivateSessionData();
     ElevenZeroApp.session = { authenticated: false, user: null };
     ElevenZeroApp.renderAuthSlots();
     window.location.replace("./auth.html");
@@ -2891,6 +2941,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await retryShippingLabel(retryButton.dataset.retryShipping, retryButton);
   });
   await loadDashboard();
+  await refreshSellerProfileAfterOnboarding();
   if (!MARKETPLACE_FOCUS_MODE) {
     await loadTrainingHub();
     if (latestTrainingHub?.relationships?.length === 1 && !activeTrainingRelationshipId) {

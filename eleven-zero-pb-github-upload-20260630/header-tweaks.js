@@ -98,6 +98,7 @@
     if (event.key === "Escape") setMenuOpen(false);
   });
   window.addEventListener("storage", updateCartCount);
+  window.addEventListener("elevenzero:cart-updated", updateCartCount);
   window.addEventListener(
     "pageshow",
     () => {
