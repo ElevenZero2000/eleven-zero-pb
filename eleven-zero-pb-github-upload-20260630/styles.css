@@ -6082,6 +6082,19 @@ body[data-nav="sell"] .seller-file-dropzone {
   color: rgba(18, 18, 18, 0.76);
 }
 
+/* Dashboard notices sit on light cards, not the dark seller form. */
+.dashboard-status.is-success {
+  color: #075b2d;
+}
+
+.dashboard-status.is-warning {
+  color: #695300;
+}
+
+.dashboard-status.is-error {
+  color: #8b2915;
+}
+
 .dashboard-card-wide {
   margin-top: 20px;
 }

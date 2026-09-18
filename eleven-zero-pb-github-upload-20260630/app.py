@@ -3078,7 +3078,7 @@ def reconcile_expired_listing_reservation(listing_row: sqlite3.Row | dict | None
 
             if payment_intent_status in {"canceled", "requires_payment_method"}:
                 with closing(connect_db()) as connection:
-                    connection.execute(
+                    updated = connection.execute(
                         """
                         UPDATE orders
                         SET stripe_payment_intent_id = ?,
@@ -3086,30 +3086,53 @@ def reconcile_expired_listing_reservation(listing_row: sqlite3.Row | dict | None
                             stripe_session_status = 'complete',
                             status = 'payment_failed'
                         WHERE stripe_checkout_session_id = ?
+                          AND status != 'paid' AND stripe_payment_status != 'paid'
                         """,
                         (payment_intent_id, session_id),
                     )
                     connection.commit()
+                # A webhook may have confirmed payment after this provider read.
+                # Report no change so callers do not recursively reconcile a
+                # still-reserved listing using the same stale response.
+                if updated.rowcount != 1:
+                    return False
                 release_listing_reservation_for_order(session_id)
                 return True
 
     if session_status == "expired":
         with closing(connect_db()) as connection:
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE orders
                 SET stripe_payment_status = ?,
                     stripe_session_status = 'expired',
                     status = 'expired'
                 WHERE stripe_checkout_session_id = ?
+                  AND status != 'paid' AND stripe_payment_status != 'paid'
                 """,
                 (payment_status, session_id),
             )
             connection.commit()
+        if updated.rowcount != 1:
+            return False
         release_listing_reservation_for_order(session_id)
         return True
 
     return False
+
+
+def shipping_label_retry_block_reason(order_row: sqlite3.Row | dict) -> str:
+    status = row_value(order_row, "shipping_status", "")
+    if status in {"rate_refreshing", "purchasing"}:
+        return "A shipping label request is already in progress. Wait a moment and refresh this order."
+    if status == "purchase_unknown" or str(row_value(order_row, "shipping_error", "")).startswith(
+        "Label purchase was interrupted."
+    ):
+        return (
+            "The previous label purchase could not be confirmed. Contact Eleven Zero PB support "
+            "to check Shippo for an existing label before another purchase is attempted."
+        )
+    return ""
 
 
 def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
@@ -3143,8 +3166,29 @@ def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
 
     if not order_row:
         return None
-    if order_row["shippo_label_url"] or order_row["shippo_transaction_id"]:
+    if (
+        order_row["shippo_label_url"] or order_row["shippo_transaction_id"]
+        or shipping_label_retry_block_reason(order_row)
+        or order_row["shipping_status"] not in {"pending", "error", "attention_needed"}
+        or not (order_row["status"] == "paid" or order_row["stripe_payment_status"] == "paid")
+    ):
         return order_row
+
+    # Claim the refresh before contacting Shippo. Its completion may update only
+    # that claim, never a purchase another request has already started/finished.
+    with closing(connect_db()) as connection:
+        claimed = connection.execute(
+            """UPDATE orders SET shipping_status = 'rate_refreshing'
+               WHERE stripe_checkout_session_id = ? AND shipping_status = ?
+                 AND shippo_transaction_id = '' AND shippo_label_url = ''
+                 AND (status = 'paid' OR stripe_payment_status = 'paid')""",
+            (session_id, order_row["shipping_status"]),
+        )
+        connection.commit()
+        if claimed.rowcount != 1:
+            return connection.execute(
+                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?", (session_id,)
+            ).fetchone()
 
     try:
         address = json.loads(order_row["shipping_address_json"] or "{}")
@@ -3164,6 +3208,7 @@ def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
                 WHERE stripe_checkout_session_id = ?
                   AND shippo_transaction_id = ''
                   AND shippo_label_url = ''
+                  AND shipping_status = 'rate_refreshing'
                 """,
                 (
                     quote.get("shippo_rate_id", ""),
@@ -3174,13 +3219,15 @@ def refresh_shippo_rate_for_order(session_id: str) -> sqlite3.Row | None:
                 ),
             )
             connection.commit()
-    except (TypeError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as error:
         with closing(connect_db()) as connection:
             connection.execute(
                 """
                 UPDATE orders
                 SET shipping_status = 'attention_needed', shipping_error = ?
                 WHERE stripe_checkout_session_id = ?
+                  AND shipping_status = 'rate_refreshing'
+                  AND shippo_transaction_id = '' AND shippo_label_url = ''
                 """,
                 (compact_whitespace(str(error))[:500], session_id),
             )
@@ -3266,6 +3313,10 @@ def finalize_paid_order(session_id: str) -> sqlite3.Row | None:
     return purchase_shippo_label_for_order(session_id)
 
 
+class ShippingLabelRejectedError(ValueError):
+    """Shippo explicitly confirmed this transaction failed, so retry is safe."""
+
+
 def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
     """Purchase one label after payment and persist it for the seller.
 
@@ -3282,7 +3333,7 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
             return None
         if order_row["shippo_label_url"] or order_row["shippo_transaction_id"]:
             already_ready = True
-        elif not order_row["shippo_rate_id"]:
+        elif not order_row["shippo_rate_id"] or shipping_label_retry_block_reason(order_row):
             return order_row
         else:
             claimed = connection.execute(
@@ -3293,6 +3344,7 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
                   AND shippo_transaction_id = ''
                   AND shippo_label_url = ''
                   AND shipping_status = 'pending'
+                  AND (status = 'paid' OR stripe_payment_status = 'paid')
                 """,
                 (session_id,),
             )
@@ -3302,10 +3354,16 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
                     "SELECT * FROM orders WHERE stripe_checkout_session_id = ?",
                     (session_id,),
                 ).fetchone()
+            # Use the rate belonging to the successful claim, not the earlier
+            # snapshot (a completed refresh might have replaced that rate).
+            order_row = connection.execute(
+                "SELECT * FROM orders WHERE stripe_checkout_session_id = ?", (session_id,)
+            ).fetchone()
 
     if already_ready:
         return send_seller_shipping_label_email_for_order(session_id)
 
+    transaction_id = ""
     try:
         transaction = shippo_request(
             "/transactions/",
@@ -3336,8 +3394,10 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
             tracking_details = ""
             tracking_status_date = None
         transaction_status = str(transaction.get("status") or "").strip().upper()
-        if transaction_status == "ERROR" or not label_url:
-            raise ValueError(shippo_transaction_error(transaction))
+        if transaction_status == "ERROR":
+            raise ShippingLabelRejectedError(shippo_transaction_error(transaction))
+        if not label_url or not transaction_id:
+            raise ValueError("Shippo has not confirmed a complete label transaction.")
 
         with closing(connect_db()) as connection:
             connection.execute(
@@ -3355,6 +3415,8 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
                   shipping_status = 'label_ready',
                   shipping_error = ''
                 WHERE stripe_checkout_session_id = ?
+                  AND shipping_status = 'purchasing'
+                  AND shippo_transaction_id = '' AND shippo_label_url = ''
                 """,
                 (
                     transaction_id,
@@ -3370,15 +3432,26 @@ def purchase_shippo_label_for_order(session_id: str) -> sqlite3.Row | None:
             )
             connection.commit()
         return send_seller_shipping_label_email_for_order(session_id)
-    except (RuntimeError, ValueError) as error:
+    except (OSError, RuntimeError, ValueError) as error:
+        rejected = isinstance(error, ShippingLabelRejectedError)
+        failure_status = "attention_needed" if rejected else "purchase_unknown"
+        failure_message = compact_whitespace(str(error))[:500] if rejected else (
+            "The label purchase outcome is unknown. Contact Eleven Zero PB support to check "
+            "Shippo for an existing transaction before retrying; another purchase may duplicate a charge."
+        )
+        log_operational_event("shipping_label_rejected" if rejected else "shipping_label_outcome_unknown", error=error)
         with closing(connect_db()) as connection:
             connection.execute(
                 """
                 UPDATE orders
-                SET shipping_status = 'attention_needed', shipping_error = ?
+                SET shipping_status = ?, shipping_error = ?,
+                    shippo_transaction_id = CASE WHEN ? != '' THEN ? ELSE shippo_transaction_id END
                 WHERE stripe_checkout_session_id = ?
+                  AND shipping_status = 'purchasing'
+                  AND shippo_transaction_id = '' AND shippo_label_url = ''
                 """,
-                (compact_whitespace(str(error))[:500], session_id),
+                (failure_status, failure_message, "" if rejected else transaction_id,
+                 "" if rejected else transaction_id, session_id),
             )
             connection.commit()
             return connection.execute(
@@ -4890,12 +4963,24 @@ def init_database() -> None:
         connection.execute(
             """
             UPDATE orders
-            SET shipping_status = 'attention_needed',
+            SET shipping_status = 'purchase_unknown',
                 shipping_error = 'Label purchase was interrupted. Check Shippo for an existing transaction before retrying to avoid purchasing a duplicate label.'
-            WHERE shipping_status = 'purchasing'
+            WHERE (shipping_status = 'purchasing' OR (
+                shipping_status = 'attention_needed'
+                AND shipping_error LIKE 'Label purchase was interrupted.%'
+            ))
               AND COALESCE(shippo_transaction_id, '') = ''
               AND COALESCE(shippo_label_url, '') = ''
             """
+        )
+
+        # Rate refreshes do not buy labels, so an interrupted refresh is safe to
+        # repeat. Keep these distinct from unknown label-purchase outcomes.
+        connection.execute(
+            """UPDATE orders SET shipping_status = 'attention_needed',
+                   shipping_error = 'Shipping rate refresh was interrupted. Retry the label request.'
+               WHERE shipping_status = 'rate_refreshing'
+                 AND shippo_transaction_id = '' AND shippo_label_url = ''"""
         )
 
         # Production never publishes anonymous starter content or known checkout tests.
@@ -6492,16 +6577,16 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         return f"{proto}://{host}"
 
     def stripe_return_url(self) -> str:
-        return f"{self.current_origin()}/account.html#seller-payouts"
+        return f"{self.current_origin()}/account.html?stripe_onboarding=return#seller-payouts"
 
     def stripe_refresh_url(self) -> str:
-        return f"{self.current_origin()}/account.html#seller-payouts"
+        return f"{self.current_origin()}/account.html?stripe_onboarding=refresh#seller-payouts"
 
     def checkout_success_url(self) -> str:
-        return f"{self.current_origin()}/shop.html?checkout=success&session_id={{CHECKOUT_SESSION_ID}}#listings"
+        return f"{self.current_origin()}/cart.html?checkout=success&session_id={{CHECKOUT_SESSION_ID}}#cart"
 
     def checkout_cancel_url(self) -> str:
-        return f"{self.current_origin()}/shop.html?checkout=cancel#listings"
+        return f"{self.current_origin()}/cart.html?checkout=cancel#cart"
 
     def handle_api_get(self, parsed):
         if parsed.path == "/api/health":
@@ -6752,6 +6837,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             if not self.require_admin(user):
                 return
             self.send_json(self.build_admin_dashboard())
+            return
+
+        if parsed.path == "/api/checkout/reservations":
+            user = self.require_user()
+            if user:
+                self.handle_checkout_reservations(user)
             return
 
         if parsed.path == "/api/checkout/session-status":
@@ -7062,6 +7153,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             self.handle_admin_release_order_payout(body)
             return
 
+        if parsed.path == "/api/checkout/reservation":
+            user = self.require_user()
+            if user:
+                self.handle_checkout_reservation(user, body)
+            return
+
         if parsed.path == "/api/checkout/create-session":
             user = self.require_user()
             if not self.require_verified_user(user):
@@ -7256,7 +7353,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                         """
                         UPDATE orders
                         SET
-                          stripe_payment_intent_id = ?,
+                          stripe_payment_intent_id = CASE WHEN ? != '' THEN ? ELSE stripe_payment_intent_id END,
                           stripe_payment_status = ?,
                           stripe_session_status = ?,
                           status = ?,
@@ -7265,8 +7362,10 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                             ELSE completed_at
                           END
                         WHERE stripe_checkout_session_id = ?
+                          AND (? = 'paid' OR (status != 'paid' AND stripe_payment_status != 'paid'))
                         """,
                         (
+                            str(stripe_object.get("payment_intent") or ""),
                             str(stripe_object.get("payment_intent") or ""),
                             payment_status,
                             str(stripe_object.get("status") or "complete"),
@@ -7274,6 +7373,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                             completed_at,
                             completed_at,
                             object_id,
+                            payment_status,
                         ),
                     )
                     connection.commit()
@@ -7288,11 +7388,12 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 and object_id.startswith("cs_")
             ):
                 with closing(connect_db()) as connection:
-                    connection.execute(
+                    updated = connection.execute(
                         """
                         UPDATE orders
                         SET stripe_payment_status = ?, stripe_session_status = ?, status = ?
                         WHERE stripe_checkout_session_id = ?
+                          AND status != 'paid' AND stripe_payment_status != 'paid'
                         """,
                         (
                             str(stripe_object.get("payment_status") or "unpaid"),
@@ -7306,7 +7407,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                         ),
                     )
                     connection.commit()
-                release_listing_reservation_for_order(object_id)
+                if updated.rowcount:
+                    release_listing_reservation_for_order(object_id)
             elif event_type in {"charge.dispute.created", "charge.dispute.updated"}:
                 charge_id = compact_whitespace(stripe_object.get("charge", ""))
                 payment_intent_id = compact_whitespace(
@@ -8749,6 +8851,91 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             }
         )
 
+    def handle_checkout_reservations(self, user: dict):
+        # Never expose another buyer's session or delivery address to a browser.
+        with closing(connect_db()) as connection:
+            rows = connection.execute(
+                """
+                SELECT orders.listing_id, orders.stripe_checkout_session_id,
+                       orders.amount_total_cents, orders.shipping_amount_cents, orders.status,
+                       listings.reserved_until
+                FROM orders JOIN listings ON listings.id = orders.listing_id
+                WHERE orders.buyer_user_id = ? AND listings.sale_status = 'reserved'
+                  AND listings.reserved_checkout_session_id = orders.stripe_checkout_session_id
+                  AND orders.status IN ('open', 'processing') AND orders.stripe_payment_status != 'paid'
+                """, (user["id"],)
+            ).fetchall()
+        self.send_json({"items": [
+            {"listingId": row["listing_id"], "sessionId": row["stripe_checkout_session_id"],
+             "amountTotalCents": row["amount_total_cents"],
+             "shippingAmountCents": row["shipping_amount_cents"],
+             "expiresAt": row["reserved_until"], "status": row["status"]}
+            for row in rows
+        ]})
+
+    def handle_checkout_reservation(self, user: dict, body: dict):
+        session_id = compact_whitespace(body.get("sessionId", ""))
+        action = body.get("action")
+        if not session_id.startswith("cs_") or action not in {"resume", "cancel"}:
+            self.send_json({"error": "Choose a checkout to resume or cancel."}, status=HTTPStatus.BAD_REQUEST)
+            return
+        order = self.fetch_order_row(session_id)
+        if not order or int(order["buyer_user_id"]) != int(user["id"]):
+            self.send_json({"error": "That checkout is not available for your account."}, status=HTTPStatus.NOT_FOUND)
+            return
+        if order["status"] == "paid" or order["stripe_payment_status"] == "paid":
+            self.handle_checkout_session_status(user, session_id)
+            return
+        if order["status"] == "expired":
+            release_listing_reservation_for_order(session_id)
+            self.send_json({"ok": True, "expired": True, "message": "Checkout ended. You can start again if the paddle is still available."})
+            return
+        listing = self.fetch_listing_checkout_row(order["listing_id"])
+        # Fetching an overdue listing may reconcile a newly completed payment.
+        refreshed_order = self.fetch_order_row(session_id)
+        if refreshed_order and (refreshed_order["status"] == "paid" or refreshed_order["stripe_payment_status"] == "paid"):
+            self.handle_checkout_session_status(user, session_id)
+            return
+        if refreshed_order and refreshed_order["status"] in {"expired", "payment_failed"}:
+            self.send_json({"ok": True, "expired": True, "message": "That checkout has ended. You can start again if the paddle is still available."})
+            return
+        if not listing or listing["sale_status"] != "reserved" or listing["reserved_checkout_session_id"] != session_id:
+            self.send_json({"error": "This checkout no longer holds the paddle. Refresh your cart."}, status=HTTPStatus.CONFLICT)
+            return
+        try:
+            session = stripe_request("GET", f"/checkout/sessions/{session_id}")
+            if action == "cancel" and session.get("status") == "open" and session.get("payment_status") != "paid":
+                try:
+                    session = stripe_request("POST", f"/checkout/sessions/{session_id}/expire", {})
+                except (RuntimeError, ValueError):
+                    # A payment may have won the race. Only authoritative expiry releases stock.
+                    session = stripe_request("GET", f"/checkout/sessions/{session_id}")
+            if session.get("payment_status") == "paid" or session.get("status") == "complete":
+                self.handle_checkout_session_status(user, session_id)
+                return
+            if session.get("status") == "expired":
+                with closing(connect_db()) as connection:
+                    connection.execute(
+                        """UPDATE orders SET status = 'expired', stripe_session_status = 'expired'
+                           WHERE stripe_checkout_session_id = ? AND status != 'paid'
+                             AND stripe_payment_status != 'paid'""", (session_id,)
+                    )
+                    connection.commit()
+                refreshed = self.fetch_order_row(session_id)
+                if refreshed["status"] == "paid" or refreshed["stripe_payment_status"] == "paid":
+                    self.handle_checkout_session_status(user, session_id)
+                    return
+                release_listing_reservation_for_order(session_id)
+                self.send_json({"ok": True, "expired": True, "message": "Checkout canceled. No payment was taken. You can update your address or continue shopping."})
+                return
+            if action == "resume" and session.get("status") == "open" and session.get("url"):
+                self.send_json({"ok": True, "checkoutUrl": session["url"]})
+                return
+        except (RuntimeError, ValueError):
+            self.send_json({"error": "We couldn’t confirm checkout with Stripe. Your reservation has not been released. Please try again."}, status=HTTPStatus.BAD_GATEWAY)
+            return
+        self.send_json({"error": "Checkout is still being confirmed. Check your orders before trying again."}, status=HTTPStatus.CONFLICT)
+
     def handle_checkout_session_status(self, user: dict, session_id: str):
         if not session_id.startswith("cs_"):
             self.send_json(
@@ -8813,6 +9000,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     ELSE completed_at
                   END
                 WHERE stripe_checkout_session_id = ?
+                  AND (status != 'paid' AND stripe_payment_status != 'paid' OR ? = 'paid')
                 """,
                 (
                     str(session.get("payment_intent") or ""),
@@ -8822,9 +9010,18 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                     completed_at,
                     completed_at,
                     session_id,
+                    order_status,
                 ),
             )
             connection.commit()
+
+        # A webhook can confirm payment while this request holds an older Stripe snapshot.
+        order_row = self.fetch_order_row(session_id) or order_row
+        if order_row["status"] == "paid" or order_row["stripe_payment_status"] == "paid":
+            order_status = "paid"
+            payment_status = "paid"
+            session_status = order_row["stripe_session_status"]
+            message = "Payment confirmed. View your order and shipping updates in your account."
 
         if order_status == "paid":
             finalize_paid_order(session_id)
@@ -8840,6 +9037,7 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                 "message": message,
                 "order": {
                     "sessionId": session_id,
+                    "listingId": order_row["listing_id"],
                     "status": order_status,
                     "paymentStatus": payment_status,
                     "sessionStatus": session_status,
@@ -8893,6 +9091,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        block_reason = shipping_label_retry_block_reason(order_row)
+        if block_reason:
+            self.send_json(
+                {"error": block_reason, "shippingStatus": order_row["shipping_status"],
+                 "code": "shipping_label_in_progress" if order_row["shipping_status"] in {"purchasing", "rate_refreshing"} else "shipping_label_review_required"},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
+
         send_seller_sale_confirmation_for_order(session_id)
 
         if order_row["shippo_label_url"]:
@@ -8916,6 +9123,15 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
         if refreshed_order and refreshed_order["shipping_status"] == "pending":
             refreshed_order = purchase_shippo_label_for_order(session_id)
         refreshed_order = refreshed_order or self.fetch_order_row(session_id)
+
+        block_reason = shipping_label_retry_block_reason(refreshed_order) if refreshed_order else ""
+        if block_reason:
+            self.send_json(
+                {"error": block_reason, "shippingStatus": refreshed_order["shipping_status"],
+                 "code": "shipping_label_in_progress" if refreshed_order["shipping_status"] in {"purchasing", "rate_refreshing"} else "shipping_label_review_required"},
+                status=HTTPStatus.CONFLICT,
+            )
+            return
 
         if not refreshed_order or refreshed_order["shipping_status"] != "label_ready":
             self.send_json(
@@ -10616,6 +10832,8 @@ class ElevenZeroHandler(SimpleHTTPRequestHandler):
                   orders.id,
                   orders.listing_id,
                   orders.stripe_checkout_session_id,
+                  orders.status,
+                  orders.stripe_payment_status,
                   orders.amount_total_cents,
                   orders.shipping_amount_cents,
                   orders.platform_fee_cents,

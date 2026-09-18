@@ -1,5 +1,17 @@
 const ElevenZeroApp = {
-  session: null,
+  _session: null,
+  get session() {
+    return this._session;
+  },
+  set session(value) {
+    this._session = value;
+    this.syncPrivateSessionData(value);
+  },
+  privateSessionOwnerKey: "elevenZeroPbPrivateSessionOwner",
+  privateSessionDataKeys: [
+    "elevenZeroPbShippingAddressDraft",
+    "elevenZeroPbPendingCheckoutListing",
+  ],
   config: {
     environment: "development",
     siteUrl: "",
@@ -11,6 +23,115 @@ const ElevenZeroApp = {
     googlePlacesSearchEnabled: false,
   },
   analyticsLoaded: false,
+
+  clearPrivateSessionData() {
+    // Keep the non-sensitive cart, but never carry an address or provider
+    // checkout link into another account on a shared browser.
+    try {
+      const storage = window.localStorage;
+      const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
+      keys.forEach((key) => {
+        if (this.privateSessionDataKeys.some((base) => key === base || key?.startsWith(`${base}:`))) {
+          storage.removeItem(key);
+        }
+      });
+    } catch {
+      // Restricted storage must not prevent signing in or signing out.
+    }
+  },
+
+  removePurchasedCartItem(order) {
+    const listingId = Number(order?.listingId);
+    if (order?.status !== "paid" || !Number.isSafeInteger(listingId) || listingId < 1) return false;
+    let changed = false;
+    try {
+      const storage = window.localStorage;
+      const read = (key) => {
+        try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }
+      };
+      const matchesOrder = (item) => Number(item?.listingId || item?.id) === listingId;
+      const items = read("elevenZeroPbCartItems");
+      if (Array.isArray(items)) {
+        const remaining = items.filter((item) => !matchesOrder(item));
+        if (remaining.length !== items.length) {
+          storage.setItem("elevenZeroPbCartItems", JSON.stringify(remaining));
+          changed = true;
+        }
+      }
+      ["elevenZeroPbCartDraft", "elevenZeroPbPendingCheckoutListing"].forEach((key) => {
+        if (matchesOrder(read(key))) {
+          storage.removeItem(key);
+          changed = true;
+        }
+      });
+    } catch {
+      // A paid order stays confirmed even when browser storage is unavailable.
+    }
+    if (changed) window.dispatchEvent?.(new Event("elevenzero:cart-updated"));
+    return changed;
+  },
+
+  getPrivateSessionOwner(session = this.session) {
+    return session?.authenticated && session.user?.id != null
+      ? `user:${session.user.id}`
+      : "anonymous";
+  },
+
+  syncPrivateSessionData(session) {
+    const owner = this.getPrivateSessionOwner(session);
+    try {
+      const previousOwner = window.localStorage.getItem(this.privateSessionOwnerKey);
+      // An unmarked legacy draft has no safe owner, including on first boot.
+      if (previousOwner !== owner) this.clearPrivateSessionData();
+      window.localStorage.setItem(this.privateSessionOwnerKey, owner);
+    } catch {
+      if (this._privateSessionOwner !== owner) this.clearPrivateSessionData();
+    }
+    this._privateSessionOwner = owner;
+  },
+
+  initSessionPrivacySync() {
+    const reloadIfOwnerChanged = () => {
+      try {
+        const owner = window.localStorage.getItem(this.privateSessionOwnerKey);
+        if (owner === this.getPrivateSessionOwner()) return;
+        // Another tab changed the cookie's account. Its transition has already
+        // removed the drafts; reload this tab instead of keeping old form data
+        // and account controls visible or overwriting the new account's data.
+        window.location.reload();
+      } catch {
+        // Storage access can be unavailable in privacy-restricted browsers.
+      }
+    };
+    window.addEventListener("storage", (event) => {
+      if (event.key !== this.privateSessionOwnerKey && event.key !== null) return;
+      try {
+        if (event.storageArea && event.storageArea !== window.localStorage) return;
+      } catch { return; }
+      reloadIfOwnerChanged();
+    });
+    window.addEventListener("pageshow", (event) => {
+      // Back/forward cache can restore the old account's populated form in the
+      // same tab without a storage event or rerunning the initial boot request.
+      if (event.persisted) reloadIfOwnerChanged();
+    });
+  },
+
+  async handleHeaderSignout(button) {
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Signing out…";
+    try {
+      await this.request("/api/auth/signout", { method: "POST" });
+      this.clearPrivateSessionData();
+      this.session = { authenticated: false, user: null };
+      window.location.href = "./auth.html";
+    } catch {
+      button.disabled = false;
+      button.textContent = "Retry sign out";
+      button.setAttribute("aria-label", "Sign out failed. Try again.");
+    }
+  },
 
   escapeHtml(value) {
     return String(value ?? "")
@@ -149,10 +270,7 @@ const ElevenZeroApp = {
     });
 
     document.querySelectorAll("[data-signout-button]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        await this.request("/api/auth/signout", { method: "POST" });
-        window.location.href = "./auth.html";
-      });
+      button.addEventListener("click", () => this.handleHeaderSignout(button));
     });
   },
 
@@ -302,6 +420,7 @@ ElevenZeroApp.boot = (async () => {
   }
 
   ElevenZeroApp.applySiteConfig();
+  ElevenZeroApp.initSessionPrivacySync();
   ElevenZeroApp.initAnalytics();
   ElevenZeroApp.renderAuthSlots();
   ElevenZeroApp.setActiveNav();

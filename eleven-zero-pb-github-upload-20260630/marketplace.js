@@ -1890,43 +1890,16 @@ async function handleCheckoutReturn() {
     return;
   }
 
-  if (checkoutState === "cancel") {
-    setMarketplaceStatus(
-      "Checkout was canceled. Your marketplace browsing is still right here when you’re ready.",
-      "warning"
-    );
-    clearCheckoutParams();
+  // Sessions opened before the cart return URL was introduced still land here.
+  // Use the same authenticated confirmation/recovery flow for both versions.
+  if (checkoutState === "success" || checkoutState === "cancel") {
+    const cartUrl = new URL("./cart.html", window.location.href);
+    cartUrl.searchParams.set("checkout", checkoutState);
+    if (sessionId) cartUrl.searchParams.set("session_id", sessionId);
+    window.location.replace(cartUrl.href);
     return;
   }
 
-  if (checkoutState !== "success") {
-    return;
-  }
-
-  if (!ElevenZeroApp.session?.authenticated || !sessionId) {
-    setMarketplaceStatus(
-      "Your checkout step finished successfully. Sign in again if you want us to confirm the order details here.",
-      "warning"
-    );
-    clearCheckoutParams();
-    return;
-  }
-
-  try {
-    const response = await ElevenZeroApp.request(
-      `/api/checkout/session-status?sessionId=${encodeURIComponent(sessionId)}`
-    );
-    const order = response.order || {};
-    const amountLabel = order.amountTotalCents
-      ? ElevenZeroApp.formatMoney(order.amountTotalCents / 100)
-      : "";
-    const summary = [response.message, order.listingTitle, amountLabel].filter(Boolean).join(" · ");
-    setMarketplaceStatus(summary, order.status === "paid" ? "success" : "warning");
-  } catch (error) {
-    setMarketplaceStatus(error.message, "error");
-  } finally {
-    clearCheckoutParams();
-  }
 }
 
 async function handleBuyListing(listingId) {

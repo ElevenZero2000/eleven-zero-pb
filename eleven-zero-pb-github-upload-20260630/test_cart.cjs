@@ -29,11 +29,13 @@ function createHarness() {
   ].map((selector) => [selector, makeNode()]));
   const requests = [];
   const storage = new Map();
+  const confirmed = [];
   const app = {
     session: { authenticated: true, user: { id: 44 } },
     escapeHtml: (value) => String(value ?? "").replaceAll("&", "&amp;")
       .replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
     setStatus: (node, message) => { if (node) node.textContent = message; },
+    removePurchasedCartItem: (order) => confirmed.push(order),
     request: (path, options) => new Promise((resolve, reject) => {
       requests.push({ path, options, resolve, reject });
     }),
@@ -60,7 +62,8 @@ function createHarness() {
   vm.runInContext(`${source}\nglobalThis.cartTest = {
     cartState, renderCart, handleShippingQuoteSubmit, handleCheckout,
     getCartActionState, getSelectedTotalCents, formatMoneyFromCents,
-    invalidateShippingQuote, removeCartItem
+    invalidateShippingQuote, removeCartItem, handleCheckoutReturn, loadCartPage,
+    handleReservationAction, loadReservations, applyConfirmedOrder
   };`, context);
   const cart = context.cartTest;
   const state = cart.cartState;
@@ -70,7 +73,7 @@ function createHarness() {
     { id: 2, brand: "Test", model: "Power", price_usd: 90, checkout_available: true },
   ];
   state.selectedListingId = 1;
-  return { cart, state, app, nodes, requests };
+  return { cart, state, app, nodes, requests, storage, confirmed, window: context.window };
 }
 
 test("cart has a single empty state and an explicit one-paddle selection", () => {
@@ -171,4 +174,91 @@ test("current address errors remain visible and prevent checkout", async () => {
   assert.equal(state.shipping.quote, null);
   await cart.handleCheckout();
   assert.equal(requests.length, 1);
+});
+
+test("owned reservation offers resume and cancel without a new shipping estimate", async () => {
+  const { cart, state, nodes, requests, window } = createHarness();
+  state.listings[0].sale_status = "reserved";
+  state.listings[0].checkout_available = false;
+  state.reservations = [{ listingId: 1, sessionId: "cs_test_own", amountTotalCents: 17000, shippingAmountCents: 975 }];
+  assert.equal(cart.getCartActionState(state.listings[0]).action, "resume");
+  cart.renderCart();
+  const markup = nodes["[data-cart-checkout-panel]"].innerHTML;
+  assert.match(markup, /Resume checkout/);
+  assert.match(markup, /Cancel checkout/);
+  assert.match(markup, /data-cart-shipping-form hidden/);
+  assert.match(markup, /\$170/);
+  const pending = cart.handleReservationAction("resume");
+  assert.equal(requests[0].path, "/api/checkout/reservation");
+  assert.equal(requests[0].options.body.sessionId, "cs_test_own");
+  requests[0].resolve({ checkoutUrl: "https://checkout.stripe.com/c/pay/test" });
+  await pending;
+  assert.equal(window.location.href, "https://checkout.stripe.com/c/pay/test");
+});
+
+test("other buyer reservation and sold paddle are not mislabeled as seller setup", () => {
+  const { cart, state } = createHarness();
+  for (const sale_status of ["reserved", "pending", "sold"]) {
+    const action = cart.getCartActionState({ ...state.listings[0], sale_status });
+    assert.equal(action.action, "disabled");
+    assert.doesNotMatch(action.reason, /setup|connected/);
+  }
+});
+
+test("processing payment keeps its owner context and cannot start a new checkout", () => {
+  const { cart, state, nodes } = createHarness();
+  state.listings[0].sale_status = "reserved";
+  state.listings[0].checkout_available = false;
+  state.reservations = [{ listingId: 1, sessionId: "cs_own", status: "processing", amountTotalCents: 17000, shippingAmountCents: 975 }];
+  assert.equal(cart.getCartActionState(state.listings[0]).buttonLabel, "Check payment status");
+  cart.renderCart();
+  assert.doesNotMatch(nodes["[data-cart-checkout-panel]"].innerHTML, /data-cancel-checkout|Another buyer/);
+  assert.match(nodes["[data-cart-checkout-panel]"].innerHTML, /being confirmed/);
+});
+
+test("paid return uses authoritative listing id rather than stale pending storage", async () => {
+  const { cart, state, requests, storage, confirmed, window } = createHarness();
+  storage.set("elevenZeroPbPendingCheckoutListing", JSON.stringify({ listingId: 2 }));
+  window.location.search = "?checkout=success&session_id=cs_test_own";
+  const pending = cart.handleCheckoutReturn();
+  assert.match(requests[0].path, /session-status/);
+  requests[0].resolve({ message: "Payment confirmed", order: { status: "paid", listingId: 1, amountTotalCents: 17000 } });
+  await pending;
+  assert.deepEqual(Array.from(state.cartItems, item => item.listingId), [2]);
+  assert.equal(state.selectedListingId, 2);
+  assert.equal(confirmed[0].listingId, 1);
+});
+
+test("confirmation is handled even with an empty cart and before URL cleanup", async () => {
+  const { cart, requests, nodes, window } = createHarness();
+  window.location.search = "?checkout=success&session_id=cs_test_own";
+  const pending = cart.loadCartPage();
+  assert.match(requests[0].path, /session-status\?sessionId=cs_test_own/);
+  requests[0].resolve({ message: "Payment confirmed", order: { status: "paid", listingId: 1 } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[1].path, "/api/checkout/reservations");
+  requests[1].resolve({ items: [] });
+  await pending;
+  assert.match(nodes["[data-cart-items-panel]"].innerHTML, /Order confirmed/);
+});
+
+test("unconfirmed payment does not remove cart items and keeps retry URL", async () => {
+  const { cart, state, requests, confirmed, window } = createHarness();
+  window.location.search = "?checkout=success&session_id=cs_test_own";
+  let cleaned = false;
+  window.history.replaceState = () => { cleaned = true; };
+  const pending = cart.handleCheckoutReturn();
+  requests[0].resolve({ message: "Processing", order: { status: "processing", listingId: 1 } });
+  await pending;
+  assert.equal(state.cartItems.length, 2);
+  assert.equal(confirmed.length, 0);
+  assert.equal(cleaned, false);
+});
+
+test("removing an actively reserved paddle gives a clear cancellation instruction", () => {
+  const { cart, state } = createHarness();
+  state.reservations = [{ listingId: 1, sessionId: "cs_own" }];
+  cart.removeCartItem(1);
+  assert.equal(state.cartItems.length, 2);
+  assert.match(state.statusMessage, /Cancel/);
 });
