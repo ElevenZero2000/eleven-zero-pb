@@ -8,7 +8,7 @@
       name="description"
       content="Manage your Eleven Zero PB listings, purchases, sales, payouts, and account settings."
     />
-    <link rel="stylesheet" href="./styles.css?v=20260917marketpolish1" />
+    <link rel="stylesheet" href="./styles.css?v=20260918accountlogout1" />
     <link rel="stylesheet" href="./header-tweaks.css?v=20260722audit2" />
   </head>
   <body data-nav="account">
@@ -61,11 +61,17 @@
                 <strong data-account-profile-name>Your profile</strong>
                 <span data-account-email></span>
               </div>
-              <button class="account-settings-button" type="button" data-profile-settings-open>
-                <span aria-hidden="true">⚙</span>
-                Settings
-              </button>
+              <div class="account-profile-controls">
+                <button class="account-settings-button" type="button" data-profile-settings-open>
+                  <span aria-hidden="true">⚙</span>
+                  Settings
+                </button>
+                <button class="account-settings-button account-logout-button" type="button" data-account-logout hidden>
+                  Log out
+                </button>
+              </div>
             </div>
+            <p class="account-logout-status" data-account-logout-status role="alert" hidden></p>
             <div class="profile-review-banner" data-profile-review-banner hidden></div>
 
             <div class="admin-mode-banner is-hidden" data-admin-mode-banner>
@@ -619,7 +625,7 @@
     </dialog>
 
     <script src="./app.js?v=20260916marketfocus1"></script>
-    <script src="./account.js?v=20260917accountcopy1"></script>
+    <script src="./account.js?v=20260918accountlogout1"></script>
     <script src="./header-tweaks.js?v=20260916marketfocus1"></script>
   </body>
 </html>

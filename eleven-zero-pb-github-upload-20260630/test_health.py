@@ -13,6 +13,7 @@ import threading
 import time
 import unittest
 from contextlib import closing
+from http.cookies import SimpleCookie
 from pathlib import Path
 from unittest import mock
 
@@ -81,15 +82,70 @@ class HealthAndStaticHTTPTests(unittest.TestCase):
             )
         return user_id
 
-    def request(self, path, method="GET", token=None):
+    def request(self, path, method="GET", token=None, *, csrf=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
         try:
             headers = {"Cookie": f"{app.SESSION_COOKIE}={token}"} if token else {}
+            if csrf is not None:
+                headers["X-CSRF-Token"] = csrf
             connection.request(method, path, headers=headers)
             response = connection.getresponse()
             return response.status, dict(response.getheaders()), response.read()
         finally:
             connection.close()
+
+    def test_signout_invalidates_session_and_expires_only_its_cookie(self):
+        status, _, body = self.request("/api/auth/session", token="member-session")
+        session = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertTrue(session["authenticated"])
+        self.assertTrue(session["csrfToken"])
+
+        status, headers, body = self.request(
+            "/api/auth/signout", "POST", "member-session", csrf=session["csrfToken"]
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"ok": True})
+        cookie = SimpleCookie(headers["Set-Cookie"])[app.SESSION_COOKIE]
+        self.assertEqual(cookie.value, "")
+        self.assertEqual(cookie["max-age"], "0")
+        self.assertEqual(cookie["path"], "/")
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        with sqlite3.connect(self.db) as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT token FROM sessions WHERE token = 'member-session'"
+            ).fetchone())
+            self.assertIsNotNone(connection.execute(
+                "SELECT token FROM sessions WHERE token = 'owner-session'"
+            ).fetchone())
+            self.assertIsNotNone(connection.execute(
+                "SELECT id FROM users WHERE id = ?", (self.member_id,)
+            ).fetchone())
+
+        # Even replaying the old browser cookie cannot restore authentication.
+        status, _, body = self.request("/api/auth/session", token="member-session")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"authenticated": False, "user": None, "csrfToken": ""})
+        self.assertEqual(self.request("/api/account/profile-image", token="member-session")[0], 401)
+        self.assertTrue(json.loads(self.request("/api/auth/session", token="owner-session")[2])["authenticated"])
+
+    def test_signout_rejects_wrong_or_missing_csrf_without_ending_session(self):
+        session = json.loads(self.request("/api/auth/session", token="member-session")[2])
+        self.assertTrue(session["csrfToken"])
+        for csrf in (None, "incorrect-csrf-token"):
+            with self.subTest(csrf=csrf):
+                status, headers, body = self.request(
+                    "/api/auth/signout", "POST", "member-session", csrf=csrf
+                )
+                self.assertEqual(status, 403)
+                self.assertIn("error", json.loads(body))
+                self.assertNotIn("Set-Cookie", headers)
+                with sqlite3.connect(self.db) as connection:
+                    self.assertIsNotNone(connection.execute(
+                        "SELECT token FROM sessions WHERE token = 'member-session'"
+                    ).fetchone())
+                self.assertTrue(json.loads(self.request("/api/auth/session", token="member-session")[2])["authenticated"])
 
     def test_sensitive_files_and_directories_are_not_public_get_or_head(self):
         paths = (

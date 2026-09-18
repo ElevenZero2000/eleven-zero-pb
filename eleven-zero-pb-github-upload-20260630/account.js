@@ -6,6 +6,8 @@ const accountName = document.querySelector("[data-account-name]");
 const accountCopy = document.querySelector("[data-account-copy]");
 const accountEmail = document.querySelector("[data-account-email]");
 const accountStatus = document.querySelector("[data-account-status]");
+const accountLogoutButton = document.querySelector("[data-account-logout]");
+const accountLogoutStatus = document.querySelector("[data-account-logout-status]");
 const statListings = document.querySelector("[data-account-stat-listings]");
 const statPurchases = document.querySelector("[data-account-stat-purchases]");
 const statSales = document.querySelector("[data-account-stat-sales]");
@@ -2774,6 +2776,30 @@ async function loadDashboard() {
   }
 }
 
+async function handleAccountLogout() {
+  if (!accountLogoutButton || accountLogoutButton.disabled) return;
+  accountLogoutButton.disabled = true;
+  accountLogoutButton.textContent = "Logging out…";
+  if (accountLogoutStatus) {
+    accountLogoutStatus.hidden = true;
+    accountLogoutStatus.textContent = "";
+  }
+  try {
+    // End the server session; keep the customer's cart and drafts intact.
+    await ElevenZeroApp.request("/api/auth/signout", { method: "POST" });
+    ElevenZeroApp.session = { authenticated: false, user: null };
+    ElevenZeroApp.renderAuthSlots();
+    window.location.replace("./auth.html");
+  } catch {
+    accountLogoutButton.disabled = false;
+    accountLogoutButton.textContent = "Log out";
+    if (accountLogoutStatus) {
+      accountLogoutStatus.textContent = "We couldn’t log you out. Please check your connection and try again.";
+      accountLogoutStatus.hidden = false;
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   await ElevenZeroApp.boot;
   applyMarketplaceFocusMode();
@@ -2792,6 +2818,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   applyAccountMode(ElevenZeroApp.session.user);
   renderAccountProfile(ElevenZeroApp.session.user);
+
+  if (accountLogoutButton) {
+    accountLogoutButton.hidden = false;
+    accountLogoutButton.addEventListener("click", handleAccountLogout);
+  }
 
   profileSettingsOpen?.addEventListener("click", openProfileSettings);
   profileForm?.addEventListener("submit", saveProfileSettings);
